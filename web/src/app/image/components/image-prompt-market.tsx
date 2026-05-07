@@ -1,0 +1,475 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ExternalLink, LoaderCircle, RefreshCcw, Search } from "lucide-react";
+
+import {
+  AWESOME_GPT_IMAGE_2_PROMPTS_SOURCE_URL,
+  BANANA_PROMPTS_SOURCE_URL,
+  PROMPT_MARKET_SOURCE_OPTIONS,
+  fetchPromptMarketPrompts,
+  type BananaPrompt,
+  type BananaPromptMode,
+  type PromptMarketLanguage,
+  type PromptMarketLocalization,
+  type PromptMarketSourceId,
+} from "@/app/image/banana-prompts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+type PromptMarketModeFilter = "all" | BananaPromptMode;
+type PromptMarketNsfwFilter = "safe" | "include" | "only";
+type PromptMarketSourceFilter = "all" | PromptMarketSourceId;
+
+type ImagePromptMarketProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onApplyPrompt: (prompt: BananaPrompt) => void | Promise<void>;
+};
+
+const ALL_CATEGORY_VALUE = "__all__";
+const INITIAL_VISIBLE_COUNT = 60;
+const VISIBLE_COUNT_STEP = 60;
+
+function includesKeyword(value: string | undefined, keyword: string) {
+  return Boolean(value && value.toLowerCase().includes(keyword));
+}
+
+function formatPromptDate(value?: string) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function getPromptLocalization(
+  prompt: BananaPrompt,
+  language: PromptMarketLanguage,
+): PromptMarketLocalization | undefined {
+  return prompt.localizations?.[language] ?? prompt.localizations?.["zh-CN"] ?? prompt.localizations?.en;
+}
+
+function getLocalizedPrompt(prompt: BananaPrompt, language: PromptMarketLanguage): BananaPrompt {
+  const localization = getPromptLocalization(prompt, language);
+  if (!localization) {
+    return prompt;
+  }
+
+  return {
+    ...prompt,
+    title: localization.title,
+    prompt: localization.prompt,
+    category: localization.category,
+    subCategory: localization.subCategory,
+  };
+}
+
+function PromptPreviewImage({ prompt }: { prompt: BananaPrompt }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-sm font-medium text-[#8e8e93]">
+        {prompt.title}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={prompt.preview}
+      alt={prompt.title}
+      loading="lazy"
+      className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+export function ImagePromptMarket({ open, onOpenChange, onApplyPrompt }: ImagePromptMarketProps) {
+  const [prompts, setPrompts] = useState<BananaPrompt[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [source, setSource] = useState<PromptMarketSourceFilter>("all");
+  const [promptLanguage, setPromptLanguage] = useState<PromptMarketLanguage>("zh-CN");
+  const [category, setCategory] = useState(ALL_CATEGORY_VALUE);
+  const [mode, setMode] = useState<PromptMarketModeFilter>("all");
+  const [nsfwFilter, setNsfwFilter] = useState<PromptMarketNsfwFilter>("safe");
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  const loadPromptData = () => {
+    setIsLoading(true);
+    setError("");
+
+    void fetchPromptMarketPrompts()
+      .then((items) => {
+        setPrompts(items);
+      })
+      .catch((loadError: unknown) => {
+        setError(loadError instanceof Error ? loadError.message : "读取提示词市场失败");
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    if (!open || prompts.length > 0) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError("");
+    const controller = new AbortController();
+
+    void fetchPromptMarketPrompts(controller.signal)
+      .then((items) => {
+        setPrompts(items);
+      })
+      .catch((loadError: unknown) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setError(loadError instanceof Error ? loadError.message : "读取提示词市场失败");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [open, prompts.length]);
+
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE_COUNT);
+    scrollAreaRef.current?.scrollTo({ top: 0 });
+  }, [keyword, source, promptLanguage, category, mode, nsfwFilter]);
+
+  useEffect(() => {
+    if (open) {
+      scrollAreaRef.current?.scrollTo({ top: 0 });
+    }
+  }, [open]);
+
+  const sourceFilteredPrompts = useMemo(() => {
+    if (source === "all") {
+      return prompts;
+    }
+    return prompts.filter((prompt) => prompt.source === source);
+  }, [prompts, source]);
+
+  const categories = useMemo(() => {
+    const values = new Set<string>();
+    sourceFilteredPrompts.forEach((prompt) => {
+      values.add(getLocalizedPrompt(prompt, promptLanguage).category);
+    });
+    return [...values].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  }, [promptLanguage, sourceFilteredPrompts]);
+
+  useEffect(() => {
+    if (category !== ALL_CATEGORY_VALUE && !categories.includes(category)) {
+      setCategory(ALL_CATEGORY_VALUE);
+    }
+  }, [categories, category]);
+
+  const filteredPrompts = useMemo(() => {
+    const normalizedKeyword = keyword.trim().toLowerCase();
+
+    return sourceFilteredPrompts.filter((prompt) => {
+      const localizedPrompt = getLocalizedPrompt(prompt, promptLanguage);
+      if (nsfwFilter === "safe" && prompt.isNsfw) {
+        return false;
+      }
+      if (nsfwFilter === "only" && !prompt.isNsfw) {
+        return false;
+      }
+      if (category !== ALL_CATEGORY_VALUE && localizedPrompt.category !== category) {
+        return false;
+      }
+      if (mode !== "all" && localizedPrompt.mode !== mode) {
+        return false;
+      }
+      if (!normalizedKeyword) {
+        return true;
+      }
+
+      return (
+        includesKeyword(localizedPrompt.title, normalizedKeyword) ||
+        includesKeyword(localizedPrompt.prompt, normalizedKeyword) ||
+        includesKeyword(localizedPrompt.author, normalizedKeyword) ||
+        includesKeyword(localizedPrompt.category, normalizedKeyword) ||
+        includesKeyword(localizedPrompt.subCategory, normalizedKeyword) ||
+        includesKeyword(localizedPrompt.sourceLabel, normalizedKeyword)
+      );
+    });
+  }, [category, keyword, mode, nsfwFilter, promptLanguage, sourceFilteredPrompts]);
+
+  const visiblePrompts = filteredPrompts.slice(0, visibleCount);
+  const hasMore = visiblePrompts.length < filteredPrompts.length;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex h-[min(90dvh,860px)] w-[min(96vw,1180px)] max-w-none flex-col overflow-hidden rounded-[28px] p-0">
+        <DialogHeader className="border-b border-[#f2f3f5] px-5 pt-5 pb-4 sm:px-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <DialogTitle className="text-2xl leading-tight">Prompts 提示词市场</DialogTitle>
+              <DialogDescription className="mt-2 leading-6">
+                来自{" "}
+                <a
+                  href={BANANA_PROMPTS_SOURCE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-[#1456f0] hover:underline"
+                >
+                  glidea/banana-prompt-quicker
+                </a>
+                {" "}和{" "}
+                <a
+                  href={AWESOME_GPT_IMAGE_2_PROMPTS_SOURCE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-[#1456f0] hover:underline"
+                >
+                  EvoLinkAI/awesome-gpt-image-2-prompts
+                </a>
+                ，可按来源筛选并一键套用到当前生图输入框。
+              </DialogDescription>
+            </div>
+            <div className="flex shrink-0 items-center gap-2 text-xs text-[#8e8e93]">
+              <span className="rounded-full bg-[#f0f0f0] px-3 py-1">
+                {prompts.length > 0 ? `${filteredPrompts.length} / ${sourceFilteredPrompts.length}` : "远程市场"}
+              </span>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="border-b border-[#f2f3f5] px-5 py-3 sm:px-6">
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_220px_120px_160px_130px_140px] xl:items-center">
+            <div className="relative">
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-[#8e8e93]" />
+              <Input
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="搜索标题、作者、分类或提示词"
+                className="pl-9"
+              />
+            </div>
+            <Select
+              value={source}
+              onValueChange={(value) => setSource(value as PromptMarketSourceFilter)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="来源" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="all">全部</SelectItem>
+                  {PROMPT_MARKET_SOURCE_OPTIONS.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <Select
+              value={promptLanguage}
+              onValueChange={(value) => setPromptLanguage(value as PromptMarketLanguage)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="语言" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="zh-CN">中文</SelectItem>
+                  <SelectItem value="en">English</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger>
+                <SelectValue placeholder="分类" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value={ALL_CATEGORY_VALUE}>全部分类</SelectItem>
+                  {categories.map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {item}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <Select value={mode} onValueChange={(value) => setMode(value as PromptMarketModeFilter)}>
+              <SelectTrigger>
+                <SelectValue placeholder="模式" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="all">全部模式</SelectItem>
+                  <SelectItem value="generate">文生图</SelectItem>
+                  <SelectItem value="edit">编辑</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <Select
+              value={nsfwFilter}
+              onValueChange={(value) => setNsfwFilter(value as PromptMarketNsfwFilter)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="NSFW" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="safe">隐藏 NSFW</SelectItem>
+                  <SelectItem value="include">包含 NSFW</SelectItem>
+                  <SelectItem value="only">仅 NSFW</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div ref={scrollAreaRef} className="min-h-0 flex-1 overflow-y-auto bg-white px-5 py-4 sm:px-6">
+          {isLoading ? (
+            <div className="flex h-full min-h-[320px] flex-col items-center justify-center gap-3 text-[#45515e]">
+              <LoaderCircle className="size-6 animate-spin text-[#1456f0]" />
+              <p className="text-sm">正在读取远程提示词市场...</p>
+            </div>
+          ) : error ? (
+            <div className="flex h-full min-h-[320px] flex-col items-center justify-center gap-4 text-center">
+              <div className="max-w-[420px] text-sm leading-6 text-[#45515e]">{error}</div>
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-full"
+                onClick={loadPromptData}
+              >
+                <RefreshCcw className="size-4" />
+                重新加载
+              </Button>
+            </div>
+          ) : visiblePrompts.length === 0 ? (
+            <div className="flex h-full min-h-[320px] items-center justify-center text-sm text-[#8e8e93]">
+              没有找到匹配的提示词
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {visiblePrompts.map((prompt) => {
+                  const localizedPrompt = getLocalizedPrompt(prompt, promptLanguage);
+                  const dateLabel = formatPromptDate(prompt.created);
+                  return (
+                    <article
+                      key={prompt.id}
+                      className="group overflow-hidden rounded-[22px] border border-[#f2f3f5] bg-white shadow-[0_4px_6px_rgba(0,0,0,0.08)] transition hover:-translate-y-0.5 hover:shadow-[0_12px_16px_-4px_rgba(36,36,36,0.08)]"
+                    >
+                      <div className="relative aspect-[16/10] overflow-hidden bg-[#f0f0f0]">
+                        <PromptPreviewImage prompt={localizedPrompt} />
+                        <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-1.5 bg-gradient-to-t from-black/70 via-black/25 to-transparent px-3 pt-8 pb-2">
+                          <Badge className="bg-white/92 text-[#18181b] shadow-sm">
+                            {localizedPrompt.mode === "edit" ? "编辑" : "文生图"}
+                          </Badge>
+                          <Badge className="bg-white/18 text-white shadow-sm backdrop-blur">
+                            {localizedPrompt.category}
+                          </Badge>
+                          {prompt.isNsfw ? (
+                            <Badge className="bg-white/18 text-white shadow-sm backdrop-blur">
+                              NSFW
+                            </Badge>
+                          ) : null}
+                          {prompt.referenceImageUrls.length > 0 ? (
+                            <Badge className="bg-white/18 text-white shadow-sm backdrop-blur">
+                              {prompt.referenceImageUrls.length} 张参考图
+                            </Badge>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="flex min-h-[196px] flex-col gap-3 p-4">
+                        <div className="flex min-w-0 items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <h3 className="font-display truncate text-base font-semibold text-[#222222]">
+                              {localizedPrompt.title}
+                            </h3>
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[#8e8e93]">
+                              <span>{localizedPrompt.author}</span>
+                              {localizedPrompt.subCategory ? <span>/{localizedPrompt.subCategory}</span> : null}
+                              {dateLabel ? <span>/{dateLabel}</span> : null}
+                            </div>
+                          </div>
+                          {prompt.link ? (
+                            <a
+                              href={prompt.link}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-[#e5e7eb] text-[#45515e] transition hover:bg-black/[0.05] hover:text-[#18181b]"
+                              aria-label="查看来源"
+                              title="查看来源"
+                            >
+                              <ExternalLink className="size-3.5" />
+                            </a>
+                          ) : null}
+                        </div>
+                        <p className="line-clamp-4 text-sm leading-6 text-[#45515e]">{localizedPrompt.prompt}</p>
+                        <div className="mt-auto flex justify-end border-t border-[#f2f3f5] pt-3">
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-8 rounded-full bg-[#1456f0] px-4 text-xs text-white shadow-sm hover:bg-[#2563eb]"
+                            onClick={() => void onApplyPrompt(localizedPrompt)}
+                          >
+                            套用
+                          </Button>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+              {hasMore ? (
+                <div className="flex justify-center pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-full"
+                    onClick={() => setVisibleCount((current) => current + VISIBLE_COUNT_STEP)}
+                  >
+                    加载更多 ({visiblePrompts.length}/{filteredPrompts.length})
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
