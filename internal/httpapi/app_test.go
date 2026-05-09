@@ -205,57 +205,16 @@ func TestAppAuthAndSPACompatibility(t *testing.T) {
 	}
 }
 
-func TestAdminSystemCheckUpdates(t *testing.T) {
-	releaseAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repos/ZyphrZero/chatgpt2api/releases/latest" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"tag_name": "v1.2.0",
-			"name": "v1.2.0",
-			"body": "release notes",
-			"html_url": "https://github.com/ZyphrZero/chatgpt2api/releases/tag/v1.2.0",
-			"published_at": "2026-01-01T00:00:00Z",
-			"assets": [
-				{"name":"chatgpt2api_1.2.0_linux_amd64.tar.gz","browser_download_url":"https://github.com/ZyphrZero/chatgpt2api/releases/download/v1.2.0/chatgpt2api_1.2.0_linux_amd64.tar.gz","size":123},
-				{"name":"checksums.txt","browser_download_url":"https://github.com/ZyphrZero/chatgpt2api/releases/download/v1.2.0/checksums.txt","size":64}
-			]
-		}`))
-	}))
-	defer releaseAPI.Close()
-
-	originalVersion := version.Version
-	originalBuildType := version.BuildType
-	version.Version = "1.1.0"
-	version.BuildType = "release"
-	t.Cleanup(func() {
-		version.Version = originalVersion
-		version.BuildType = originalBuildType
-	})
-
+func TestAdminSystemCheckUpdatesRemoved(t *testing.T) {
 	app := newTestApp(t)
 	defer app.Close()
-	app.update = service.NewUpdateService(service.UpdateOptions{
-		APIBaseURL:     releaseAPI.URL,
-		CurrentVersion: version.Get(),
-		BuildType:      version.GetBuildType(),
-	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/system/check-updates?force=true", nil)
 	req.Header.Set("Authorization", adminAuthHeader(t, app))
 	res := httptest.NewRecorder()
 	app.Handler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK {
-		t.Fatalf("check updates status = %d body = %s", res.Code, res.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
-		t.Fatalf("check updates json: %v", err)
-	}
-	if body["current_version"] != "1.1.0" || body["latest_version"] != "1.2.0" || body["has_update"] != true || body["build_type"] != "release" {
-		t.Fatalf("unexpected check updates body = %#v", body)
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("removed check updates status = %d body = %s", res.Code, res.Body.String())
 	}
 }
 
@@ -296,27 +255,8 @@ func TestPasswordAccountLoginAndRegistrationToggle(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(`{"email":"alice@qq.com","password":"Password123","name":"Alice"}`))
 	res = httptest.NewRecorder()
 	app.Handler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK {
-		t.Fatalf("enabled registration status = %d body = %s", res.Code, res.Body.String())
-	}
-	var registered map[string]any
-	if err := json.Unmarshal(res.Body.Bytes(), &registered); err != nil {
-		t.Fatalf("register json: %v", err)
-	}
-	userToken, _ := registered["token"].(string)
-	if userToken == "" || registered["role"] != service.AuthRoleUser || registered["name"] != "Alice" {
-		t.Fatalf("register body = %#v", registered)
-	}
-	if registered["role_id"] != service.DefaultManagedRoleID {
-		t.Fatalf("registered role fields = %#v", registered)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/auth/session", nil)
-	req.Header.Set("Authorization", "Bearer "+userToken)
-	res = httptest.NewRecorder()
-	app.Handler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK {
-		t.Fatalf("registered session status = %d body = %s", res.Code, res.Body.String())
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "email verification is not configured") {
+		t.Fatalf("enabled registration without email verification status = %d body = %s", res.Code, res.Body.String())
 	}
 }
 
@@ -385,8 +325,8 @@ func TestEmailRegistrationDomainRestriction(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(`{"email":"alice@qq.com","password":"Password123","name":"Alice"}`))
 	res = httptest.NewRecorder()
 	app.Handler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK {
-		t.Fatalf("allowed email domain status = %d body = %s", res.Code, res.Body.String())
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "email verification is not configured") {
+		t.Fatalf("allowed email domain without verification status = %d body = %s", res.Code, res.Body.String())
 	}
 }
 
@@ -486,10 +426,11 @@ func TestCreationTaskFailureWritesCallLog(t *testing.T) {
 	app := newTestApp(t)
 	defer app.Close()
 
-	_, rawKey, err := app.auth.CreateAPIKey(service.AuthRoleUser, "frontend", service.AuthOwner{})
+	user, rawKey, err := app.auth.CreateAPIKey(service.AuthRoleUser, "frontend", service.AuthOwner{})
 	if err != nil {
 		t.Fatalf("CreateAPIKey() error = %v", err)
 	}
+	fundTestUserWallet(t, app, user, 1000)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/creation-tasks/image-generations", strings.NewReader(`{"client_task_id":"task-log-test","prompt":"test image"}`))
 	req.Header.Set("Authorization", "Bearer "+rawKey)
@@ -513,7 +454,10 @@ func TestCreationTaskFailureWritesCallLog(t *testing.T) {
 		if err := json.Unmarshal(res.Body.Bytes(), &logs); err != nil {
 			t.Fatalf("logs json: %v", err)
 		}
-		item = findLogBySummary(logItems(logs), "文生图调用失败")
+		item = findLogByDetails(logItems(logs), map[string]any{
+			"endpoint": "/api/creation-tasks/image-generations",
+			"outcome":  "failed",
+		})
 		if item != nil {
 			break
 		}
@@ -550,10 +494,11 @@ func TestResponsesImageTaskRouteBuildsTaskPayload(t *testing.T) {
 		called <- payload
 		return map[string]any{"data": []map[string]any{{"url": "https://example.test/generated.png"}}}, nil
 	})
-	_, rawKey, err := app.auth.CreateAPIKey(service.AuthRoleUser, "frontend", service.AuthOwner{})
+	user, rawKey, err := app.auth.CreateAPIKey(service.AuthRoleUser, "frontend", service.AuthOwner{})
 	if err != nil {
 		t.Fatalf("CreateAPIKey() error = %v", err)
 	}
+	fundTestUserWallet(t, app, user, 1000)
 
 	body := `{"client_task_id":"response-image-route","prompt":"生成封面","model":"gpt-5.5","size":"2048x2048","image_resolution":"2k","quality":"high","output_format":"jpeg","output_compression":42,"n":2,"images":["data:image/png;base64,cG5n"],"messages":[{"role":"user","content":"生成封面"}],"visibility":"public"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/creation-tasks/response-image-generations", strings.NewReader(body))
@@ -648,7 +593,10 @@ func TestRunLoggedImageTaskLogsTextOutputAsFailure(t *testing.T) {
 		t.Fatalf("runLoggedImageTask() result = %#v", result)
 	}
 	logs := app.logs.Search(service.LogQuery{Limit: 10})
-	item := findLogBySummary(logs, "Responses 作画调用失败")
+	item := findLogByDetails(logs, map[string]any{
+		"endpoint": "/api/creation-tasks/response-image-generations",
+		"outcome":  "failed",
+	})
 	if item == nil {
 		t.Fatalf("expected text-only image result to write failure log, got %#v", logs)
 	}
@@ -2120,113 +2068,19 @@ func TestAdminUsersManageLinuxDoUsers(t *testing.T) {
 	}
 }
 
-func TestLinuxDoOAuthCallbackCreatesSession(t *testing.T) {
-	oauthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/token":
-			if err := r.ParseForm(); err != nil {
-				t.Fatalf("ParseForm() error = %v", err)
-			}
-			if r.Form.Get("code") != "oauth-code" || r.Form.Get("client_id") != "client-id" || r.Form.Get("client_secret") != "client-secret" {
-				t.Fatalf("unexpected token form = %#v", r.Form)
-			}
-			util.WriteJSON(w, http.StatusOK, map[string]any{"access_token": "linuxdo-access", "token_type": "Bearer", "expires_in": 3600})
-		case "/user":
-			if r.Header.Get("Authorization") != "Bearer linuxdo-access" {
-				t.Fatalf("userinfo authorization = %q", r.Header.Get("Authorization"))
-			}
-			util.WriteJSON(w, http.StatusOK, map[string]any{"id": 123, "username": "linuxdo_user", "trust_level": 2})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer oauthServer.Close()
-
-	t.Setenv("CHATGPT2API_LINUXDO_ENABLED", "true")
-	t.Setenv("CHATGPT2API_LINUXDO_CLIENT_ID", "client-id")
-	t.Setenv("CHATGPT2API_LINUXDO_CLIENT_SECRET", "client-secret")
-	t.Setenv("CHATGPT2API_LINUXDO_AUTHORIZE_URL", oauthServer.URL+"/authorize")
-	t.Setenv("CHATGPT2API_LINUXDO_TOKEN_URL", oauthServer.URL+"/token")
-	t.Setenv("CHATGPT2API_LINUXDO_USERINFO_URL", oauthServer.URL+"/user")
-	t.Setenv("CHATGPT2API_LINUXDO_REDIRECT_URL", "http://chatgpt2api.test/auth/linuxdo/oauth/callback")
-	t.Setenv("CHATGPT2API_LINUXDO_FRONTEND_REDIRECT_URL", "/auth/linuxdo/callback")
-
+func TestLinuxDoOAuthRoutesRemoved(t *testing.T) {
 	app := newTestApp(t)
 	defer app.Close()
 
-	req := httptest.NewRequest(http.MethodGet, "/auth/linuxdo/start?redirect=/settings", nil)
-	res := httptest.NewRecorder()
-	app.Handler().ServeHTTP(res, req)
-	if res.Code != http.StatusFound {
-		t.Fatalf("start status = %d body = %s", res.Code, res.Body.String())
-	}
-	authorizeURL, err := url.Parse(res.Header().Get("Location"))
-	if err != nil {
-		t.Fatalf("parse authorize location: %v", err)
-	}
-	state := authorizeURL.Query().Get("state")
-	if state == "" || authorizeURL.Query().Get("client_id") != "client-id" {
-		t.Fatalf("authorize location = %s", authorizeURL.String())
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/auth/linuxdo/oauth/callback?code=oauth-code&state="+url.QueryEscape(state), nil)
-	for _, cookie := range res.Result().Cookies() {
-		req.AddCookie(cookie)
-	}
-	res = httptest.NewRecorder()
-	app.Handler().ServeHTTP(res, req)
-	if res.Code != http.StatusFound {
-		t.Fatalf("callback status = %d body = %s", res.Code, res.Body.String())
-	}
-	callbackLocation := res.Header().Get("Location")
-	if strings.Contains(callbackLocation, "%25") {
-		t.Fatalf("callback location double-encoded fragment values: %s", callbackLocation)
-	}
-	callbackURL, err := url.Parse(callbackLocation)
-	if err != nil {
-		t.Fatalf("parse callback location: %v", err)
-	}
-	fragment, err := url.ParseQuery(callbackURL.Fragment)
-	if err != nil {
-		t.Fatalf("parse callback fragment: %v", err)
-	}
-	sessionKey := fragment.Get("key")
-	if sessionKey == "" || fragment.Get("subject_id") != "linuxdo:123" || fragment.Get("redirect") != "/settings" {
-		t.Fatalf("callback fragment = %#v", fragment)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/auth/session", nil)
-	req.Header.Set("Authorization", "Bearer "+sessionKey)
-	res = httptest.NewRecorder()
-	app.Handler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK {
-		t.Fatalf("login with linuxdo session status = %d body = %s", res.Code, res.Body.String())
-	}
-	var login map[string]any
-	if err := json.Unmarshal(res.Body.Bytes(), &login); err != nil {
-		t.Fatalf("login json: %v", err)
-	}
-	if login["subject_id"] != "linuxdo:123" || login["provider"] != service.AuthProviderLinuxDo || login["name"] != "linuxdo_user" {
-		t.Fatalf("login response = %#v", login)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
-	req.Header.Set("Authorization", adminAuthHeader(t, app))
-	res = httptest.NewRecorder()
-	app.Handler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK {
-		t.Fatalf("admin users after linuxdo oauth status = %d body = %s", res.Code, res.Body.String())
-	}
-	var users map[string]any
-	if err := json.Unmarshal(res.Body.Bytes(), &users); err != nil {
-		t.Fatalf("admin users json: %v", err)
-	}
-	linuxdoUser := findHTTPItem(logItems(users), "linuxdo:123")
-	if linuxdoUser == nil || linuxdoUser["linuxdo_level"] != "2" {
-		t.Fatalf("oauth linuxdo user level = %#v", linuxdoUser)
+	for _, path := range []string{"/auth/linuxdo/start?redirect=/settings", "/auth/linuxdo/oauth/callback?code=oauth-code", "/auth/linuxdo/callback"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		res := httptest.NewRecorder()
+		app.Handler().ServeHTTP(res, req)
+		if res.Code != http.StatusNotFound {
+			t.Fatalf("removed linuxdo route %s status = %d body = %s", path, res.Code, res.Body.String())
+		}
 	}
 }
-
 func TestCreationTaskPollingDisablesCaching(t *testing.T) {
 	app := newTestApp(t)
 	defer app.Close()
@@ -2493,6 +2347,18 @@ func newTestApp(t *testing.T) *App {
 		return map[string]any{"object": "list", "data": []map[string]any{}}, nil
 	}
 	return app
+}
+
+func fundTestUserWallet(t *testing.T, app *App, user map[string]any, cents int) {
+	t.Helper()
+	userID := util.Clean(user["id"])
+	if userID == "" {
+		t.Fatalf("test user missing id: %#v", user)
+	}
+	app.billing.EnsureWalletUserWithEmail(userID, userID+"@local.invalid", util.Clean(user["name"]), service.AuthProviderLocal)
+	if _, err := app.billing.AdminSetUserBalance(userID, cents, "test balance"); err != nil {
+		t.Fatalf("AdminSetUserBalance(%q) error = %v", userID, err)
+	}
 }
 
 func unsetTestEnv(t *testing.T, key string) {
