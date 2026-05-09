@@ -592,6 +592,70 @@ func (a *App) handleRegisterSendCode(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *App) handlePasswordResetSendCode(w http.ResponseWriter, r *http.Request) {
+	body, err := readJSONMap(r)
+	if err != nil {
+		util.WriteError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	if err := a.requireCFTurnstile(r, loginBodyTurnstileToken(body)); err != nil {
+		util.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	email, err := normalizeRegisterEmail(util.Clean(body["email"]))
+	if err != nil {
+		util.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if a.emailVerify == nil || !a.emailVerify.Enabled() {
+		util.WriteError(w, http.StatusBadRequest, "email verification is not configured")
+		return
+	}
+	if !a.auth.HasPasswordEmailAccount(email) {
+		util.WriteError(w, http.StatusBadRequest, "该邮箱未注册")
+		return
+	}
+	if err := a.emailVerify.SendCode(email); err != nil {
+		util.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	util.WriteJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"expires_in": 600,
+	})
+}
+
+func (a *App) handlePasswordReset(w http.ResponseWriter, r *http.Request) {
+	body, err := readJSONMap(r)
+	if err != nil {
+		util.WriteError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	if err := a.requireCFTurnstile(r, loginBodyTurnstileToken(body)); err != nil {
+		util.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	email, err := normalizeRegisterEmail(util.Clean(body["email"]))
+	if err != nil {
+		util.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if a.emailVerify == nil || !a.emailVerify.Enabled() {
+		util.WriteError(w, http.StatusBadRequest, "email verification is not configured")
+		return
+	}
+	code := firstNonEmpty(util.Clean(body["code"]), util.Clean(body["verification_code"]))
+	if err := a.emailVerify.VerifyCode(email, code); err != nil {
+		util.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := a.auth.ResetPasswordByEmail(email, util.Clean(body["password"])); err != nil {
+		util.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	util.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -1187,6 +1251,10 @@ func isPermissionCheckSkipped(path string) bool {
 	case "/auth/logout":
 		return true
 	case "/auth/register":
+		return true
+	case "/auth/password/send-code":
+		return true
+	case "/auth/password/reset":
 		return true
 	case "/auth/session":
 		return true

@@ -63,6 +63,9 @@ func (a *App) handleAuthProviders(w http.ResponseWriter, r *http.Request) {
 		"email_verification": map[string]any{
 			"enabled": a.emailVerify != nil && a.emailVerify.Enabled(),
 		},
+		"password_recovery": map[string]any{
+			"enabled": a.emailVerify != nil && a.emailVerify.Enabled(),
+		},
 		"key_login": map[string]any{
 			"enabled": true,
 		},

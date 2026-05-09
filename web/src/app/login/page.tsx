@@ -20,7 +20,14 @@ import { AnnouncementNotifications } from "@/components/announcement-banner";
 import { LoginPageImageStage } from "@/components/login-page-image-stage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchAuthProviders, login, registerAccount, sendRegisterCode } from "@/lib/api";
+import {
+  fetchAuthProviders,
+  login,
+  registerAccount,
+  resetPasswordByEmail,
+  sendPasswordResetCode,
+  sendRegisterCode,
+} from "@/lib/api";
 import { resolveBrandAssetURL } from "@/lib/app-meta";
 import { setVerifiedAuthSession } from "@/lib/session";
 import {
@@ -32,6 +39,7 @@ import {
 import { useAppMeta } from "@/lib/use-app-meta";
 import { useRedirectIfAuthenticated } from "@/lib/use-auth-guard";
 import { getDefaultRouteForSession } from "@/store/auth";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const loginBackgroundClass =
   "bg-[#fff9fb] bg-[radial-gradient(rgba(20,86,240,0.12)_1px,transparent_1px),linear-gradient(145deg,#fff8fa_0%,#ffffff_48%,#f4f8ff_100%)] [background-position:0_0,center] [background-size:12px_12px,cover] dark:bg-[#090d16] dark:bg-[radial-gradient(rgba(96,165,250,0.16)_1px,transparent_1px),linear-gradient(145deg,#080b13_0%,#101827_52%,#070b12_100%)]";
@@ -99,11 +107,19 @@ export default function LoginPage() {
   const [sendCooldown, setSendCooldown] = useState(0);
   const [registrationEnabled, setRegistrationEnabled] = useState(false);
   const [emailVerificationEnabled, setEmailVerificationEnabled] = useState(false);
+  const [passwordRecoveryEnabled, setPasswordRecoveryEnabled] = useState(false);
   const [keyLoginEnabled, setKeyLoginEnabled] = useState(true);
 
   const [turnstileEnabled, setTurnstileEnabled] = useState(false);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
   const [turnstileToken, setTurnstileToken] = useState("");
+  const [isForgotDialogOpen, setIsForgotDialogOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotCode, setForgotCode] = useState("");
+  const [forgotPassword, setForgotPassword] = useState("");
+  const [isSendingResetCode, setIsSendingResetCode] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetCooldown, setResetCooldown] = useState(0);
 
   const [theme, setTheme] = useState<ColorTheme>(() => getPreferredColorTheme());
   const { isCheckingAuth } = useRedirectIfAuthenticated();
@@ -126,6 +142,7 @@ export default function LoginPage() {
         if (active) {
           setRegistrationEnabled(Boolean(providers.registration?.enabled));
           setEmailVerificationEnabled(Boolean(providers.email_verification?.enabled));
+          setPasswordRecoveryEnabled(Boolean(providers.password_recovery?.enabled ?? providers.email_verification?.enabled));
           setKeyLoginEnabled(Boolean(providers.key_login?.enabled ?? true));
           setTurnstileEnabled(Boolean(providers.turnstile?.enabled));
           setTurnstileSiteKey(String(providers.turnstile?.site_key || "").trim());
@@ -134,6 +151,7 @@ export default function LoginPage() {
         if (active) {
           setRegistrationEnabled(false);
           setEmailVerificationEnabled(false);
+          setPasswordRecoveryEnabled(false);
           setKeyLoginEnabled(true);
           setTurnstileEnabled(false);
           setTurnstileSiteKey("");
@@ -197,6 +215,16 @@ export default function LoginPage() {
     }, 1000);
     return () => window.clearTimeout(timer);
   }, [sendCooldown]);
+
+  useEffect(() => {
+    if (resetCooldown <= 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setResetCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [resetCooldown]);
 
   const resetTurnstile = () => {
     setTurnstileToken("");
@@ -327,6 +355,76 @@ export default function LoginPage() {
         resetTurnstile();
       }
       setIsSubmitting(false);
+    }
+  };
+
+  const handleSendResetCode = async () => {
+    const email = forgotEmail.trim();
+    if (!emailPattern.test(email)) {
+      toast.error("请输入有效邮箱地址");
+      return;
+    }
+    if (turnstileEnabled && !turnstileToken) {
+      toast.error("请先完成 Cloudflare 验证");
+      return;
+    }
+    if (!passwordRecoveryEnabled) {
+      toast.error("当前未启用找回密码，请联系管理员配置 SMTP");
+      return;
+    }
+    setIsSendingResetCode(true);
+    try {
+      await sendPasswordResetCode(email, turnstileToken);
+      setResetCooldown(60);
+      toast.success("重置验证码已发送，请查收邮箱");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "发送验证码失败";
+      toast.error(message);
+    } finally {
+      setIsSendingResetCode(false);
+      if (turnstileEnabled) {
+        resetTurnstile();
+      }
+    }
+  };
+
+  const handleResetPassword = async () => {
+    const email = forgotEmail.trim();
+    if (!emailPattern.test(email)) {
+      toast.error("请输入有效邮箱地址");
+      return;
+    }
+    if (forgotCode.trim() === "") {
+      toast.error("请输入邮箱验证码");
+      return;
+    }
+    if (forgotPassword.trim().length < 8) {
+      toast.error("新密码至少 8 位");
+      return;
+    }
+    if (turnstileEnabled && !turnstileToken) {
+      toast.error("请先完成 Cloudflare 验证");
+      return;
+    }
+    setIsResettingPassword(true);
+    try {
+      await resetPasswordByEmail(email, forgotPassword, forgotCode.trim(), turnstileToken);
+      toast.success("密码重置成功，请使用新密码登录");
+      setUsername(email);
+      setPassword("");
+      setIsForgotDialogOpen(false);
+      setForgotCode("");
+      setForgotPassword("");
+      setLoginMethod("password");
+      setIsRegisterMode(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "重置密码失败";
+      toast.error(message);
+    } finally {
+      setIsResettingPassword(false);
+      if (turnstileEnabled) {
+        resetTurnstile();
+      }
     }
   };
 
@@ -624,6 +722,22 @@ export default function LoginPage() {
                     <span>{isRegisterMode ? "已有账号，返回登录" : "没有账号，去邮箱注册"}</span>
                   </Button>
                 ) : null}
+                {!isRegisterMode && loginMethod === "password" ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="mx-auto h-8 w-[88%] rounded-[1rem] text-xs text-[#45515e] hover:bg-black/5 hover:text-[#18181b] dark:text-white/62 dark:hover:bg-white/8 dark:hover:text-white"
+                    onClick={() => {
+                      setForgotEmail(username.includes("@") ? username : "");
+                      setForgotCode("");
+                      setForgotPassword("");
+                      setIsForgotDialogOpen(true);
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    找回密码
+                  </Button>
+                ) : null}
               </div>
             </form>
           </div>
@@ -645,6 +759,68 @@ export default function LoginPage() {
           </div>
         </section>
       </div>
+
+      <Dialog open={isForgotDialogOpen} onOpenChange={setIsForgotDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>找回密码</DialogTitle>
+            <DialogDescription>输入注册邮箱、验证码和新密码即可重置账号密码。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label htmlFor="forgot-email" className="text-sm font-medium">注册邮箱</label>
+              <Input
+                id="forgot-email"
+                type="email"
+                value={forgotEmail}
+                onChange={(event) => setForgotEmail(event.target.value)}
+                placeholder="name@company.com"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="forgot-code" className="text-sm font-medium">邮箱验证码</label>
+              <div className="flex gap-2">
+                <Input
+                  id="forgot-code"
+                  type="text"
+                  inputMode="numeric"
+                  value={forgotCode}
+                  onChange={(event) => setForgotCode(event.target.value)}
+                  placeholder="请输入 6 位验证码"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => void handleSendResetCode()}
+                  disabled={isSendingResetCode || resetCooldown > 0 || isResettingPassword}
+                >
+                  {isSendingResetCode ? "发送中..." : resetCooldown > 0 ? `${resetCooldown}s` : "发送验证码"}
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="forgot-password" className="text-sm font-medium">新密码</label>
+              <Input
+                id="forgot-password"
+                type="password"
+                value={forgotPassword}
+                onChange={(event) => setForgotPassword(event.target.value)}
+                placeholder="至少 8 位"
+              />
+            </div>
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => void handleResetPassword()}
+              disabled={isResettingPassword}
+            >
+              {isResettingPassword ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              重置密码
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -578,6 +578,9 @@ export type AuthProviders = {
   email_verification?: {
     enabled: boolean;
   };
+  password_recovery?: {
+    enabled: boolean;
+  };
   key_login?: {
     enabled: boolean;
   };
@@ -768,6 +771,35 @@ export async function registerAccount(
       name: name ?? "",
       invite_code: inviteCode ?? "",
       device_id: deviceID ?? "",
+      cf_turnstile_token: cfTurnstileToken ?? "",
+    },
+    redirectOnUnauthorized: false,
+  });
+}
+
+export async function sendPasswordResetCode(email: string, cfTurnstileToken?: string) {
+  return httpRequest<{ ok: boolean; expires_in?: number }>("/auth/password/send-code", {
+    method: "POST",
+    body: {
+      email,
+      cf_turnstile_token: cfTurnstileToken ?? "",
+    },
+    redirectOnUnauthorized: false,
+  });
+}
+
+export async function resetPasswordByEmail(
+  email: string,
+  password: string,
+  code: string,
+  cfTurnstileToken?: string,
+) {
+  return httpRequest<{ ok: boolean }>("/auth/password/reset", {
+    method: "POST",
+    body: {
+      email,
+      password,
+      code,
       cf_turnstile_token: cfTurnstileToken ?? "",
     },
     redirectOnUnauthorized: false,

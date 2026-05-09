@@ -370,6 +370,66 @@ func (s *AuthService) ChangeProfilePassword(identity Identity, currentPassword, 
 	return authError("password account not found")
 }
 
+func (s *AuthService) HasPasswordEmailAccount(email string) bool {
+	email, err := normalizeAccountEmail(email)
+	if err != nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, account := range s.accounts {
+		if account.Username == email || account.Email == email {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *AuthService) ResetPasswordByEmail(email, nextPassword string) error {
+	email, err := normalizeAccountEmail(email)
+	if err != nil {
+		return err
+	}
+	if err := validateAccountPassword(nextPassword); err != nil {
+		return err
+	}
+	now := util.NowISO()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index, account := range s.accounts {
+		if account.Username != email && account.Email != email {
+			continue
+		}
+		hash, err := hashAccountPassword(nextPassword)
+		if err != nil {
+			return err
+		}
+		account.PasswordHash = hash
+		account.UpdatedAt = now
+		s.accounts[index] = account
+
+		// Password reset should revoke existing local sessions for this account.
+		nextItems := make([]map[string]any, 0, len(s.items))
+		for _, item := range s.items {
+			if util.Clean(item["kind"]) == AuthKindSession &&
+				util.Clean(item["provider"]) == AuthProviderLocal &&
+				util.Clean(item["owner_id"]) == account.ID {
+				continue
+			}
+			nextItems = append(nextItems, item)
+		}
+		s.items = nextItems
+
+		if err := s.savePasswordAccountsLocked(); err != nil {
+			return err
+		}
+		return s.saveLocked()
+	}
+	return authError("该邮箱未注册")
+}
+
 func (s *AuthService) issuePasswordSessionLocked(account PasswordAccount, now string) (map[string]any, string) {
 	raw := "sess-" + util.RandomTokenURL(32)
 	owner := AuthOwner{

@@ -12,6 +12,7 @@ chatgpt2api.container.current.backup
 node_modules/
 data
 data.bak.*/
+data.before-restore.*/
 edit
 
 web_dist_official/

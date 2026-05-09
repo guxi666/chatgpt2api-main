@@ -44,6 +44,8 @@ func (a *App) routes() []appRoute {
 		exact(http.MethodPost, "/auth/logout", a.handleLogout),
 		exact(http.MethodPost, "/auth/register", a.handleAccountRegister),
 		exact(http.MethodPost, "/auth/register/send-code", a.handleRegisterSendCode),
+		exact(http.MethodPost, "/auth/password/send-code", a.handlePasswordResetSendCode),
+		exact(http.MethodPost, "/auth/password/reset", a.handlePasswordReset),
 		exact(http.MethodGet, "/auth/session", a.handleSession),
 		exact("", "/auth/providers", a.handleAuthProviders),
 		exact(http.MethodGet, "/health", a.handleHealth),

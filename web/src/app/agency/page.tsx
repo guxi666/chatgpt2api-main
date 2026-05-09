@@ -255,7 +255,7 @@ function AgencyPackageShowcase({
                   </div>
                   <div className="text-base text-[#4c6794]">一次性</div>
                   <div className="h-px bg-[#e5ebfb]" />
-                  <div className="space-y-3 text-base">
+                  <div className="space-y-3 text-base min-h-[320px]">
                     {features.map((item) => (
                       <div key={item} className="flex items-center gap-2">
                         <BadgeCheck className={cn("size-5", isPremium ? "text-[#f29500]" : "text-[#2f6bff]")} />
@@ -273,7 +273,7 @@ function AgencyPackageShowcase({
                   </div>
                   <Button
                     className={cn(
-                      "mt-auto h-11 rounded-full text-base font-semibold",
+                      "mt-2 h-11 rounded-full text-base font-semibold",
                       isPremium
                         ? "border border-[#f4c978] bg-white text-[#f29a00] hover:bg-[#fff7e7]"
                         : isMiddle
