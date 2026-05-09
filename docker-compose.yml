@@ -1,7 +1,7 @@
 services:
   app:
-    image: ${CHATGPT2API_RUNTIME_IMAGE:-chatgpt2api:stable-local}
-    pull_policy: never
+    image: ${CHATGPT2API_RUNTIME_IMAGE:-ghcr.io/guxi666/chatgpt2api:latest}
+    pull_policy: ${CHATGPT2API_PULL_POLICY:-always}
     container_name: chatgpt2api
     restart: unless-stopped
     ports:

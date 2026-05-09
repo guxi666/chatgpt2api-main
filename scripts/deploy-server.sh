@@ -25,7 +25,11 @@ services:
 EOF
 
 echo "[1/4] docker login ghcr.io"
-docker login ghcr.io
+if [[ -n "${GHCR_USERNAME:-}" && -n "${GHCR_TOKEN:-}" ]]; then
+  echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+else
+  echo "Skip login (public image). Set GHCR_USERNAME/GHCR_TOKEN if image is private."
+fi
 
 echo "[2/4] docker compose pull"
 docker compose pull
