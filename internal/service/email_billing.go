@@ -34,6 +34,10 @@ const (
 	BillingOrderStatusPaid    = "paid"
 	BillingOrderStatusFailed  = "failed"
 
+	BillingOrderKindRecharge      = "recharge"
+	BillingOrderKindAgencyJoin    = "agency_join"
+	BillingOrderKindAgencyUpgrade = "agency_upgrade"
+
 	BillingTxTypeRecharge = "recharge"
 	BillingTxTypeConsume  = "consume"
 	BillingTxTypeAdjust   = "adjust"
@@ -43,9 +47,21 @@ const (
 
 	RegisterBonusImageTimes = 20
 	InviteBonusImageTimes   = 10
+
+	AgencyTierBasic   = "basic"
+	AgencyTierPro     = "pro"
+	AgencyTierPremium = "premium"
 )
 
 var emailRE = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
+var billingBeijingLocation = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*3600)
+	}
+	return loc
+}()
 
 type YiPayGatewayConfig struct {
 	Enabled   bool
@@ -117,6 +133,13 @@ type billingUser struct {
 	BalanceCents       int
 	TotalRechargeCents int
 	TotalConsumeCents  int
+	AgencyTier         string
+	AgencyEnabled      bool
+	AgencyCommissionBP int
+	AgencyDiscountBP   int
+	AgencyJoinedAt     string
+	RegisterIP         string
+	RegisterDeviceID   string
 	CreatedAt          string
 	UpdatedAt          string
 	LastLoginAt        string
@@ -127,10 +150,14 @@ type billingOrder struct {
 	OutTradeNo  string
 	TradeNo     string
 	Provider    string
+	Kind        string
 	UserID      string
 	UserEmail   string
 	PayType     string
 	AmountCents int
+	BonusCents  int
+	AgencyTier  string
+	Note        string
 	Status      string
 	CreatedAt   string
 	UpdatedAt   string
@@ -414,22 +441,250 @@ func (s *EmailBillingService) GetWalletByIdentity(identity Identity) map[string]
 	if user == nil {
 		return nil
 	}
-	invitees, inviteeCount := s.inviteesForUserLocked(user, 200)
+	invitedUsers := s.invitedUsersByCodeLocked(user.InviteCode)
 	return map[string]any{
 		"user_id":               user.ID,
 		"email":                 user.Email,
 		"name":                  user.Name,
 		"invite_code":           user.InviteCode,
 		"invited_by":            user.InvitedBy,
-		"invitee_count":         inviteeCount,
-		"invitees":              invitees,
+		"invited_count":         len(invitedUsers),
+		"invited_users":         invitedUsers,
 		"balance_cents":         user.BalanceCents,
 		"total_recharge_cents":  user.TotalRechargeCents,
 		"total_consume_cents":   user.TotalConsumeCents,
+		"agency_tier":           user.AgencyTier,
+		"agency_enabled":        user.AgencyEnabled,
+		"agency_commission_bp":  user.AgencyCommissionBP,
+		"agency_discount_bp":    user.AgencyDiscountBP,
+		"agency_joined_at":      user.AgencyJoinedAt,
 		"image_price_note":      "amount is in cents",
 		"last_login_at":         user.LastLoginAt,
 		"updated_at":            user.UpdatedAt,
 		"billing_provider_hint": BillingProviderYiPay,
+	}
+}
+
+type AgencyTierBenefit struct {
+	Tier         string
+	CommissionBP int
+	DiscountBP   int
+}
+
+func (s *EmailBillingService) ActivateAgencyByIdentity(identity Identity, benefit AgencyTierBenefit, allowUpgradeOnly bool) (map[string]any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.ensureUserByIdentityLocked(identity)
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	return s.activateAgencyLocked(user, benefit, allowUpgradeOnly)
+}
+
+func (s *EmailBillingService) ActivateAgencyByUserID(userID string, benefit AgencyTierBenefit, allowUpgradeOnly bool) (map[string]any, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user id is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.users[userID]
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	return s.activateAgencyLocked(user, benefit, allowUpgradeOnly)
+}
+
+func (s *EmailBillingService) DeactivateAgencyByUserID(userID string) (map[string]any, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user id is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.users[userID]
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	if !user.AgencyEnabled && user.AgencyTier == "" && user.AgencyCommissionBP == 0 && user.AgencyDiscountBP == 0 {
+		return publicBillingUser(user), nil
+	}
+	user.AgencyEnabled = false
+	user.AgencyTier = ""
+	user.AgencyCommissionBP = 0
+	user.AgencyDiscountBP = 0
+	user.AgencyJoinedAt = ""
+	user.UpdatedAt = util.NowISO()
+	if err := s.saveLocked(); err != nil {
+		return nil, err
+	}
+	return publicBillingUser(user), nil
+}
+
+func (s *EmailBillingService) activateAgencyLocked(user *billingUser, benefit AgencyTierBenefit, allowUpgradeOnly bool) (map[string]any, error) {
+	nextTier := normalizeAgencyTier(benefit.Tier)
+	if nextTier == "" {
+		return nil, fmt.Errorf("invalid agency tier")
+	}
+	if allowUpgradeOnly && agencyTierRank(nextTier) < agencyTierRank(user.AgencyTier) {
+		return nil, fmt.Errorf("cannot downgrade agency tier")
+	}
+	if user.AgencyTier == nextTier && user.AgencyEnabled &&
+		user.AgencyCommissionBP == normalizeAgencyBasisPoint(benefit.CommissionBP) &&
+		user.AgencyDiscountBP == normalizeAgencyBasisPoint(benefit.DiscountBP) {
+		return publicBillingUser(user), nil
+	}
+	now := util.NowISO()
+	user.AgencyTier = nextTier
+	user.AgencyEnabled = true
+	user.AgencyCommissionBP = normalizeAgencyBasisPoint(benefit.CommissionBP)
+	user.AgencyDiscountBP = normalizeAgencyBasisPoint(benefit.DiscountBP)
+	if strings.TrimSpace(user.AgencyJoinedAt) == "" {
+		user.AgencyJoinedAt = now
+	}
+	user.UpdatedAt = now
+	if err := s.saveLocked(); err != nil {
+		return nil, err
+	}
+	return publicBillingUser(user), nil
+}
+
+func (s *EmailBillingService) AgencyDashboardByIdentity(identity Identity, registerURLBase string) (map[string]any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.ensureUserByIdentityLocked(identity)
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	return s.agencyDashboardLocked(user, registerURLBase), nil
+}
+
+func (s *EmailBillingService) agencyDashboardLocked(user *billingUser, registerURLBase string) map[string]any {
+	inviteCode := strings.TrimSpace(user.InviteCode)
+	invitedUsers := s.invitedUsersByCodeLocked(inviteCode)
+	invitedUserSet := map[string]struct{}{}
+	for _, item := range invitedUsers {
+		id := strings.TrimSpace(util.Clean(item["id"]))
+		if id != "" {
+			invitedUserSet[id] = struct{}{}
+		}
+	}
+
+	orderRows := make([]map[string]any, 0)
+	totalCommission := 0
+	monthCommission := 0
+	todayCommission := 0
+	now := time.Now().In(billingBeijingLocation)
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, billingBeijingLocation)
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, billingBeijingLocation)
+
+	for _, order := range s.orders {
+		if order.Status != BillingOrderStatusPaid {
+			continue
+		}
+		if _, ok := invitedUserSet[order.UserID]; !ok {
+			continue
+		}
+		commissionCents := order.AmountCents * user.AgencyCommissionBP / 10000
+		createdAt := firstNonEmpty(order.PaidAt, order.UpdatedAt, order.CreatedAt)
+		createdTime := parseBillingTimestamp(createdAt).In(billingBeijingLocation)
+		totalCommission += commissionCents
+		if !createdTime.Before(monthStart) {
+			monthCommission += commissionCents
+		}
+		if !createdTime.Before(dayStart) {
+			todayCommission += commissionCents
+		}
+		orderRows = append(orderRows, map[string]any{
+			"id":                order.ID,
+			"user_id":           order.UserID,
+			"user_email":        order.UserEmail,
+			"amount_cents":      order.AmountCents,
+			"amount_yuan":       centsToYuan(order.AmountCents),
+			"commission_cents":  commissionCents,
+			"commission_yuan":   centsToYuan(commissionCents),
+			"status":            order.Status,
+			"created_at":        createdAt,
+			"out_trade_no":      order.OutTradeNo,
+			"agent_tier":        user.AgencyTier,
+			"commission_bp":     user.AgencyCommissionBP,
+			"discount_bp":       user.AgencyDiscountBP,
+			"recharge_discount": fmt.Sprintf("%.2f%%", float64(user.AgencyDiscountBP)/100),
+		})
+	}
+
+	sort.Slice(orderRows, func(i, j int) bool {
+		left := parseBillingTimestamp(strings.TrimSpace(util.Clean(orderRows[i]["created_at"])))
+		right := parseBillingTimestamp(strings.TrimSpace(util.Clean(orderRows[j]["created_at"])))
+		return left.After(right)
+	})
+
+	return map[string]any{
+		"agent": map[string]any{
+			"user_id":        user.ID,
+			"email":          user.Email,
+			"name":           user.Name,
+			"tier":           user.AgencyTier,
+			"enabled":        user.AgencyEnabled,
+			"commission_bp":  user.AgencyCommissionBP,
+			"discount_bp":    user.AgencyDiscountBP,
+			"joined_at":      user.AgencyJoinedAt,
+			"invite_code":    user.InviteCode,
+			"channel_link":   buildAgencyInviteLink(registerURLBase, user.InviteCode),
+			"invited_count":  len(invitedUsers),
+			"invited_users":  invitedUsers,
+			"wallet_balance": user.BalanceCents,
+		},
+		"summary": map[string]any{
+			"today_commission_cents": todayCommission,
+			"today_commission_yuan":  centsToYuan(todayCommission),
+			"month_commission_cents": monthCommission,
+			"month_commission_yuan":  centsToYuan(monthCommission),
+			"total_commission_cents": totalCommission,
+			"total_commission_yuan":  centsToYuan(totalCommission),
+			"available_cents":        totalCommission,
+			"available_yuan":         centsToYuan(totalCommission),
+		},
+		"orders": orderRows,
+	}
+}
+
+func buildAgencyInviteLink(base, inviteCode string) string {
+	base = strings.TrimSpace(base)
+	inviteCode = strings.TrimSpace(inviteCode)
+	if base == "" || inviteCode == "" {
+		return ""
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return ""
+	}
+	query := u.Query()
+	query.Set("invite_code", inviteCode)
+	u.RawQuery = query.Encode()
+	return u.String()
+}
+
+func billingRechargeNote(order *billingOrder) string {
+	if order == nil {
+		return ""
+	}
+	if order.BonusCents <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("agency recharge bonus +%s", centsToYuan(order.BonusCents))
+}
+
+func agencyTierRank(tier string) int {
+	switch normalizeAgencyTier(tier) {
+	case AgencyTierBasic:
+		return 1
+	case AgencyTierPro:
+		return 2
+	case AgencyTierPremium:
+		return 3
+	default:
+		return 0
 	}
 }
 
@@ -503,6 +758,218 @@ func (s *EmailBillingService) EnsureWalletUser(userID, name, provider string) ma
 	}
 }
 
+func (s *EmailBillingService) EnsureWalletUserWithEmail(userID, email, name, provider string) map[string]any {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.ensureUserByIDLocked(userID, name, provider)
+	if user == nil {
+		return nil
+	}
+
+	normalizedEmail, err := normalizeEmail(email)
+	if err == nil {
+		if ownerID := strings.TrimSpace(s.userByEmail[normalizedEmail]); ownerID != "" && ownerID != user.ID {
+			normalizedEmail = ""
+		}
+	}
+
+	changed := false
+	if normalizedEmail != "" && user.Email != normalizedEmail {
+		if previousOwner := strings.TrimSpace(s.userByEmail[user.Email]); previousOwner == user.ID {
+			delete(s.userByEmail, user.Email)
+		}
+		user.Email = normalizedEmail
+		s.userByEmail[normalizedEmail] = user.ID
+		changed = true
+	}
+	if displayName := strings.TrimSpace(name); displayName != "" && user.Name != displayName {
+		user.Name = displayName
+		changed = true
+	}
+	if normalizedProvider := strings.TrimSpace(provider); normalizedProvider != "" && user.Provider != normalizedProvider {
+		user.Provider = normalizedProvider
+		changed = true
+	}
+	if changed {
+		user.UpdatedAt = util.NowISO()
+		_ = s.saveLocked()
+	}
+	invitedUsers := s.invitedUsersByCodeLocked(user.InviteCode)
+	return map[string]any{
+		"user_id":              user.ID,
+		"email":                user.Email,
+		"name":                 user.Name,
+		"invite_code":          user.InviteCode,
+		"invited_by":           user.InvitedBy,
+		"invited_count":        len(invitedUsers),
+		"invited_users":        invitedUsers,
+		"balance_cents":        user.BalanceCents,
+		"total_recharge_cents": user.TotalRechargeCents,
+		"total_consume_cents":  user.TotalConsumeCents,
+		"last_login_at":        user.LastLoginAt,
+		"updated_at":           user.UpdatedAt,
+	}
+}
+
+func (s *EmailBillingService) ApplyInviteCodeForUser(userID, inviteCode string, imagePriceCents int) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("user id is required")
+	}
+	normalizedInviteCode := normalizeInviteCode(inviteCode)
+	if normalizedInviteCode == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.users[userID]
+	if user == nil {
+		return fmt.Errorf("user not found")
+	}
+	if user.InvitedBy != "" {
+		return nil
+	}
+	inviterID := strings.TrimSpace(s.userByInviteCode[normalizedInviteCode])
+	if inviterID == "" {
+		return fmt.Errorf("invalid invite code")
+	}
+	if inviterID == user.ID {
+		return fmt.Errorf("invalid invite code")
+	}
+	inviter := s.users[inviterID]
+	if inviter == nil || !inviter.Enabled {
+		return fmt.Errorf("invalid invite code")
+	}
+
+	now := util.NowISO()
+	user.InvitedBy = inviter.InviteCode
+	user.UpdatedAt = now
+
+	bonusCents := maxBillingInt(0, imagePriceCents) * InviteBonusImageTimes
+	var tx map[string]any
+	if bonusCents > 0 {
+		inviter.BalanceCents += bonusCents
+		inviter.TotalRechargeCents += bonusCents
+		inviter.UpdatedAt = now
+		tx = map[string]any{
+			"id":                  "tx_" + util.NewHex(18),
+			"user_id":             inviter.ID,
+			"email":               inviter.Email,
+			"type":                BillingTxTypeRecharge,
+			"amount_cents":        bonusCents,
+			"balance_after_cents": inviter.BalanceCents,
+			"provider":            BillingProviderInviteBonus,
+			"note":                fmt.Sprintf("invite bonus from %s (%d image credits)", user.Email, InviteBonusImageTimes),
+			"created_at":          now,
+		}
+		s.transactions = append(s.transactions, tx)
+	}
+
+	if err := s.saveLocked(); err != nil {
+		user.InvitedBy = ""
+		user.UpdatedAt = util.NowISO()
+		if bonusCents > 0 {
+			inviter.BalanceCents -= bonusCents
+			inviter.TotalRechargeCents -= bonusCents
+			inviter.UpdatedAt = util.NowISO()
+			if len(s.transactions) > 0 {
+				s.transactions = s.transactions[:len(s.transactions)-1]
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *EmailBillingService) ValidateInviteCode(inviteCode string) error {
+	normalizedInviteCode := normalizeInviteCode(inviteCode)
+	if normalizedInviteCode == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	inviterID := strings.TrimSpace(s.userByInviteCode[normalizedInviteCode])
+	if inviterID == "" {
+		return fmt.Errorf("invalid invite code")
+	}
+	inviter := s.users[inviterID]
+	if inviter == nil || !inviter.Enabled {
+		return fmt.Errorf("invalid invite code")
+	}
+	return nil
+}
+
+func (s *EmailBillingService) ValidateRegisterFingerprint(registerIP, registerDeviceID string, maxPerIP, maxPerDevice int) error {
+	registerIP = strings.TrimSpace(registerIP)
+	registerDeviceID = strings.TrimSpace(registerDeviceID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if maxPerIP > 0 && registerIP != "" {
+		used := 0
+		for _, user := range s.users {
+			if !user.Enabled || strings.TrimSpace(user.RegisterIP) != registerIP {
+				continue
+			}
+			used++
+			if used >= maxPerIP {
+				return fmt.Errorf("同 IP 注册次数已达上限")
+			}
+		}
+	}
+	if maxPerDevice > 0 && registerDeviceID != "" {
+		used := 0
+		for _, user := range s.users {
+			if !user.Enabled || strings.TrimSpace(user.RegisterDeviceID) != registerDeviceID {
+				continue
+			}
+			used++
+			if used >= maxPerDevice {
+				return fmt.Errorf("同设备注册次数已达上限")
+			}
+		}
+	}
+	return nil
+}
+
+func (s *EmailBillingService) BindRegisterFingerprint(userID, registerIP, registerDeviceID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("user id is required")
+	}
+	registerIP = strings.TrimSpace(registerIP)
+	registerDeviceID = strings.TrimSpace(registerDeviceID)
+	if registerIP == "" && registerDeviceID == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.users[userID]
+	if user == nil {
+		return fmt.Errorf("user not found")
+	}
+	changed := false
+	if registerIP != "" && user.RegisterIP != registerIP {
+		user.RegisterIP = registerIP
+		changed = true
+	}
+	if registerDeviceID != "" && user.RegisterDeviceID != registerDeviceID {
+		user.RegisterDeviceID = registerDeviceID
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	user.UpdatedAt = util.NowISO()
+	return s.saveLocked()
+}
+
 func (s *EmailBillingService) AdminAdjustUserBalance(userID string, deltaCents int, note string) (map[string]any, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -519,7 +986,6 @@ func (s *EmailBillingService) AdminAdjustUserBalance(userID string, deltaCents i
 	}
 	nextBalance := user.BalanceCents + deltaCents
 	if nextBalance < 0 {
-		s.appendBillingFailureLocked(user, BillingTxTypeAdjust, BillingProviderAdmin, 0, "balance cannot be negative")
 		return nil, fmt.Errorf("balance cannot be negative")
 	}
 	user.BalanceCents = nextBalance
@@ -603,21 +1069,17 @@ func (s *EmailBillingService) RedeemCode(identity Identity, code string) (map[st
 	}
 	item := s.redeemCodes[code]
 	if item == nil {
-		s.appendBillingFailureLocked(user, BillingTxTypeRecharge, BillingProviderRedeemCode, 0, "redeem code is invalid")
 		return nil, fmt.Errorf("redeem code is invalid")
 	}
 	if !item.Enabled {
-		s.appendBillingFailureLocked(user, BillingTxTypeRecharge, BillingProviderRedeemCode, 0, "redeem code is disabled")
 		return nil, fmt.Errorf("redeem code is disabled")
 	}
 	if item.UsedBy != "" {
-		s.appendBillingFailureLocked(user, BillingTxTypeRecharge, BillingProviderRedeemCode, 0, "redeem code has already been used")
 		return nil, fmt.Errorf("redeem code has already been used")
 	}
 	if item.ExpiresAt != "" {
 		expiresAt, err := time.Parse(time.RFC3339Nano, item.ExpiresAt)
 		if err != nil || time.Now().UTC().After(expiresAt) {
-			s.appendBillingFailureLocked(user, BillingTxTypeRecharge, BillingProviderRedeemCode, 0, "redeem code has expired")
 			return nil, fmt.Errorf("redeem code has expired")
 		}
 	}
@@ -697,16 +1159,11 @@ func (s *EmailBillingService) CreateRedeemCodes(amountCents, count int, expiresA
 	if count < 1 || count > 500 {
 		return nil, fmt.Errorf("count must be between 1 and 500")
 	}
-	expiresAt = strings.TrimSpace(expiresAt)
-	if expiresAt != "" {
-		t, err := time.Parse(time.RFC3339Nano, expiresAt)
-		if err != nil {
-			return nil, fmt.Errorf("expires_at must be RFC3339 time")
-		}
-		if time.Now().UTC().After(t) {
-			return nil, fmt.Errorf("expires_at must be in the future")
-		}
+	normalizedExpiresAt, err := normalizeRedeemExpiresAt(expiresAt)
+	if err != nil {
+		return nil, err
 	}
+	expiresAt = normalizedExpiresAt
 	now := util.NowISO()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -754,15 +1211,9 @@ func (s *EmailBillingService) UpdateRedeemCode(code string, enabled *bool, note 
 		item.Note = strings.TrimSpace(*note)
 	}
 	if expiresAt != nil {
-		value := strings.TrimSpace(*expiresAt)
-		if value != "" {
-			t, err := time.Parse(time.RFC3339Nano, value)
-			if err != nil {
-				return nil, fmt.Errorf("expires_at must be RFC3339 time")
-			}
-			if time.Now().UTC().After(t) {
-				return nil, fmt.Errorf("expires_at must be in the future")
-			}
+		value, err := normalizeRedeemExpiresAt(*expiresAt)
+		if err != nil {
+			return nil, err
 		}
 		item.ExpiresAt = value
 	}
@@ -871,16 +1322,67 @@ func (s *EmailBillingService) CreateYiPayOrder(identity Identity, amountCents in
 	if !user.Enabled {
 		return nil, fmt.Errorf("account is disabled")
 	}
+	return s.createYiPayOrderLocked(user, amountCents, payType, cfg, "chatgpt2api wallet recharge", BillingOrderKindRecharge, "", "")
+}
+
+func (s *EmailBillingService) CreateAgencyYiPayOrder(identity Identity, tier string, amountCents int, payType string, cfg YiPayGatewayConfig, allowUpgradeOnly bool) (map[string]any, error) {
+	if !cfg.Enabled || strings.TrimSpace(cfg.PID) == "" || strings.TrimSpace(cfg.Key) == "" || strings.TrimSpace(cfg.SubmitURL) == "" {
+		return nil, fmt.Errorf("YiPay is not configured")
+	}
+	payType = strings.ToLower(strings.TrimSpace(payType))
+	switch payType {
+	case "alipay", "wxpay", "paypal", "usdt":
+	default:
+		return nil, fmt.Errorf("unsupported pay type")
+	}
+	tier = normalizeAgencyTier(tier)
+	if tier == "" {
+		return nil, fmt.Errorf("invalid agency tier")
+	}
+	if amountCents < 1 {
+		return nil, fmt.Errorf("agency tier price is invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.ensureUserByIdentityLocked(identity)
+	if user == nil {
+		return nil, fmt.Errorf("user identity required")
+	}
+	if !user.Enabled {
+		return nil, fmt.Errorf("account is disabled")
+	}
+	if allowUpgradeOnly && agencyTierRank(tier) < agencyTierRank(user.AgencyTier) {
+		return nil, fmt.Errorf("cannot downgrade agency tier")
+	}
+	if user.AgencyEnabled && user.AgencyTier == tier {
+		return nil, fmt.Errorf("agency tier already activated")
+	}
+
+	kind := BillingOrderKindAgencyJoin
+	if user.AgencyEnabled && agencyTierRank(tier) > agencyTierRank(user.AgencyTier) {
+		kind = BillingOrderKindAgencyUpgrade
+	}
+	note := "chatgpt2api agency tier " + tier
+	return s.createYiPayOrderLocked(user, amountCents, payType, cfg, note, kind, tier, note)
+}
+
+func (s *EmailBillingService) createYiPayOrderLocked(user *billingUser, amountCents int, payType string, cfg YiPayGatewayConfig, orderName, orderKind, agencyTier, note string) (map[string]any, error) {
+	if user == nil {
+		return nil, fmt.Errorf("user identity required")
+	}
 	now := util.NowISO()
 	outTradeNo := s.newOutTradeNoLocked()
 	order := &billingOrder{
 		ID:          "ord_" + util.NewHex(18),
 		OutTradeNo:  outTradeNo,
 		Provider:    BillingProviderYiPay,
+		Kind:        normalizeBillingOrderKind(orderKind),
 		UserID:      user.ID,
 		UserEmail:   user.Email,
 		PayType:     payType,
 		AmountCents: amountCents,
+		AgencyTier:  normalizeAgencyTier(agencyTier),
+		Note:        strings.TrimSpace(note),
 		Status:      BillingOrderStatusPending,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -891,7 +1393,7 @@ func (s *EmailBillingService) CreateYiPayOrder(identity Identity, amountCents in
 		"out_trade_no": outTradeNo,
 		"notify_url":   strings.TrimSpace(cfg.NotifyURL),
 		"return_url":   strings.TrimSpace(cfg.ReturnURL),
-		"name":         "chatgpt2api wallet recharge",
+		"name":         firstNonEmpty(strings.TrimSpace(orderName), "chatgpt2api wallet recharge"),
 		"money":        centsToYuan(amountCents),
 		"sitename":     firstNonEmpty(strings.TrimSpace(cfg.SiteName), "chatgpt2api"),
 		"param":        user.ID,
@@ -927,6 +1429,8 @@ func (s *EmailBillingService) CreateYiPayOrder(identity Identity, amountCents in
 		"user_id":      order.UserID,
 		"user_email":   order.UserEmail,
 		"pay_type":     order.PayType,
+		"order_kind":   order.Kind,
+		"agency_tier":  order.AgencyTier,
 		"amount_cents": order.AmountCents,
 		"amount_yuan":  centsToYuan(order.AmountCents),
 		"pay_url":      payURL,
@@ -1032,9 +1536,9 @@ func (s *EmailBillingService) CreateUSDTOrder(identity Identity, amountCents int
 	}, nil
 }
 
-func (s *EmailBillingService) HandleYiPayNotify(values url.Values, cfg YiPayGatewayConfig) (bool, error) {
+func (s *EmailBillingService) HandleYiPayNotify(values url.Values, cfg YiPayGatewayConfig) (bool, map[string]any, error) {
 	if !cfg.Enabled || strings.TrimSpace(cfg.Key) == "" {
-		return false, fmt.Errorf("YiPay is not configured")
+		return false, nil, fmt.Errorf("YiPay is not configured")
 	}
 	flat := map[string]string{}
 	for key, items := range values {
@@ -1045,47 +1549,44 @@ func (s *EmailBillingService) HandleYiPayNotify(values url.Values, cfg YiPayGate
 	}
 	sign := strings.TrimSpace(flat["sign"])
 	if sign == "" {
-		return false, fmt.Errorf("missing sign")
+		return false, nil, fmt.Errorf("missing sign")
 	}
 	expected := yipaySign(flat, cfg.Key)
 	if !strings.EqualFold(sign, expected) {
-		return false, fmt.Errorf("invalid sign")
+		return false, nil, fmt.Errorf("invalid sign")
 	}
 	outTradeNo := strings.TrimSpace(flat["out_trade_no"])
 	if outTradeNo == "" {
-		return false, fmt.Errorf("missing out_trade_no")
+		return false, nil, fmt.Errorf("missing out_trade_no")
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	order := s.orders[outTradeNo]
 	if order == nil {
-		return false, fmt.Errorf("order not found")
+		return false, nil, fmt.Errorf("order not found")
 	}
 	tradeStatus := strings.ToUpper(strings.TrimSpace(flat["trade_status"]))
 	if tradeStatus != "TRADE_SUCCESS" {
 		order.Status = BillingOrderStatusFailed
 		order.UpdatedAt = util.NowISO()
 		_ = s.saveLocked()
-		return true, nil
+		return true, yipayNotifyResult(order), nil
 	}
 	if order.Status == BillingOrderStatusPaid {
-		return true, nil
+		return true, yipayNotifyResult(order), nil
 	}
 	moneyCents, err := yuanToCents(flat["money"])
 	if err != nil {
-		return false, fmt.Errorf("invalid money")
+		return false, nil, fmt.Errorf("invalid money")
 	}
 	if moneyCents != order.AmountCents {
-		return false, fmt.Errorf("money mismatch")
+		return false, nil, fmt.Errorf("money mismatch")
 	}
 	user := s.users[order.UserID]
 	if user == nil {
-		return false, fmt.Errorf("user not found")
+		return false, nil, fmt.Errorf("user not found")
 	}
-	user.BalanceCents += order.AmountCents
-	user.TotalRechargeCents += order.AmountCents
-	user.UpdatedAt = util.NowISO()
 
 	now := util.NowISO()
 	order.Status = BillingOrderStatusPaid
@@ -1093,35 +1594,60 @@ func (s *EmailBillingService) HandleYiPayNotify(values url.Values, cfg YiPayGate
 	order.PaidAt = now
 	order.UpdatedAt = now
 
-	tx := map[string]any{
-		"id":                  "tx_" + util.NewHex(18),
-		"user_id":             user.ID,
-		"email":               user.Email,
-		"type":                BillingTxTypeRecharge,
-		"amount_cents":        order.AmountCents,
-		"balance_after_cents": user.BalanceCents,
-		"order_id":            order.ID,
-		"out_trade_no":        order.OutTradeNo,
-		"trade_no":            order.TradeNo,
-		"provider":            BillingProviderYiPay,
-		"created_at":          now,
+	restoreUser := *user
+	hadTx := false
+	switch normalizeBillingOrderKind(order.Kind) {
+	case BillingOrderKindAgencyJoin, BillingOrderKindAgencyUpgrade:
+		// Agency orders only unlock agency tier; no wallet credit is added.
+	default:
+		creditedCents := order.AmountCents + maxBillingInt(0, order.BonusCents)
+		user.BalanceCents += creditedCents
+		user.TotalRechargeCents += creditedCents
+		user.UpdatedAt = util.NowISO()
+		tx := map[string]any{
+			"id":                  "tx_" + util.NewHex(18),
+			"user_id":             user.ID,
+			"email":               user.Email,
+			"type":                BillingTxTypeRecharge,
+			"amount_cents":        creditedCents,
+			"balance_after_cents": user.BalanceCents,
+			"order_id":            order.ID,
+			"out_trade_no":        order.OutTradeNo,
+			"trade_no":            order.TradeNo,
+			"provider":            BillingProviderYiPay,
+			"note":                billingRechargeNote(order),
+			"created_at":          now,
+		}
+		s.transactions = append(s.transactions, tx)
+		hadTx = true
 	}
-	s.transactions = append(s.transactions, tx)
 
 	if err := s.saveLocked(); err != nil {
-		user.BalanceCents -= order.AmountCents
-		user.TotalRechargeCents -= order.AmountCents
-		user.UpdatedAt = util.NowISO()
+		*user = restoreUser
 		order.Status = BillingOrderStatusPending
 		order.TradeNo = ""
 		order.PaidAt = ""
 		order.UpdatedAt = util.NowISO()
-		if len(s.transactions) > 0 {
+		if hadTx && len(s.transactions) > 0 {
 			s.transactions = s.transactions[:len(s.transactions)-1]
 		}
-		return false, err
+		return false, nil, err
 	}
-	return true, nil
+	return true, yipayNotifyResult(order), nil
+}
+
+func yipayNotifyResult(order *billingOrder) map[string]any {
+	if order == nil {
+		return map[string]any{}
+	}
+	return map[string]any{
+		"order_id":     order.ID,
+		"out_trade_no": order.OutTradeNo,
+		"user_id":      order.UserID,
+		"order_kind":   normalizeBillingOrderKind(order.Kind),
+		"agency_tier":  normalizeAgencyTier(order.AgencyTier),
+		"status":       order.Status,
+	}
 }
 
 func (s *EmailBillingService) ListOrdersByIdentity(identity Identity, limit int) []map[string]any {
@@ -1132,131 +1658,123 @@ func (s *EmailBillingService) ListOrdersByIdentity(identity Identity, limit int)
 		return []map[string]any{}
 	}
 	if limit < 1 {
-		limit = 20
+		limit = 50
 	}
-	out := make([]map[string]any, 0)
-	items := make([]*billingOrder, 0)
-	for _, order := range s.orders {
-		if order.UserID == user.ID {
-			items = append(items, order)
+	records := make([]map[string]any, 0, len(s.transactions)+len(s.orders))
+
+	for _, tx := range s.transactions {
+		if strings.TrimSpace(util.Clean(tx["user_id"])) != user.ID {
+			continue
 		}
+		amountCents := util.ToInt(tx["amount_cents"], 0)
+		record := map[string]any{
+			"id":                  firstNonEmpty(strings.TrimSpace(util.Clean(tx["id"])), "tx_"+util.NewHex(12)),
+			"record_type":         "transaction",
+			"type":                strings.TrimSpace(util.Clean(tx["type"])),
+			"provider":            strings.TrimSpace(util.Clean(tx["provider"])),
+			"status":              BillingOrderStatusPaid,
+			"amount_cents":        amountCents,
+			"amount_yuan":         centsToYuan(absBillingInt(amountCents)),
+			"balance_after_cents": util.ToInt(tx["balance_after_cents"], 0),
+			"out_trade_no":        strings.TrimSpace(util.Clean(tx["out_trade_no"])),
+			"trade_no":            strings.TrimSpace(util.Clean(tx["trade_no"])),
+			"pay_type":            strings.TrimSpace(util.Clean(tx["pay_type"])),
+			"note":                strings.TrimSpace(util.Clean(tx["note"])),
+			"created_at":          strings.TrimSpace(util.Clean(tx["created_at"])),
+		}
+		records = append(records, record)
+	}
+
+	for _, order := range s.orders {
+		if order.UserID != user.ID {
+			continue
+		}
+		if order.Status == BillingOrderStatusPaid {
+			continue
+		}
+		record := publicBillingOrder(order)
+		record["record_type"] = "order"
+		records = append(records, record)
+	}
+
+	sort.Slice(records, func(i, j int) bool {
+		left := parseBillingTimestamp(strings.TrimSpace(util.Clean(records[i]["created_at"])))
+		right := parseBillingTimestamp(strings.TrimSpace(util.Clean(records[j]["created_at"])))
+		if !left.Equal(right) {
+			return left.After(right)
+		}
+		return strings.TrimSpace(util.Clean(records[i]["id"])) > strings.TrimSpace(util.Clean(records[j]["id"]))
+	})
+
+	if len(records) > limit {
+		records = records[:limit]
+	}
+	return records
+}
+
+func (s *EmailBillingService) ListOrdersForAdmin(limit int) ([]map[string]any, map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := make([]*billingOrder, 0, len(s.orders))
+	for _, order := range s.orders {
+		items = append(items, order)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].CreatedAt > items[j].CreatedAt
 	})
-	for _, item := range items {
-		record := publicBillingOrder(item)
-		record["source"] = "order"
-		record["note"] = ""
-		out = append(out, record)
-	}
-	for _, tx := range s.transactions {
-		if util.Clean(tx["user_id"]) != user.ID {
-			continue
-		}
-		txType := strings.TrimSpace(util.Clean(tx["type"]))
-		if txType == BillingTxTypeConsume {
-			continue
-		}
-		provider := strings.TrimSpace(util.Clean(tx["provider"]))
-		if provider == BillingProviderYiPay || provider == BillingProviderPayPal || provider == BillingProviderUSDT {
-			continue
-		}
-		createdAt := strings.TrimSpace(util.Clean(tx["created_at"]))
-		status := strings.ToLower(strings.TrimSpace(util.Clean(tx["status"])))
-		switch status {
-		case "", "success", "paid":
-			status = BillingOrderStatusPaid
-		case "failed":
-			status = BillingOrderStatusFailed
-		case "pending":
-			status = BillingOrderStatusPending
-		default:
-			status = BillingOrderStatusPaid
-		}
-		amountCents := util.ToInt(tx["amount_cents"], 0)
-		id := strings.TrimSpace(util.Clean(tx["id"]))
-		if id == "" {
-			id = "tx_" + strings.ReplaceAll(strings.ReplaceAll(firstNonEmpty(createdAt, util.NowISO()), ":", ""), "-", "")
-		}
-		out = append(out, map[string]any{
-			"id":           id,
-			"provider":     firstNonEmpty(provider, BillingProviderAdmin),
-			"pay_type":     firstNonEmpty(provider, BillingProviderAdmin),
-			"amount_cents": amountCents,
-			"amount_yuan":  centsToYuanSigned(amountCents),
-			"status":       status,
-			"out_trade_no": id,
-			"trade_no":     "",
-			"created_at":   createdAt,
-			"updated_at":   createdAt,
-			"paid_at":      "",
-			"source":       "transaction",
-			"tx_type":      txType,
-			"note":         strings.TrimSpace(util.Clean(tx["note"])),
-		})
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return util.Clean(out[i]["created_at"]) > util.Clean(out[j]["created_at"])
-	})
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out
-}
 
-func (s *EmailBillingService) inviteesForUserLocked(user *billingUser, limit int) ([]map[string]any, int) {
-	if user == nil || strings.TrimSpace(user.InviteCode) == "" {
-		return []map[string]any{}, 0
-	}
-	candidates := make([]*billingUser, 0)
-	for _, item := range s.users {
-		if strings.EqualFold(strings.TrimSpace(item.InvitedBy), strings.TrimSpace(user.InviteCode)) {
-			candidates = append(candidates, item)
-		}
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].CreatedAt != candidates[j].CreatedAt {
-			return candidates[i].CreatedAt > candidates[j].CreatedAt
-		}
-		return candidates[i].Email < candidates[j].Email
-	})
-	count := len(candidates)
-	if limit < 1 {
-		limit = 50
-	}
-	if len(candidates) > limit {
-		candidates = candidates[:limit]
-	}
-	out := make([]map[string]any, 0, len(candidates))
-	for _, item := range candidates {
-		out = append(out, map[string]any{
-			"id":         item.ID,
-			"email":      item.Email,
-			"name":       item.Name,
-			"created_at": item.CreatedAt,
-		})
-	}
-	return out, count
-}
+	now := time.Now().In(billingBeijingLocation)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, billingBeijingLocation)
+	todayEnd := todayStart.Add(24 * time.Hour)
 
-func (s *EmailBillingService) appendBillingFailureLocked(user *billingUser, txType, provider string, amountCents int, note string) {
-	if user == nil {
-		return
+	totalPaidCount := 0
+	totalRevenueCents := 0
+	todayPaidCount := 0
+	todayRevenueCents := 0
+	pendingCount := 0
+	failedCount := 0
+
+	for _, order := range items {
+		switch order.Status {
+		case BillingOrderStatusPending:
+			pendingCount++
+		case BillingOrderStatusFailed:
+			failedCount++
+		case BillingOrderStatusPaid:
+			totalPaidCount++
+			totalRevenueCents += order.AmountCents
+
+			paidAt := parseBillingTimestamp(firstNonEmpty(order.PaidAt, order.UpdatedAt, order.CreatedAt))
+			if !paidAt.IsZero() {
+				localPaidAt := paidAt.In(billingBeijingLocation)
+				if !localPaidAt.Before(todayStart) && localPaidAt.Before(todayEnd) {
+					todayPaidCount++
+					todayRevenueCents += order.AmountCents
+				}
+			}
+		}
 	}
-	s.transactions = append(s.transactions, map[string]any{
-		"id":                  "tx_" + util.NewHex(18),
-		"user_id":             user.ID,
-		"email":               user.Email,
-		"type":                firstNonEmpty(strings.TrimSpace(txType), BillingTxTypeRecharge),
-		"amount_cents":        amountCents,
-		"balance_after_cents": user.BalanceCents,
-		"provider":            firstNonEmpty(strings.TrimSpace(provider), BillingProviderAdmin),
-		"status":              BillingOrderStatusFailed,
-		"note":                strings.TrimSpace(note),
-		"created_at":          util.NowISO(),
-	})
-	_ = s.saveLocked()
+
+	out := make([]map[string]any, 0, len(items))
+	for _, order := range items {
+		out = append(out, adminBillingOrder(order))
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+
+	return out, map[string]any{
+		"today_revenue_cents": todayRevenueCents,
+		"today_revenue_yuan":  centsToYuan(todayRevenueCents),
+		"today_paid_count":    todayPaidCount,
+		"total_revenue_cents": totalRevenueCents,
+		"total_revenue_yuan":  centsToYuan(totalRevenueCents),
+		"total_paid_count":    totalPaidCount,
+		"pending_count":       pendingCount,
+		"failed_count":        failedCount,
+		"record_count":        len(items),
+		"updated_at":          util.NowISO(),
+	}
 }
 
 func (s *EmailBillingService) loadLocked() {
@@ -1362,6 +1880,34 @@ func (s *EmailBillingService) userByEmailLocked(email string) *billingUser {
 	return s.users[id]
 }
 
+func (s *EmailBillingService) invitedUsersByCodeLocked(inviteCode string) []map[string]any {
+	inviteCode = normalizeInviteCode(inviteCode)
+	if inviteCode == "" {
+		return []map[string]any{}
+	}
+	out := make([]map[string]any, 0)
+	for _, user := range s.users {
+		if normalizeInviteCode(user.InvitedBy) != inviteCode {
+			continue
+		}
+		out = append(out, map[string]any{
+			"id":         user.ID,
+			"email":      user.Email,
+			"name":       user.Name,
+			"created_at": user.CreatedAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := strings.TrimSpace(util.Clean(out[i]["created_at"]))
+		right := strings.TrimSpace(util.Clean(out[j]["created_at"]))
+		if left != right {
+			return left > right
+		}
+		return strings.TrimSpace(util.Clean(out[i]["email"])) < strings.TrimSpace(util.Clean(out[j]["email"]))
+	})
+	return out
+}
+
 func (s *EmailBillingService) userByIdentityLocked(identity Identity) *billingUser {
 	if identity.Role != AuthRoleUser {
 		return nil
@@ -1455,14 +2001,20 @@ func (s *EmailBillingService) newOutTradeNoLocked() string {
 
 func (s *EmailBillingService) newPendingOrderLocked(user *billingUser, amountCents int, payType, provider string) *billingOrder {
 	now := util.NowISO()
+	bonusCents := 0
+	if user != nil && user.AgencyEnabled && user.AgencyDiscountBP > 0 {
+		bonusCents = amountCents * user.AgencyDiscountBP / 10000
+	}
 	return &billingOrder{
 		ID:          "ord_" + util.NewHex(18),
 		OutTradeNo:  s.newOutTradeNoLocked(),
 		Provider:    strings.TrimSpace(provider),
+		Kind:        BillingOrderKindRecharge,
 		UserID:      user.ID,
 		UserEmail:   user.Email,
 		PayType:     strings.ToLower(strings.TrimSpace(payType)),
 		AmountCents: amountCents,
+		BonusCents:  bonusCents,
 		Status:      BillingOrderStatusPending,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -1516,6 +2068,13 @@ func normalizeBillingUser(raw map[string]any) *billingUser {
 		BalanceCents:       maxBillingInt(0, util.ToInt(raw["balance_cents"], 0)),
 		TotalRechargeCents: maxBillingInt(0, util.ToInt(raw["total_recharge_cents"], 0)),
 		TotalConsumeCents:  maxBillingInt(0, util.ToInt(raw["total_consume_cents"], 0)),
+		AgencyTier:         normalizeAgencyTier(raw["agency_tier"]),
+		AgencyEnabled:      util.ToBool(raw["agency_enabled"]),
+		AgencyCommissionBP: normalizeAgencyBasisPoint(raw["agency_commission_bp"]),
+		AgencyDiscountBP:   normalizeAgencyBasisPoint(raw["agency_discount_bp"]),
+		AgencyJoinedAt:     util.Clean(raw["agency_joined_at"]),
+		RegisterIP:         strings.TrimSpace(util.Clean(raw["register_ip"])),
+		RegisterDeviceID:   strings.TrimSpace(util.Clean(raw["register_device_id"])),
 		CreatedAt:          firstNonEmpty(util.Clean(raw["created_at"]), util.NowISO()),
 		UpdatedAt:          firstNonEmpty(util.Clean(raw["updated_at"]), util.Clean(raw["created_at"]), util.NowISO()),
 		LastLoginAt:        util.Clean(raw["last_login_at"]),
@@ -1536,6 +2095,13 @@ func billingUserToMap(user *billingUser) map[string]any {
 		"balance_cents":        user.BalanceCents,
 		"total_recharge_cents": user.TotalRechargeCents,
 		"total_consume_cents":  user.TotalConsumeCents,
+		"agency_tier":          user.AgencyTier,
+		"agency_enabled":       user.AgencyEnabled,
+		"agency_commission_bp": user.AgencyCommissionBP,
+		"agency_discount_bp":   user.AgencyDiscountBP,
+		"agency_joined_at":     user.AgencyJoinedAt,
+		"register_ip":          user.RegisterIP,
+		"register_device_id":   user.RegisterDeviceID,
 		"created_at":           user.CreatedAt,
 		"updated_at":           user.UpdatedAt,
 		"last_login_at":        user.LastLoginAt,
@@ -1559,9 +2125,49 @@ func publicBillingUser(user *billingUser) map[string]any {
 		"balance_cents":        user.BalanceCents,
 		"total_recharge_cents": user.TotalRechargeCents,
 		"total_consume_cents":  user.TotalConsumeCents,
+		"agency_tier":          user.AgencyTier,
+		"agency_enabled":       user.AgencyEnabled,
+		"agency_commission_bp": user.AgencyCommissionBP,
+		"agency_discount_bp":   user.AgencyDiscountBP,
+		"agency_joined_at":     user.AgencyJoinedAt,
 		"created_at":           user.CreatedAt,
 		"updated_at":           user.UpdatedAt,
 		"last_login_at":        user.LastLoginAt,
+	}
+}
+
+func normalizeAgencyTier(value any) string {
+	switch strings.ToLower(strings.TrimSpace(util.Clean(value))) {
+	case AgencyTierBasic:
+		return AgencyTierBasic
+	case AgencyTierPro:
+		return AgencyTierPro
+	case AgencyTierPremium:
+		return AgencyTierPremium
+	default:
+		return ""
+	}
+}
+
+func normalizeAgencyBasisPoint(value any) int {
+	bp := util.ToInt(value, 0)
+	if bp < 0 {
+		return 0
+	}
+	if bp > 10000 {
+		return 10000
+	}
+	return bp
+}
+
+func normalizeBillingOrderKind(value any) string {
+	switch strings.ToLower(strings.TrimSpace(util.Clean(value))) {
+	case BillingOrderKindAgencyJoin:
+		return BillingOrderKindAgencyJoin
+	case BillingOrderKindAgencyUpgrade:
+		return BillingOrderKindAgencyUpgrade
+	default:
+		return BillingOrderKindRecharge
 	}
 }
 
@@ -1659,10 +2265,14 @@ func normalizeBillingOrder(raw map[string]any) *billingOrder {
 		OutTradeNo:  outTradeNo,
 		TradeNo:     strings.TrimSpace(util.Clean(raw["trade_no"])),
 		Provider:    firstNonEmpty(strings.TrimSpace(util.Clean(raw["provider"])), BillingProviderYiPay),
+		Kind:        normalizeBillingOrderKind(raw["order_kind"]),
 		UserID:      userID,
 		UserEmail:   strings.TrimSpace(util.Clean(raw["user_email"])),
 		PayType:     strings.TrimSpace(util.Clean(raw["pay_type"])),
 		AmountCents: maxBillingInt(0, util.ToInt(raw["amount_cents"], 0)),
+		BonusCents:  maxBillingInt(0, util.ToInt(raw["bonus_cents"], 0)),
+		AgencyTier:  normalizeAgencyTier(raw["agency_tier"]),
+		Note:        strings.TrimSpace(util.Clean(raw["note"])),
 		Status:      status,
 		CreatedAt:   firstNonEmpty(strings.TrimSpace(util.Clean(raw["created_at"])), util.NowISO()),
 		UpdatedAt:   firstNonEmpty(strings.TrimSpace(util.Clean(raw["updated_at"])), util.Clean(raw["created_at"]), util.NowISO()),
@@ -1676,10 +2286,14 @@ func billingOrderToMap(order *billingOrder) map[string]any {
 		"out_trade_no": order.OutTradeNo,
 		"trade_no":     order.TradeNo,
 		"provider":     order.Provider,
+		"order_kind":   normalizeBillingOrderKind(order.Kind),
 		"user_id":      order.UserID,
 		"user_email":   order.UserEmail,
 		"pay_type":     order.PayType,
 		"amount_cents": order.AmountCents,
+		"bonus_cents":  order.BonusCents,
+		"agency_tier":  normalizeAgencyTier(order.AgencyTier),
+		"note":         strings.TrimSpace(order.Note),
 		"status":       order.Status,
 		"created_at":   order.CreatedAt,
 		"updated_at":   order.UpdatedAt,
@@ -1693,14 +2307,80 @@ func publicBillingOrder(order *billingOrder) map[string]any {
 		"out_trade_no": order.OutTradeNo,
 		"trade_no":     order.TradeNo,
 		"provider":     order.Provider,
+		"order_kind":   normalizeBillingOrderKind(order.Kind),
 		"pay_type":     order.PayType,
 		"amount_cents": order.AmountCents,
 		"amount_yuan":  centsToYuan(order.AmountCents),
+		"bonus_cents":  order.BonusCents,
+		"bonus_yuan":   centsToYuan(order.BonusCents),
+		"credit_cents": order.AmountCents + maxBillingInt(0, order.BonusCents),
+		"credit_yuan":  centsToYuan(order.AmountCents + maxBillingInt(0, order.BonusCents)),
+		"agency_tier":  normalizeAgencyTier(order.AgencyTier),
+		"note":         strings.TrimSpace(order.Note),
 		"status":       order.Status,
 		"created_at":   order.CreatedAt,
 		"updated_at":   order.UpdatedAt,
 		"paid_at":      order.PaidAt,
 	}
+}
+
+func adminBillingOrder(order *billingOrder) map[string]any {
+	item := publicBillingOrder(order)
+	item["user_id"] = order.UserID
+	item["user_email"] = order.UserEmail
+	return item
+}
+
+func parseBillingTimestamp(value string) time.Time {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return time.Time{}
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, text); err == nil {
+		return parsed
+	}
+	if parsed, err := time.Parse(time.RFC3339, text); err == nil {
+		return parsed
+	}
+	if parsed, err := time.ParseInLocation("2006-01-02 15:04:05", text, time.UTC); err == nil {
+		return parsed
+	}
+	return time.Time{}
+}
+
+func normalizeRedeemExpiresAt(value string) (string, error) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return "", nil
+	}
+	parseLayouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+	}
+	var parsed time.Time
+	for _, layout := range parseLayouts {
+		var t time.Time
+		var err error
+		if layout == time.RFC3339Nano || layout == time.RFC3339 {
+			t, err = time.Parse(layout, text)
+		} else {
+			t, err = time.ParseInLocation(layout, text, billingBeijingLocation)
+		}
+		if err == nil {
+			parsed = t
+			break
+		}
+	}
+	if parsed.IsZero() {
+		return "", fmt.Errorf("expires_at 时间格式无效")
+	}
+	if time.Now().UTC().After(parsed.UTC()) {
+		return "", fmt.Errorf("过期时间必须晚于当前时间")
+	}
+	return parsed.UTC().Format(time.RFC3339Nano), nil
 }
 
 func normalizeEmail(email string) (string, error) {
@@ -1773,15 +2453,6 @@ func centsToYuan(value int) string {
 		value = 0
 	}
 	return fmt.Sprintf("%.2f", float64(value)/100)
-}
-
-func centsToYuanSigned(value int) string {
-	sign := ""
-	if value < 0 {
-		sign = "-"
-		value = -value
-	}
-	return sign + fmt.Sprintf("%.2f", float64(value)/100)
 }
 
 func yuanToCents(text string) (int, error) {
@@ -1875,4 +2546,11 @@ func maxBillingInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func absBillingInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }

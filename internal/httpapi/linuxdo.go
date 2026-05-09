@@ -55,7 +55,20 @@ func (a *App) handleAuthProviders(w http.ResponseWriter, r *http.Request) {
 	}
 	util.WriteJSON(w, http.StatusOK, map[string]any{
 		"linuxdo": map[string]any{
-			"enabled": a.config.LinuxDoOAuth().Ready(),
+			"enabled": false,
+		},
+		"registration": map[string]any{
+			"enabled": a.config.RegistrationEnabled(),
+		},
+		"email_verification": map[string]any{
+			"enabled": a.emailVerify != nil && a.emailVerify.Enabled(),
+		},
+		"key_login": map[string]any{
+			"enabled": true,
+		},
+		"turnstile": map[string]any{
+			"enabled":  a.config.CFTurnstileEnabled(),
+			"site_key": a.config.CFTurnstileSiteKey(),
 		},
 	})
 }
@@ -182,6 +195,7 @@ func (a *App) handleLinuxDoOAuthCallback(w http.ResponseWriter, r *http.Request)
 	fragment.Set("name", userInfo.Username)
 	fragment.Set("version", version.Get())
 	fragment.Set("redirect", redirectTo)
+	setAuthSessionCookie(w, r, rawSessionKey)
 	redirectWithFragment(w, r, frontendCallback, fragment)
 }
 

@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { getVerifiedAuthSession } from "@/lib/session";
-import { getDefaultRouteForRole } from "@/store/auth";
+import { getDefaultRouteForSession } from "@/store/auth";
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -17,7 +17,7 @@ export default function HomePage() {
       if (!active) {
         return;
       }
-      navigate(session ? getDefaultRouteForRole(session.role) : "/login", { replace: true });
+      navigate(session ? getDefaultRouteForSession(session) : "/login", { replace: true });
     };
 
     void redirect();

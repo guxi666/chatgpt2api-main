@@ -111,15 +111,264 @@ func userKeyScope(identity service.Identity) (service.AuthKeyFilter, service.Aut
 	if identity.Role == service.AuthRoleAdmin {
 		return filter, service.AuthOwner{}, true
 	}
-	if identity.Role != service.AuthRoleUser || identity.Provider != service.AuthProviderLinuxDo || identity.OwnerID == "" {
+	if identity.Role != service.AuthRoleUser || identity.OwnerID == "" {
 		return service.AuthKeyFilter{}, service.AuthOwner{}, false
 	}
 	filter.OwnerID = identity.OwnerID
 	return filter, service.AuthOwner{ID: identity.OwnerID, Name: identity.Name, Provider: identity.Provider}, true
 }
 
+func (a *App) handleProfile(w http.ResponseWriter, r *http.Request) {
+	identity, ok := a.requireIdentity(w, r, "")
+	if !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		a.writeLoginResponse(w, identity, "")
+	case http.MethodPost:
+		body, err := readJSONMap(r)
+		if err != nil {
+			util.WriteError(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		updated, err := a.auth.UpdateProfileName(identity, util.Clean(body["name"]))
+		if err != nil {
+			util.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		a.writeLoginResponse(w, *updated, "")
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *App) handleProfilePassword(w http.ResponseWriter, r *http.Request) {
+	identity, ok := a.requireIdentity(w, r, "")
+	if !ok {
+		return
+	}
+	body, err := readJSONMap(r)
+	if err != nil {
+		util.WriteError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	if err := a.auth.ChangeProfilePassword(identity, util.Clean(body["current_password"]), util.Clean(body["new_password"])); err != nil {
+		util.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	util.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *App) handleProfileAPIKey(w http.ResponseWriter, r *http.Request) {
+	identity, ok := a.requireIdentity(w, r, "")
+	if !ok {
+		return
+	}
+	filter, ok := profileAPIKeyFilter(identity)
+	if !ok {
+		util.WriteError(w, http.StatusForbidden, "profile API key requires a bound user account")
+		return
+	}
+	base := "/api/profile/api-key"
+	if r.URL.Path == base {
+		switch r.Method {
+		case http.MethodGet:
+			util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.auth.ListPersonalAPIKey(identity)})
+		case http.MethodPost:
+			body, _ := readJSONMap(r)
+			item, raw, err := a.auth.UpsertPersonalAPIKey(identity, util.Clean(body["name"]))
+			if err != nil {
+				util.WriteError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			util.WriteJSON(w, http.StatusOK, map[string]any{"item": item, "key": raw, "items": a.auth.ListPersonalAPIKey(identity)})
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
+	parts := splitPath(r.URL.Path)
+	if len(parts) < 4 || parts[0] != "api" || parts[1] != "profile" || parts[2] != "api-key" {
+		http.NotFound(w, r)
+		return
+	}
+	keyID := parts[3]
+	if len(parts) == 5 && parts[4] == "key" {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		key, found := a.auth.RevealKey(keyID, filter)
+		if !found {
+			util.WriteError(w, http.StatusNotFound, "profile API key not found")
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, map[string]any{"key": key})
+		return
+	}
+	if len(parts) != 4 {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodPost:
+		body, _ := readJSONMap(r)
+		updates := map[string]any{}
+		if value, ok := body["name"]; ok {
+			updates["name"] = value
+		}
+		if value, ok := body["enabled"]; ok {
+			updates["enabled"] = value
+		}
+		if len(updates) == 0 {
+			util.WriteError(w, http.StatusBadRequest, "no updates provided")
+			return
+		}
+		item := a.auth.UpdateKey(keyID, updates, filter)
+		if item == nil {
+			util.WriteError(w, http.StatusNotFound, "profile API key not found")
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, map[string]any{"item": item, "items": a.auth.ListPersonalAPIKey(identity)})
+	case http.MethodDelete:
+		if !a.auth.DeleteKey(keyID, filter) {
+			util.WriteError(w, http.StatusNotFound, "profile API key not found")
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.auth.ListPersonalAPIKey(identity)})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func profileAPIKeyFilter(identity service.Identity) (service.AuthKeyFilter, bool) {
+	role := identity.Role
+	if role != service.AuthRoleAdmin && role != service.AuthRoleUser {
+		return service.AuthKeyFilter{}, false
+	}
+	ownerID := util.Clean(identity.OwnerID)
+	if ownerID == "" {
+		return service.AuthKeyFilter{}, false
+	}
+	return service.AuthKeyFilter{Role: role, Kind: service.AuthKindAPIKey, OwnerID: ownerID}, true
+}
+
+func (a *App) handleProfilePromptFavorites(w http.ResponseWriter, r *http.Request) {
+	identity, ok := a.requireIdentity(w, r, "")
+	if !ok {
+		return
+	}
+	ownerID := util.Clean(identity.OwnerID)
+	if ownerID == "" {
+		util.WriteError(w, http.StatusForbidden, "prompt favorites require a bound user account")
+		return
+	}
+
+	base := "/api/profile/prompt-favorites"
+	if r.URL.Path == base {
+		switch r.Method {
+		case http.MethodGet:
+			util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.prompts.List(ownerID)})
+		case http.MethodPost:
+			body, err := readJSONMap(r)
+			if err != nil {
+				util.WriteError(w, http.StatusBadRequest, "invalid json body")
+				return
+			}
+			item, err := a.prompts.Upsert(ownerID, body)
+			if err != nil {
+				util.WriteError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			util.WriteJSON(w, http.StatusOK, map[string]any{"item": item, "items": a.prompts.List(ownerID)})
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
+	parts := splitPath(r.URL.Path)
+	if len(parts) != 4 || parts[0] != "api" || parts[1] != "profile" || parts[2] != "prompt-favorites" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodDelete {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if !a.prompts.Delete(ownerID, parts[3]) {
+		util.WriteError(w, http.StatusNotFound, "prompt favorite not found")
+		return
+	}
+	util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.prompts.List(ownerID)})
+}
+
+func (a *App) handleAdminRoles(w http.ResponseWriter, r *http.Request) {
+	if _, ok := a.requireIdentity(w, r, ""); !ok {
+		return
+	}
+	base := "/api/admin/roles"
+	if r.URL.Path == base {
+		switch r.Method {
+		case http.MethodGet:
+			util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.auth.ListRoles()})
+		case http.MethodPost:
+			body, _ := readJSONMap(r)
+			item, err := a.auth.CreateRole(body)
+			if err != nil {
+				util.WriteError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			util.WriteJSON(w, http.StatusOK, map[string]any{"item": item, "items": a.auth.ListRoles()})
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
+	parts := splitPath(r.URL.Path)
+	if len(parts) != 4 || parts[0] != "api" || parts[1] != "admin" || parts[2] != "roles" {
+		http.NotFound(w, r)
+		return
+	}
+	roleID := parts[3]
+	switch r.Method {
+	case http.MethodPost:
+		body, _ := readJSONMap(r)
+		item, err := a.auth.UpdateRole(roleID, body)
+		if err != nil {
+			status := http.StatusBadRequest
+			if err.Error() == "role not found" {
+				status = http.StatusNotFound
+			}
+			util.WriteError(w, status, err.Error())
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, map[string]any{"item": item, "items": a.auth.ListRoles()})
+	case http.MethodDelete:
+		deleted, err := a.auth.DeleteRole(roleID)
+		if err != nil {
+			status := http.StatusBadRequest
+			if err.Error() == "role is assigned to users" {
+				status = http.StatusConflict
+			}
+			util.WriteError(w, status, err.Error())
+			return
+		}
+		if !deleted {
+			util.WriteError(w, http.StatusNotFound, "role not found")
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.auth.ListRoles()})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
 func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
-	if _, ok := a.requireAdmin(w, r); !ok {
+	if _, ok := a.requireIdentity(w, r, ""); !ok {
 		return
 	}
 	base := "/api/admin/users"
@@ -128,18 +377,40 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		case http.MethodGet:
 			util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.managedUsers()})
 		case http.MethodPost:
-			body, _ := readJSONMap(r)
-			apiKey, raw, err := a.auth.CreateAPIKey(service.AuthRoleUser, util.Clean(body["name"]), service.AuthOwner{})
+			body, err := readJSONMap(r)
+			if err != nil {
+				util.WriteError(w, http.StatusBadRequest, "invalid json body")
+				return
+			}
+			enabled := true
+			if value, ok := body["enabled"]; ok {
+				enabled = util.ToBool(value)
+			}
+			item, err := a.auth.CreatePasswordUser(
+				util.Clean(body["username"]),
+				util.Clean(body["password"]),
+				util.Clean(body["name"]),
+				util.Clean(body["role_id"]),
+				enabled,
+			)
 			if err != nil {
 				util.WriteError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			userID := util.Clean(apiKey["id"])
+			userID := util.Clean(item["id"])
 			if userID != "" {
-				a.billing.EnsureWalletUser(userID, util.Clean(apiKey["name"]), service.AuthProviderLocal)
+				a.billing.EnsureWalletUserWithEmail(
+					userID,
+					util.Clean(item["email"]),
+					util.Clean(item["name"]),
+					service.AuthProviderLocal,
+				)
 			}
 			items := a.managedUsers()
-			util.WriteJSON(w, http.StatusOK, map[string]any{"item": findManagedUser(items, util.Clean(apiKey["id"])), "api_key": apiKey, "key": raw, "items": items})
+			if current := findManagedUser(items, util.Clean(item["id"])); current != nil {
+				item = current
+			}
+			util.WriteJSON(w, http.StatusOK, map[string]any{"item": item, "items": items})
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
@@ -151,11 +422,7 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	userID, decodeErr := url.PathUnescape(parts[3])
-	if decodeErr != nil {
-		util.WriteError(w, http.StatusBadRequest, "invalid user id")
-		return
-	}
+	userID := parts[3]
 	if len(parts) == 5 && parts[4] == "key" {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -223,6 +490,13 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		if value, ok := body["enabled"]; ok {
 			updates["enabled"] = value
 		}
+		if value, ok := body["role_id"]; ok {
+			if roleID := util.Clean(value); roleID != "" && !a.auth.RoleExists(roleID) {
+				util.WriteError(w, http.StatusBadRequest, "role not found")
+				return
+			}
+			updates["role_id"] = value
+		}
 		if len(updates) == 0 {
 			util.WriteError(w, http.StatusBadRequest, "no updates provided")
 			return
@@ -231,6 +505,11 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		if item == nil {
 			util.WriteError(w, http.StatusNotFound, "user not found")
 			return
+		}
+		if _, hasRoleID := updates["role_id"]; hasRoleID {
+			if !isAgencyRoleID(a.auth.ListRoles(), util.Clean(item["role_id"])) {
+				_, _ = a.billing.DeactivateAgencyByUserID(userID)
+			}
 		}
 		items := a.managedUsers()
 		if current := findManagedUser(items, userID); current != nil {
@@ -260,8 +539,13 @@ func (a *App) managedUsers() []map[string]any {
 	stats := a.logs.UserUsageStats(14)
 	for _, item := range items {
 		userID := util.Clean(item["id"])
-		if util.Clean(item["provider"]) == service.AuthProviderLocal && userID != "" {
-			if wallet := a.billing.EnsureWalletUser(userID, util.Clean(item["name"]), service.AuthProviderLocal); wallet != nil {
+		if userID != "" && util.Clean(item["provider"]) == service.AuthProviderLocal {
+			if wallet := a.billing.EnsureWalletUserWithEmail(
+				userID,
+				util.Clean(item["email"]),
+				util.Clean(item["name"]),
+				service.AuthProviderLocal,
+			); wallet != nil {
 				billingUsers[userID] = wallet
 			}
 		}
@@ -273,6 +557,9 @@ func (a *App) managedUsers() []map[string]any {
 			item[key] = value
 		}
 		if billing, exists := billingUsers[userID]; exists {
+			if email := strings.TrimSpace(util.Clean(billing["email"])); email != "" {
+				item["email"] = email
+			}
 			item["balance_cents"] = util.ToInt(billing["balance_cents"], 0)
 			item["total_recharge_cents"] = util.ToInt(billing["total_recharge_cents"], 0)
 			item["total_consume_cents"] = util.ToInt(billing["total_consume_cents"], 0)
@@ -298,8 +585,26 @@ func findManagedUser(items []map[string]any, id string) map[string]any {
 	return nil
 }
 
+func isAgencyRoleID(roles []map[string]any, roleID string) bool {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" || roleID == service.AuthRoleAdmin || roleID == service.DefaultManagedRoleID {
+		return false
+	}
+	for _, role := range roles {
+		if strings.TrimSpace(util.Clean(role["id"])) != roleID {
+			continue
+		}
+		name := strings.TrimSpace(util.Clean(role["name"]))
+		if strings.Contains(name, "代理") {
+			return true
+		}
+		return false
+	}
+	return false
+}
+
 func (a *App) handleAdminBilling(w http.ResponseWriter, r *http.Request) {
-	if _, ok := a.requireAdmin(w, r); !ok {
+	if _, ok := a.requireIdentity(w, r, ""); !ok {
 		return
 	}
 	parts := splitPath(r.URL.Path)
@@ -445,6 +750,27 @@ func (a *App) handleAdminBilling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(parts) >= 4 && parts[3] == "orders" {
+		if len(parts) != 4 {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		limit := util.ToInt(r.URL.Query().Get("limit"), 0)
+		items, stats := a.billing.ListOrdersForAdmin(limit)
+		util.WriteJSON(w, http.StatusOK, map[string]any{
+			"items":  items,
+			"stats":  stats,
+			"limit":  limit,
+			"scope":  "all_time",
+			"source": "billing_orders",
+		})
+		return
+	}
+
 	http.NotFound(w, r)
 }
 
@@ -457,7 +783,7 @@ func (a *App) handlePublicAnnouncements(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *App) handleAdminAnnouncements(w http.ResponseWriter, r *http.Request) {
-	if _, ok := a.requireAdmin(w, r); !ok {
+	if _, ok := a.requireIdentity(w, r, ""); !ok {
 		return
 	}
 	base := "/api/admin/announcements"
@@ -517,12 +843,15 @@ func (a *App) handleAdminAnnouncements(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleAccounts(w http.ResponseWriter, r *http.Request) {
-	if _, ok := a.requireAdmin(w, r); !ok {
+	identity, ok := a.requireIdentity(w, r, "")
+	if !ok {
 		return
 	}
 	switch {
 	case r.URL.Path == "/api/accounts" && r.Method == http.MethodGet:
-		util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.accounts.ListAccounts()})
+		util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.accountItemsForIdentity(identity)})
+	case r.URL.Path == "/api/accounts/tokens" && r.Method == http.MethodGet:
+		util.WriteJSON(w, http.StatusOK, map[string]any{"tokens": a.accounts.ListTokens()})
 	case r.URL.Path == "/api/accounts" && r.Method == http.MethodPost:
 		body, _ := readJSONMap(r)
 		tokens := util.AsStringSlice(body["tokens"])
@@ -537,31 +866,60 @@ func (a *App) handleAccounts(w http.ResponseWriter, r *http.Request) {
 				result[key] = value
 			}
 		}
+		a.redactAccountPayloadForIdentity(identity, result)
 		util.WriteJSON(w, http.StatusOK, result)
 	case r.URL.Path == "/api/accounts" && r.Method == http.MethodDelete:
 		body, _ := readJSONMap(r)
 		tokens := util.AsStringSlice(body["tokens"])
+		accountIDs := util.AsStringSlice(body["account_ids"])
 		if len(tokens) == 0 {
-			util.WriteError(w, http.StatusBadRequest, "tokens is required")
+			tokens = a.accounts.ListTokensByIDs(accountIDs)
+		}
+		if len(tokens) == 0 {
+			if len(accountIDs) > 0 {
+				util.WriteError(w, http.StatusNotFound, "account not found")
+				return
+			}
+			util.WriteError(w, http.StatusBadRequest, "tokens or account_ids is required")
 			return
 		}
-		util.WriteJSON(w, http.StatusOK, a.accounts.DeleteAccounts(tokens))
+		result := a.accounts.DeleteAccounts(tokens)
+		a.redactAccountPayloadForIdentity(identity, result)
+		util.WriteJSON(w, http.StatusOK, result)
 	case r.URL.Path == "/api/accounts/refresh" && r.Method == http.MethodPost:
 		body, _ := readJSONMap(r)
 		tokens := util.AsStringSlice(body["access_tokens"])
-		if len(tokens) == 0 {
+		accountIDs := util.AsStringSlice(body["account_ids"])
+		if len(tokens) == 0 && len(accountIDs) > 0 {
+			tokens = a.accounts.ListTokensByIDs(accountIDs)
+		}
+		if len(tokens) == 0 && len(accountIDs) == 0 {
 			tokens = a.accounts.ListTokens()
 		}
 		if len(tokens) == 0 {
-			util.WriteError(w, http.StatusBadRequest, "access_tokens is required")
+			if len(accountIDs) > 0 {
+				util.WriteError(w, http.StatusNotFound, "account not found")
+				return
+			}
+			util.WriteError(w, http.StatusBadRequest, "access_tokens or account_ids is required")
 			return
 		}
-		util.WriteJSON(w, http.StatusOK, a.accounts.RefreshAccounts(r.Context(), tokens))
+		result := a.accounts.RefreshAccounts(r.Context(), tokens)
+		a.redactAccountPayloadForIdentity(identity, result)
+		util.WriteJSON(w, http.StatusOK, result)
 	case r.URL.Path == "/api/accounts/update" && r.Method == http.MethodPost:
 		body, _ := readJSONMap(r)
 		token := util.Clean(body["access_token"])
+		accountID := util.Clean(body["account_id"])
+		if token == "" && accountID != "" {
+			token = a.accounts.GetTokenByID(accountID)
+			if token == "" {
+				util.WriteError(w, http.StatusNotFound, "account not found")
+				return
+			}
+		}
 		if token == "" {
-			util.WriteError(w, http.StatusBadRequest, "access_token is required")
+			util.WriteError(w, http.StatusBadRequest, "access_token or account_id is required")
 			return
 		}
 		updates := map[string]any{}
@@ -579,14 +937,55 @@ func (a *App) handleAccounts(w http.ResponseWriter, r *http.Request) {
 			util.WriteError(w, http.StatusNotFound, "account not found")
 			return
 		}
-		util.WriteJSON(w, http.StatusOK, map[string]any{"item": item, "items": a.accounts.ListAccounts()})
+		result := map[string]any{"item": item, "items": a.accounts.ListAccounts()}
+		a.redactAccountPayloadForIdentity(identity, result)
+		util.WriteJSON(w, http.StatusOK, result)
 	default:
 		http.NotFound(w, r)
 	}
 }
 
+func (a *App) accountItemsForIdentity(identity service.Identity) []map[string]any {
+	items := a.accounts.ListAccounts()
+	if !a.identityCanAccessAPI(identity, http.MethodGet, "/api/accounts/tokens") {
+		redactAccountTokens(items)
+	}
+	return items
+}
+
+func (a *App) redactAccountPayloadForIdentity(identity service.Identity, payload map[string]any) {
+	if a.identityCanAccessAPI(identity, http.MethodGet, "/api/accounts/tokens") {
+		return
+	}
+	if item, ok := payload["item"].(map[string]any); ok {
+		redactAccountToken(item)
+	}
+	if items, ok := payload["items"].([]map[string]any); ok {
+		redactAccountTokens(items)
+	}
+	if errors, ok := payload["errors"].([]map[string]string); ok {
+		for _, item := range errors {
+			token := item["access_token"]
+			delete(item, "access_token")
+			if token != "" {
+				item["account_id"] = util.SHA1Short(token, 16)
+			}
+		}
+	}
+}
+
+func redactAccountTokens(items []map[string]any) {
+	for _, item := range items {
+		redactAccountToken(item)
+	}
+}
+
+func redactAccountToken(item map[string]any) {
+	delete(item, "access_token")
+}
+
 func (a *App) handleCPA(w http.ResponseWriter, r *http.Request) {
-	if _, ok := a.requireAdmin(w, r); !ok {
+	if _, ok := a.requireIdentity(w, r, ""); !ok {
 		return
 	}
 	parts := splitPath(r.URL.Path)
@@ -667,7 +1066,7 @@ func (a *App) handleCPA(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleSub2API(w http.ResponseWriter, r *http.Request) {
-	if _, ok := a.requireAdmin(w, r); !ok {
+	if _, ok := a.requireIdentity(w, r, ""); !ok {
 		return
 	}
 	parts := splitPath(r.URL.Path)
@@ -758,7 +1157,7 @@ func (a *App) handleSub2API(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-func (a *App) handleImageTasks(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleCreationTasks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 	identity, ok := a.requireIdentity(w, r, "")
@@ -766,11 +1165,11 @@ func (a *App) handleImageTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := splitPath(r.URL.Path)
-	if r.URL.Path == "/api/image-tasks" && r.Method == http.MethodGet {
+	if r.URL.Path == "/api/creation-tasks" && r.Method == http.MethodGet {
 		util.WriteJSON(w, http.StatusOK, a.tasks.ListTasks(identity, util.ParseCommaList(r.URL.Query().Get("ids"))))
 		return
 	}
-	if len(parts) == 4 && parts[0] == "api" && parts[1] == "image-tasks" && parts[3] == "cancel" {
+	if len(parts) == 4 && parts[0] == "api" && parts[1] == "creation-tasks" && parts[3] == "cancel" {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -783,31 +1182,66 @@ func (a *App) handleImageTasks(w http.ResponseWriter, r *http.Request) {
 		util.WriteJSON(w, http.StatusOK, task)
 		return
 	}
-	if r.URL.Path == "/api/image-tasks/generations" && r.Method == http.MethodPost {
-		if !a.ensureImageBillingCredit(w, identity) {
+	if r.URL.Path == "/api/creation-tasks/image-generations" && r.Method == http.MethodPost {
+		body, _ := readJSONMap(r)
+		normalizeImageRequestPayload(body)
+		if !a.validateImageSingleCount(w, util.ToInt(body["n"], 1)) {
 			return
 		}
-		body, _ := readJSONMap(r)
-		task, err := a.tasks.SubmitGeneration(r.Context(), identity, util.Clean(body["client_task_id"]), util.Clean(body["prompt"]), firstNonEmpty(util.Clean(body["model"]), util.ImageModelAuto), util.Clean(body["size"]), util.Clean(body["quality"]), a.resolveImageBaseURL(r), util.ToInt(body["n"], 1), body["messages"])
+		if !a.ensureImageBillingCredit(w, identity, body) {
+			return
+		}
+		task, err := a.tasks.SubmitGenerationWithOptions(r.Context(), identity, util.Clean(body["client_task_id"]), util.Clean(body["prompt"]), firstNonEmpty(util.Clean(body["model"]), util.ImageModelAuto), util.Clean(body["size"]), util.Clean(body["quality"]), a.resolveImageBaseURL(r), util.ToInt(body["n"], 1), body["messages"], imageTaskRequestMetadata(body), imageOutputOptionsFromBody(body), util.Clean(body["visibility"]))
 		if err != nil {
-			writeImageTaskSubmitError(w, err)
+			writeCreationTaskSubmitError(w, err)
 			return
 		}
 		util.WriteJSON(w, http.StatusOK, task)
 		return
 	}
-	if r.URL.Path == "/api/image-tasks/edits" && r.Method == http.MethodPost {
-		if !a.ensureImageBillingCredit(w, identity) {
+	if r.URL.Path == "/api/creation-tasks/response-image-generations" && r.Method == http.MethodPost {
+		body, _ := readJSONMap(r)
+		normalizeImageRequestPayload(body)
+		if !a.validateImageSingleCount(w, util.ToInt(body["n"], 1)) {
 			return
 		}
+		if !a.ensureImageBillingCredit(w, identity, body) {
+			return
+		}
+		task, err := a.tasks.SubmitResponseImageGenerationWithOptions(r.Context(), identity, util.Clean(body["client_task_id"]), util.Clean(body["prompt"]), firstNonEmpty(util.Clean(body["model"]), util.ImageModelAuto), util.Clean(body["size"]), util.Clean(body["quality"]), a.resolveImageBaseURL(r), body["images"], util.ToInt(body["n"], 1), body["messages"], imageTaskRequestMetadata(body), imageOutputOptionsFromBody(body), util.Clean(body["visibility"]))
+		if err != nil {
+			writeCreationTaskSubmitError(w, err)
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, task)
+		return
+	}
+	if r.URL.Path == "/api/creation-tasks/chat-completions" && r.Method == http.MethodPost {
+		body, _ := readJSONMap(r)
+		task, err := a.tasks.SubmitChat(r.Context(), identity, util.Clean(body["client_task_id"]), util.Clean(body["prompt"]), firstNonEmpty(util.Clean(body["model"]), util.ImageModelAuto), body["messages"])
+		if err != nil {
+			writeCreationTaskSubmitError(w, err)
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, task)
+		return
+	}
+	if r.URL.Path == "/api/creation-tasks/image-edits" && r.Method == http.MethodPost {
 		body, images, err := readMultipartImageBody(r)
 		if err != nil {
 			util.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		task, err := a.tasks.SubmitEdit(r.Context(), identity, util.Clean(body["client_task_id"]), util.Clean(body["prompt"]), firstNonEmpty(util.Clean(body["model"]), util.ImageModelAuto), util.Clean(body["size"]), util.Clean(body["quality"]), a.resolveImageBaseURL(r), images, util.ToInt(body["n"], 1), body["messages"])
+		normalizeImageRequestPayload(body)
+		if !a.validateImageSingleCount(w, util.ToInt(body["n"], 1)) {
+			return
+		}
+		if !a.ensureImageBillingCredit(w, identity, body) {
+			return
+		}
+		task, err := a.tasks.SubmitEditWithOptions(r.Context(), identity, util.Clean(body["client_task_id"]), util.Clean(body["prompt"]), firstNonEmpty(util.Clean(body["model"]), util.ImageModelAuto), util.Clean(body["size"]), util.Clean(body["quality"]), a.resolveImageBaseURL(r), images, util.ToInt(body["n"], 1), body["messages"], imageTaskRequestMetadata(body), imageOutputOptionsFromBody(body), util.Clean(body["visibility"]))
 		if err != nil {
-			writeImageTaskSubmitError(w, err)
+			writeCreationTaskSubmitError(w, err)
 			return
 		}
 		util.WriteJSON(w, http.StatusOK, task)
@@ -816,7 +1250,45 @@ func (a *App) handleImageTasks(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-func writeImageTaskSubmitError(w http.ResponseWriter, err error) {
+func imageTaskRequestMetadata(body map[string]any) map[string]any {
+	size := util.Clean(body["size"])
+	metadata := map[string]any{}
+	if preset := service.NormalizeImageResolutionPreset(firstNonEmpty(util.Clean(body["resolution"]), util.Clean(body["image_resolution"]))); preset != "" {
+		metadata["resolution"] = preset
+		metadata["image_resolution"] = preset
+	}
+	if size != "" {
+		metadata["requested_size"] = size
+	}
+	return metadata
+}
+
+func imageOutputOptionsFromBody(body map[string]any) service.ImageOutputOptions {
+	format := service.NormalizeImageOutputFormat(util.Clean(body["output_format"]))
+	options := service.ImageOutputOptions{Format: format}
+	if format != "png" {
+		if compression, ok := imageOutputCompressionFromBody(body["output_compression"]); ok {
+			options.Compression = &compression
+		}
+	}
+	return options
+}
+
+func imageOutputCompressionFromBody(value any) (int, bool) {
+	if value == nil || strings.TrimSpace(util.Clean(value)) == "" {
+		return 0, false
+	}
+	compression := util.ToInt(value, -1)
+	if compression < 0 {
+		return 0, false
+	}
+	if compression > 100 {
+		compression = 100
+	}
+	return compression, true
+}
+
+func writeCreationTaskSubmitError(w http.ResponseWriter, err error) {
 	var limitErr service.ImageTaskLimitError
 	if errors.As(err, &limitErr) {
 		util.WriteError(w, http.StatusTooManyRequests, limitErr.Error())
@@ -834,7 +1306,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		a.streamRegisterEvents(w, r)
 		return
 	}
-	if _, ok := a.requireAdmin(w, r); !ok {
+	if _, ok := a.requireIdentity(w, r, ""); !ok {
 		return
 	}
 	switch {

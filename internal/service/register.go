@@ -1049,6 +1049,9 @@ func normalizeRegisterMailConfig(raw map[string]any) map[string]any {
 		item := util.CopyMap(provider)
 		item["type"] = util.Clean(item["type"])
 		item["enable"] = util.ToBool(item["enable"])
+		if util.Clean(item["type"]) == "cloudflare_temp_email" {
+			item["random_subdomain"] = util.ToBool(item["random_subdomain"])
+		}
 		if item["domain"] != nil {
 			item["domain"] = util.AsStringSlice(item["domain"])
 		}

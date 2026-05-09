@@ -1,6 +1,6 @@
 "use client";
 
-import { login } from "@/lib/api";
+import { verifySession, type LoginResponse } from "@/lib/api";
 import {
   clearStoredAuthSession,
   getStoredAuthSession,
@@ -11,6 +11,28 @@ import {
 let cachedAuthSession: StoredAuthSession | null | undefined;
 let verifyAuthSessionPromise: Promise<StoredAuthSession | null> | null = null;
 let authSessionVersion = 0;
+export const AUTH_SESSION_CHANGE_EVENT = "chatgpt2api:auth-session-change";
+
+export function authSessionFromLoginResponse(data: LoginResponse, key: string): StoredAuthSession {
+  return {
+    key,
+    role: data.role,
+    roleId: data.role_id,
+    roleName: data.role_name,
+    subjectId: data.subject_id,
+    name: data.name,
+    provider: data.provider,
+    menuPaths: data.menu_paths || [],
+    apiPermissions: data.api_permissions || [],
+    menus: data.menus || [],
+  };
+}
+
+function emitAuthSessionChange() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(AUTH_SESSION_CHANGE_EVENT));
+  }
+}
 
 export function getCachedAuthSession() {
   return cachedAuthSession;
@@ -47,6 +69,7 @@ export async function setVerifiedAuthSession(session: StoredAuthSession) {
   cachedAuthSession = session;
   verifyAuthSessionPromise = null;
   await setStoredAuthSession(session);
+  emitAuthSessionChange();
 }
 
 export async function clearVerifiedAuthSession() {
@@ -54,6 +77,7 @@ export async function clearVerifiedAuthSession() {
   cachedAuthSession = null;
   verifyAuthSessionPromise = null;
   await clearStoredAuthSession();
+  emitAuthSessionChange();
 }
 
 async function verifyStoredAuthSession(): Promise<StoredAuthSession | null> {
@@ -63,15 +87,8 @@ async function verifyStoredAuthSession(): Promise<StoredAuthSession | null> {
   }
 
   try {
-    const data = await login(storedSession.key);
-    const verifiedSession: StoredAuthSession = {
-      key: storedSession.key,
-      role: data.role,
-      subjectId: data.subject_id,
-      name: data.name,
-      provider: data.provider,
-    };
-    return verifiedSession;
+    const data = await verifySession(storedSession.key);
+    return authSessionFromLoginResponse(data, storedSession.key);
   } catch {
     return null;
   }

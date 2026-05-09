@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import webConfig from "@/constants/common-env";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import type { RegisterConfig } from "@/lib/api";
-import { getStoredAuthKey } from "@/store/auth";
+import { getStoredSessionToken } from "@/store/auth";
 
 import { useSettingsStore } from "../settings/store";
 import { RegisterCard } from "./components/register-card";
@@ -26,7 +26,7 @@ function RegisterDataController() {
   useEffect(() => {
     let source: EventSource | null = null;
     let closed = false;
-    void getStoredAuthKey().then((token) => {
+    void getStoredSessionToken().then((token) => {
       if (closed || !token) return;
       const baseUrl = webConfig.apiUrl.replace(/\/$/, "");
       source = new EventSource(`${baseUrl}/api/register/events?token=${encodeURIComponent(token)}`);
@@ -48,7 +48,7 @@ function RegisterPageContent() {
     <>
       <RegisterDataController />
       <PageHeader eyebrow="Register" title="ChatGPT注册机" />
-      <section>
+      <section className="mt-5">
         <RegisterCard />
       </section>
     </>
@@ -56,9 +56,9 @@ function RegisterPageContent() {
 }
 
 export default function RegisterPage() {
-  const { isCheckingAuth, session } = useAuthGuard(["admin"]);
+  const { isCheckingAuth, session } = useAuthGuard(undefined, "/register");
 
-  if (isCheckingAuth || !session || session.role !== "admin") {
+  if (isCheckingAuth || !session) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
         <LoaderCircle className="size-5 animate-spin text-stone-400" />

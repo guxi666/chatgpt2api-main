@@ -343,6 +343,27 @@ func TestGetAvailableAccessTokenLimitsUnknownImageQuotaToOneInFlight(t *testing.
 	accounts.MarkImageResult("token-1", false)
 }
 
+func TestReserveNextCandidateTokenCanFilterPaidAccounts(t *testing.T) {
+	accounts := newTestAccountService(t)
+	accounts.AddAccounts([]string{"free-token", "plus-token"})
+	accounts.UpdateAccount("free-token", map[string]any{"status": "正常", "quota": 5, "type": "Free"})
+	accounts.UpdateAccount("plus-token", map[string]any{"status": "正常", "quota": 5, "type": "Plus"})
+
+	reservation, err := accounts.reserveNextCandidateToken(map[string]struct{}{}, IsPaidImageAccount)
+	if err != nil {
+		t.Fatalf("reserveNextCandidateToken() error = %v", err)
+	}
+	if reservation.token != "plus-token" {
+		t.Fatalf("reserved token = %q, want plus-token", reservation.token)
+	}
+	accounts.releaseImageReservation(reservation.token)
+
+	_, err = accounts.reserveNextCandidateToken(map[string]struct{}{"plus-token": struct{}{}}, IsPaidImageAccount)
+	if err == nil {
+		t.Fatal("reserveNextCandidateToken() error = nil, want no available paid token")
+	}
+}
+
 func TestApplyAccountErrorMessageDetectsImageStreamFailures(t *testing.T) {
 	accounts := newTestAccountService(t)
 	accounts.AddAccounts([]string{"token-invalid", "token-limited"})

@@ -15,8 +15,9 @@ function PopoverTrigger(props: React.ComponentProps<typeof PopoverPrimitive.Trig
 
 function PopoverContent({
   className,
+  children,
   align = "center",
-  sideOffset = 4,
+  sideOffset = 6,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content>) {
   return (
@@ -26,11 +27,13 @@ function PopoverContent({
         align={align}
         sideOffset={sideOffset}
         className={cn(
-          "z-50 rounded-2xl border border-white/80 bg-white p-3 text-stone-950 shadow-[0_20px_60px_-30px_rgba(15,23,42,0.35)] outline-none",
+          "z-50 rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-[0_20px_60px_-30px_rgba(15,23,42,0.35)] outline-none",
           className,
         )}
         {...props}
-      />
+      >
+        {children}
+      </PopoverPrimitive.Content>
     </PopoverPrimitive.Portal>
   );
 }

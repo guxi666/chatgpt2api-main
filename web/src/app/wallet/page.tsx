@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ExternalLink, Gift, LoaderCircle, RefreshCw, Wallet } from "lucide-react";
+import { ChevronDown, ChevronUp, ExternalLink, Gift, LoaderCircle, RefreshCw, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/page-header";
@@ -11,29 +11,58 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { createPayOrder, fetchPayOrders, fetchWallet, redeemWalletCode, type PayOrder, type PayType, type WalletInfo } from "@/lib/api";
+import {
+  createPayOrder,
+  fetchPayOrders,
+  fetchWallet,
+  redeemWalletCode,
+  type PayOrder,
+  type PayType,
+  type WalletInfo,
+} from "@/lib/api";
+import { parseDateTime } from "@/lib/datetime";
 import { useAuthGuard } from "@/lib/use-auth-guard";
+
+const PAY_ORDER_PENDING_TIMEOUT_MS = 30 * 60 * 1000;
 
 function centsToYuan(cents: number) {
   return (Math.max(0, cents) / 100).toFixed(2);
 }
 
-function orderStatusLabel(status: string) {
-  if (status === "paid") return { text: "成功", variant: "success" as const };
-  if (status === "failed") return { text: "失败", variant: "danger" as const };
+function formatDateTime(value?: string | null) {
+  const date = parseDateTime(value);
+  if (!date) {
+    return "-";
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  const second = String(date.getSeconds()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+function isPendingOrderTimeout(order: PayOrder, nowMs: number) {
+  if (order.status !== "pending") {
+    return false;
+  }
+  const createdAt = parseDateTime(order.created_at);
+  if (!createdAt) {
+    return false;
+  }
+  return nowMs - createdAt.getTime() >= PAY_ORDER_PENDING_TIMEOUT_MS;
+}
+
+function orderStatusLabel(order: PayOrder, nowMs: number) {
+  if (order.status === "paid") return { text: "已支付", variant: "success" as const };
+  if (order.status === "failed") return { text: "失败", variant: "danger" as const };
+  if (isPendingOrderTimeout(order, nowMs)) return { text: "已超时未支付", variant: "danger" as const };
   return { text: "待支付", variant: "warning" as const };
 }
 
-function payTypeLabel(type: string) {
+function payTypeLabel(type?: string) {
   switch (type) {
-    case "redeem_code":
-      return "卡密兑换";
-    case "admin_adjust":
-      return "后台调账";
-    case "register_bonus":
-      return "注册赠送";
-    case "invite_bonus":
-      return "邀请奖励";
     case "wxpay":
       return "微信";
     case "paypal":
@@ -42,6 +71,23 @@ function payTypeLabel(type: string) {
       return "USDT";
     default:
       return "支付宝";
+  }
+}
+
+function providerLabel(provider?: string) {
+  switch (provider) {
+    case "yipay":
+      return "易支付";
+    case "redeem_code":
+      return "卡密兑换";
+    case "admin_adjust":
+      return "管理员调整";
+    case "invite_bonus":
+      return "邀请奖励";
+    case "register_bonus":
+      return "注册赠送";
+    default:
+      return provider || "-";
   }
 }
 
@@ -56,6 +102,17 @@ function defaultPayType(channels: string[]): PayType {
   return "alipay";
 }
 
+function recordAmountText(item: PayOrder) {
+  const cents = Number(item.amount_cents || 0);
+  if (item.record_type === "transaction" && item.type === "consume") {
+    return `-￥${centsToYuan(Math.abs(cents))}`;
+  }
+  if (item.record_type === "transaction" && cents < 0) {
+    return `-￥${centsToYuan(Math.abs(cents))}`;
+  }
+  return `￥${item.amount_yuan || centsToYuan(Math.abs(cents))}`;
+}
+
 function WalletPageContent() {
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
   const [imagePriceCents, setImagePriceCents] = useState(8);
@@ -65,10 +122,11 @@ function WalletPageContent() {
   const [payType, setPayType] = useState<PayType>("alipay");
   const [payChannels, setPayChannels] = useState<string[]>([]);
   const [redeemCode, setRedeemCode] = useState("");
+  const [showInviteUsers, setShowInviteUsers] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedeeming, setIsRedeeming] = useState(false);
-  const [showInvitees, setShowInvitees] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const reload = useCallback(async () => {
     const [walletData, orderData] = await Promise.all([fetchWallet(), fetchPayOrders()]);
@@ -102,6 +160,15 @@ function WalletPageContent() {
     };
   }, [reload]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 10000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
   const handleCreateOrder = async () => {
     const normalizedAmount = amountYuan.trim();
     if (!normalizedAmount) {
@@ -121,7 +188,7 @@ function WalletPageContent() {
         pay_type: payType,
       });
       const createdOrder = data.order;
-      const payUrl = createdOrder.pay_url || "";
+      const payUrl = String(createdOrder.pay_url || "");
       setLatestOrder(createdOrder);
       if (payUrl) {
         window.open(payUrl, "_blank", "noopener,noreferrer");
@@ -158,7 +225,10 @@ function WalletPageContent() {
     }
   };
 
-  const pendingCount = useMemo(() => orders.filter((order) => order.status === "pending").length, [orders]);
+  const pendingCount = useMemo(
+    () => orders.filter((order) => order.status === "pending" && !isPendingOrderTimeout(order, nowMs)).length,
+    [nowMs, orders],
+  );
   const effectiveChannels = payChannels;
 
   return (
@@ -196,14 +266,14 @@ function WalletPageContent() {
         <Card className="rounded-[20px]">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">单次扣费</CardTitle>
-            <CardDescription>生图/对话消耗</CardDescription>
+            <CardDescription>每次生图消耗</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-semibold text-foreground">￥{centsToYuan(imagePriceCents)}</div>
-            <div className="mt-2 text-xs text-muted-foreground">文本对话每次固定消耗 ￥0.10</div>
           </CardContent>
         </Card>
       </div>
+
       <Card className="rounded-[20px]">
         <CardHeader>
           <CardTitle className="text-base">我的邀请码</CardTitle>
@@ -212,25 +282,26 @@ function WalletPageContent() {
         <CardContent className="flex flex-col gap-2 text-sm">
           <div className="font-mono text-foreground">{wallet?.invite_code || "-"}</div>
           <div className="text-muted-foreground">我的邀请人：{wallet?.invited_by || "无"}</div>
-          <div className="text-muted-foreground">已邀请注册：{wallet?.invitee_count ?? 0} 人</div>
-          <div>
-            <Button type="button" variant="outline" className="h-8 rounded-[10px] px-3 text-xs" onClick={() => setShowInvitees((current) => !current)}>
-              {showInvitees ? "收起邀请详情" : "查看邀请详情"}
-            </Button>
-          </div>
-          {showInvitees ? (
-            <div className="rounded-[12px] border border-border bg-muted/40 p-3">
-              {wallet?.invitees && wallet.invitees.length > 0 ? (
-                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  {wallet.invitees.map((item) => (
-                    <div key={item.id || item.email} className="flex items-center justify-between gap-3">
-                      <span className="font-mono text-foreground">{item.email || "-"}</span>
-                      <span>{item.created_at || "-"}</span>
+          <button
+            type="button"
+            className="mt-1 inline-flex w-fit items-center gap-1 text-primary hover:underline"
+            onClick={() => setShowInviteUsers((value) => !value)}
+          >
+            已邀请 {wallet?.invited_count || 0} 人 {showInviteUsers ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+          </button>
+          {showInviteUsers ? (
+            <div className="rounded-[12px] border border-border bg-muted/30 p-3">
+              {(wallet?.invited_users || []).length === 0 ? (
+                <div className="text-xs text-muted-foreground">暂无邀请记录</div>
+              ) : (
+                <div className="space-y-1.5 text-xs text-muted-foreground">
+                  {(wallet?.invited_users || []).map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-3">
+                      <span className="truncate">{item.email || item.name || item.id}</span>
+                      <span>{formatDateTime(item.created_at)}</span>
                     </div>
                   ))}
                 </div>
-              ) : (
-                <div className="text-xs text-muted-foreground">暂无被邀请用户</div>
               )}
             </div>
           ) : null}
@@ -315,7 +386,7 @@ function WalletPageContent() {
       <Card className="rounded-[20px]">
         <CardHeader>
           <CardTitle className="text-base">充值订单</CardTitle>
-          <CardDescription>最近 30 条（待支付 {pendingCount} 条）</CardDescription>
+          <CardDescription>最近记录（待支付 {pendingCount} 条）</CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -329,27 +400,30 @@ function WalletPageContent() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>订单号</TableHead>
+                    <TableHead>记录号</TableHead>
                     <TableHead>金额</TableHead>
-                    <TableHead>方式</TableHead>
+                    <TableHead>来源</TableHead>
                     <TableHead>状态</TableHead>
-                    <TableHead>说明</TableHead>
+                    <TableHead>备注</TableHead>
                     <TableHead>时间</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {orders.map((order) => {
-                    const status = orderStatusLabel(order.status);
+                    const status = orderStatusLabel(order, nowMs);
+                    const source = order.record_type === "transaction"
+                      ? providerLabel(order.provider)
+                      : payTypeLabel(order.pay_type);
                     return (
                       <TableRow key={order.id}>
-                        <TableCell className="font-mono text-xs">{order.out_trade_no}</TableCell>
-                        <TableCell>￥{order.amount_yuan || centsToYuan(order.amount_cents)}</TableCell>
-                        <TableCell>{payTypeLabel(order.pay_type)}</TableCell>
+                        <TableCell className="font-mono text-xs">{order.out_trade_no || order.id}</TableCell>
+                        <TableCell>{recordAmountText(order)}</TableCell>
+                        <TableCell>{source}</TableCell>
                         <TableCell>
                           <Badge variant={status.variant}>{status.text}</Badge>
                         </TableCell>
-                        <TableCell className="max-w-[280px] truncate text-muted-foreground">{order.note || "-"}</TableCell>
-                        <TableCell className="text-muted-foreground">{order.created_at || "-"}</TableCell>
+                        <TableCell className="text-muted-foreground">{order.note || "-"}</TableCell>
+                        <TableCell className="text-muted-foreground">{formatDateTime(order.created_at)}</TableCell>
                       </TableRow>
                     );
                   })}
@@ -364,7 +438,7 @@ function WalletPageContent() {
 }
 
 export default function WalletPage() {
-  const { isCheckingAuth, session } = useAuthGuard(["user"]);
+  const { isCheckingAuth, session } = useAuthGuard(undefined, "/wallet");
 
   if (isCheckingAuth || !session) {
     return (

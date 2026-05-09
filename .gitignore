@@ -1,13 +1,27 @@
-# Generated files
+﻿# Generated files
 build/
 dist/
 web_dist
 chatgpt2api.exe
+chatgpt2api
+chatgpt2api-linux
+chatgpt2api.container.current.backup
+.omx/
 
 .idea
 node_modules/
 data
+data.bak.*/
 edit
+
+web_dist_official/
+internal/web/dist/
+web/.npm-cache/
+web/.npm-cache-local/
+web/*.tgz
+web/*_pkg/
+
+.tmp_cookies.txt
 
 docker-compose-local.yml
 

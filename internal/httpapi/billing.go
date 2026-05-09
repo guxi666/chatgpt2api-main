@@ -3,15 +3,15 @@ package httpapi
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
+	"chatgpt2api/internal/protocol"
 	"chatgpt2api/internal/service"
 	"chatgpt2api/internal/util"
 	"chatgpt2api/internal/version"
 )
-
-const chatQuestionPriceCents = 10
 
 func (a *App) handleEmailRegister(w http.ResponseWriter, r *http.Request) {
 	body, err := readJSONMap(r)
@@ -40,6 +40,7 @@ func (a *App) handleEmailRegister(w http.ResponseWriter, r *http.Request) {
 		"user":            user,
 		"wallet":          walletFromUser(user),
 		"image_price":     a.config.ImagePriceCents(),
+		"image_prices":    a.imagePricesConfig(),
 		"allowed_domains": a.config.EmailAllowedDomains(),
 	})
 }
@@ -85,6 +86,7 @@ func (a *App) handleEmailLogin(w http.ResponseWriter, r *http.Request) {
 		"user":            user,
 		"wallet":          walletFromUser(user),
 		"image_price":     a.config.ImagePriceCents(),
+		"image_prices":    a.imagePricesConfig(),
 		"allowed_domains": a.config.EmailAllowedDomains(),
 	})
 }
@@ -106,6 +108,7 @@ func (a *App) handleWallet(w http.ResponseWriter, r *http.Request) {
 	util.WriteJSON(w, http.StatusOK, map[string]any{
 		"wallet":       wallet,
 		"image_price":  a.config.ImagePriceCents(),
+		"image_prices": a.imagePricesConfig(),
 		"pay_channels": a.availablePayChannels(),
 	})
 }
@@ -166,7 +169,7 @@ func (a *App) handlePayOrders(w http.ResponseWriter, r *http.Request) {
 			order    map[string]any
 			orderErr error
 		)
-		order, orderErr = a.billing.CreateYiPayOrder(identity, amountCents, payType, a.yiPayGatewayConfig(r))
+		order, orderErr = a.billing.CreateYiPayOrder(identity, amountCents, payType, a.yiPayGatewayConfigForPath(r, "/wallet"))
 		if orderErr != nil {
 			util.WriteError(w, http.StatusBadRequest, orderErr.Error())
 			return
@@ -188,9 +191,9 @@ func (a *App) handleYiPayNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	gateway := a.yiPayGatewayConfig(r)
-	ok, err := a.billing.HandleYiPayNotify(r.Form, gateway)
+	ok, notifyResult, err := a.billing.HandleYiPayNotify(r.Form, gateway)
 	if err != nil {
-		a.logs.Add(service.LogTypeAccount, "YiPay notify handle failed", map[string]any{
+		a.logs.Add("YiPay notify handle failed", map[string]any{
 			"status": "failed",
 			"error":  err.Error(),
 		})
@@ -203,46 +206,92 @@ func (a *App) handleYiPayNotify(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("fail"))
 		return
 	}
+	a.activateAgencyFromPayResult(notifyResult, "YiPay notify")
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte("success"))
 }
 
-func (a *App) ensureImageBillingCredit(w http.ResponseWriter, identity service.Identity) bool {
+func (a *App) handleYiPayReturn(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/wallet", http.StatusFound)
+		return
+	}
+	redirectPath := yipayReturnRedirectPath(r.Form.Get("redirect"))
+	verifyValues := cloneURLValuesWithoutKeys(r.Form, "redirect")
+	gateway := a.yiPayGatewayConfig(r)
+	ok, notifyResult, err := a.billing.HandleYiPayNotify(verifyValues, gateway)
+	if err != nil || !ok {
+		message := "invalid notify payload"
+		if err != nil {
+			message = err.Error()
+		}
+		a.logs.Add("YiPay return handle failed", map[string]any{
+			"status":   "failed",
+			"error":    message,
+			"redirect": redirectPath,
+		})
+		http.Redirect(w, r, redirectPath, http.StatusFound)
+		return
+	}
+	a.activateAgencyFromPayResult(notifyResult, "YiPay return")
+	http.Redirect(w, r, redirectPath, http.StatusFound)
+}
+
+func (a *App) activateAgencyFromPayResult(result map[string]any, source string) {
+	orderKind := strings.TrimSpace(util.Clean(result["order_kind"]))
+	if orderKind != service.BillingOrderKindAgencyJoin && orderKind != service.BillingOrderKindAgencyUpgrade {
+		return
+	}
+	tierKey := strings.TrimSpace(util.Clean(result["agency_tier"]))
+	userID := strings.TrimSpace(util.Clean(result["user_id"]))
+	tier, found := a.agencyTierByKey(tierKey)
+	if !found || userID == "" {
+		return
+	}
+	a.ensureAgencyTierRoles()
+	if _, activateErr := a.billing.ActivateAgencyByUserID(userID, service.AgencyTierBenefit{
+		Tier:         tier.Key,
+		CommissionBP: tier.CommissionBP,
+		DiscountBP:   tier.DiscountBP,
+	}, true); activateErr == nil {
+		if roleID, roleFound := a.agencyRoleIDByTier(tier.Key); roleFound {
+			_ = a.auth.UpdateUser(userID, map[string]any{"role_id": roleID})
+		}
+		return
+	}
+	a.logs.Add(source+" agency activation failed", map[string]any{
+		"status":  "failed",
+		"user_id": userID,
+		"tier":    tierKey,
+	})
+}
+
+func (a *App) ensureImageBillingCredit(w http.ResponseWriter, identity service.Identity, payload map[string]any) bool {
 	if !a.shouldBillImage(identity) {
 		return true
 	}
-	if err := a.billing.EnsureCanConsume(identity, a.config.ImagePriceCents()); err != nil {
+	if err := a.billing.EnsureCanConsume(identity, a.imageBillingAmountFromPayload(payload)); err != nil {
 		util.WriteError(w, http.StatusPaymentRequired, err.Error())
 		return false
 	}
 	return true
 }
 
-func (a *App) ensureChatBillingCredit(w http.ResponseWriter, identity service.Identity) bool {
-	if !a.shouldBillChatText(identity) {
-		return true
-	}
-	if _, err := a.billing.ConsumeImageUsage(identity, chatQuestionPriceCents, "chat question usage /v1/chat/completions"); err != nil {
-		util.WriteError(w, http.StatusPaymentRequired, err.Error())
-		return false
-	}
-	return true
-}
-
-func (a *App) chargeImageUsage(identity service.Identity, endpoint string) error {
+func (a *App) chargeImageUsage(identity service.Identity, endpoint string, payload map[string]any) error {
 	if !a.shouldBillImage(identity) {
 		return nil
 	}
-	_, err := a.billing.ConsumeImageUsage(identity, a.config.ImagePriceCents(), "image usage "+strings.TrimSpace(endpoint))
+	tier := a.imageBillingTierFromPayload(payload)
+	_, err := a.billing.ConsumeImageUsage(identity, a.imageBillingAmountFromPayload(payload), "image usage "+strings.TrimSpace(endpoint)+" "+tier)
 	return err
 }
 
 func (a *App) shouldBillImage(identity service.Identity) bool {
-	return identity.Role == service.AuthRoleUser && identity.Provider == service.AuthProviderEmail
-}
-
-func (a *App) shouldBillChatText(identity service.Identity) bool {
-	return identity.Role == service.AuthRoleUser && identity.Provider == service.AuthProviderEmail
+	return identity.Role == service.AuthRoleUser && identity.Provider != service.AuthProviderLinuxDo
 }
 
 func (a *App) emailSMTPConfig() service.EmailSMTPConfig {
@@ -253,7 +302,7 @@ func (a *App) emailSMTPConfig() service.EmailSMTPConfig {
 		Port:      raw.Port,
 		UseSSL:    raw.UseSSL,
 		Username:  raw.Username,
-		AuthCode:  raw.AuthCode,
+		AuthCode:  raw.Password,
 		FromEmail: raw.FromEmail,
 		FromName:  raw.FromName,
 	}
@@ -265,6 +314,11 @@ func (a *App) yiPayGatewayConfig(r *http.Request) service.YiPayGatewayConfig {
 	notifyURL := strings.TrimSpace(raw.NotifyURL)
 	if notifyURL == "" {
 		notifyURL = strings.TrimRight(baseURL, "/") + "/api/pay/yipay/notify"
+	} else {
+		trimmed := strings.TrimRight(notifyURL, "/")
+		if strings.HasSuffix(trimmed, "/api/pay/yipay") {
+			notifyURL = trimmed + "/notify"
+		}
 	}
 	returnURL := strings.TrimSpace(raw.ReturnURL)
 	return service.YiPayGatewayConfig{
@@ -278,6 +332,52 @@ func (a *App) yiPayGatewayConfig(r *http.Request) service.YiPayGatewayConfig {
 	}
 }
 
+func (a *App) yiPayGatewayConfigForPath(r *http.Request, path string) service.YiPayGatewayConfig {
+	cfg := a.yiPayGatewayConfig(r)
+	baseURL := strings.TrimRight(a.resolveImageBaseURL(r), "/")
+	targetPath := strings.TrimSpace(path)
+	if targetPath == "" {
+		return cfg
+	}
+	if strings.HasPrefix(targetPath, "http://") || strings.HasPrefix(targetPath, "https://") {
+		cfg.ReturnURL = targetPath
+		return cfg
+	}
+	redirectPath := yipayReturnRedirectPath(targetPath)
+	q := url.Values{}
+	q.Set("redirect", redirectPath)
+	cfg.ReturnURL = baseURL + "/api/pay/yipay/return?" + q.Encode()
+	return cfg
+}
+
+func yipayReturnRedirectPath(path string) string {
+	redirectPath := sanitizeFrontendRedirectPath(path)
+	if redirectPath == "" {
+		return "/wallet"
+	}
+	return redirectPath
+}
+
+func cloneURLValuesWithoutKeys(values url.Values, keys ...string) url.Values {
+	out := url.Values{}
+	skip := map[string]struct{}{}
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			skip[key] = struct{}{}
+		}
+	}
+	for key, items := range values {
+		if _, ignored := skip[key]; ignored {
+			continue
+		}
+		for _, item := range items {
+			out.Add(key, item)
+		}
+	}
+	return out
+}
+
 func (a *App) availablePayChannels() []string {
 	items := []string{}
 	yipay := a.config.YiPay()
@@ -285,6 +385,51 @@ func (a *App) availablePayChannels() []string {
 		items = append(items, "alipay", "wxpay", "paypal", "usdt")
 	}
 	return items
+}
+
+func (a *App) imagePricesConfig() map[string]any {
+	return map[string]any{
+		"1k": a.config.ImagePrice1KCents(),
+		"2k": a.config.ImagePrice2KCents(),
+		"4k": a.config.ImagePrice4KCents(),
+	}
+}
+
+func (a *App) imageBillingTierFromPayload(payload map[string]any) string {
+	if payload == nil {
+		return "1k"
+	}
+	resolution := protocol.NormalizeImageResolutionTier(firstNonEmpty(util.Clean(payload["resolution"]), util.Clean(payload["image_resolution"])))
+	if resolution != "" {
+		return resolution
+	}
+	size := protocol.ResolveImageSizeWithResolution(util.Clean(payload["size"]), resolution)
+	if tier := protocol.ResolutionTierFromSize(size); tier != "" {
+		return tier
+	}
+	return "1k"
+}
+
+func (a *App) imagePriceCentsByTier(tier string) int {
+	switch protocol.NormalizeImageResolutionTier(tier) {
+	case "2k":
+		return a.config.ImagePrice2KCents()
+	case "4k":
+		return a.config.ImagePrice4KCents()
+	default:
+		return a.config.ImagePrice1KCents()
+	}
+}
+
+func (a *App) imageBillingAmountFromPayload(payload map[string]any) int {
+	count := util.ToInt(payload["n"], 1)
+	if count < 1 {
+		count = 1
+	}
+	if count > 4 {
+		count = 4
+	}
+	return a.imagePriceCentsByTier(a.imageBillingTierFromPayload(payload)) * count
 }
 
 func parseRechargeAmountCents(body map[string]any) (int, error) {

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { LoaderCircle, MessageSquarePlus, Trash2 } from "lucide-react";
 
@@ -33,19 +33,21 @@ export function ImageSidebar({
     <aside className="h-full min-h-0 overflow-hidden">
       <div className="flex h-full min-h-0 flex-col gap-2 py-1 sm:gap-3 sm:py-2">
         {!hideActionButtons && (
-          <div className="flex items-center gap-2">
-            <Button className="h-10 flex-1 rounded-full" onClick={onCreateDraft}>
-              <MessageSquarePlus className="size-4" />
-              新建对话
-            </Button>
-            <Button
-              variant="outline"
-              className="h-10 rounded-full border-[#e5e7eb] bg-white px-3 text-[#45515e] hover:bg-black/[0.05]"
-              onClick={() => void onClearHistory()}
-              disabled={conversations.length === 0}
-            >
-              <Trash2 className="size-4" />
-            </Button>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Button className="h-10 flex-1 rounded-full" onClick={onCreateDraft}>
+                <MessageSquarePlus className="size-4" />
+                新建对话
+              </Button>
+              <Button
+                variant="outline"
+                className="h-10 rounded-full border-[#e5e7eb] bg-white px-3 text-[#45515e] hover:bg-black/[0.05]"
+                onClick={() => void onClearHistory()}
+                disabled={conversations.length === 0}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
           </div>
         )}
 

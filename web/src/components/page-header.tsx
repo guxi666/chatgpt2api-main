@@ -13,7 +13,7 @@ export function PageHeader({ eyebrow, title, actions, className }: PageHeaderPro
   return (
     <section
       className={cn(
-        "flex flex-col gap-5 border-b border-[#f2f3f5] pb-5 lg:flex-row lg:items-end lg:justify-between",
+        "flex flex-col lg:flex-row lg:items-end lg:justify-between",
         className,
       )}
     >

@@ -6,12 +6,16 @@ import {
   DEFAULT_CHAT_MODEL,
   DEFAULT_IMAGE_MODEL,
   isChatModel,
+  isImageCreationModel,
   isImageModel,
+  isImageOutputFormat,
   isImageQuality,
-  isImageTaskModel,
   type ImageModel,
+  type ImageOutputFormat,
   type ImageQuality,
+  type ImageVisibility,
 } from "@/lib/api";
+import { getManagedImagePathFromUrl } from "@/lib/image-path";
 import { getStoredAuthSession, type StoredAuthSession } from "@/store/auth";
 
 export type ImageConversationMode = "chat" | "generate" | "image" | "edit";
@@ -28,14 +32,29 @@ export type StoredImage = {
   id: string;
   taskId?: string;
   status?: "loading" | "success" | "error" | "cancelled" | "message";
+  path?: string;
+  visibility?: ImageVisibility;
   b64_json?: string;
   url?: string;
+  width?: number;
+  height?: number;
+  resolution?: string;
+  outputFormat?: ImageOutputFormat;
   revised_prompt?: string;
   error?: string;
   text_response?: string;
 };
 
 export type ImageTurnStatus = "queued" | "generating" | "success" | "error" | "cancelled" | "message";
+
+export type StoredImageSizeSelection = {
+  mode: string;
+  aspectRatio: string;
+  resolution: string;
+  customRatio?: string;
+  customWidth: string;
+  customHeight: string;
+};
 
 export type ImageTurn = {
   id: string;
@@ -45,7 +64,11 @@ export type ImageTurn = {
   referenceImages: StoredReferenceImage[];
   count: number;
   size: string;
+  sizeSelection?: StoredImageSizeSelection;
   quality?: ImageQuality;
+  outputFormat?: ImageOutputFormat;
+  outputCompression?: number;
+  visibility?: ImageVisibility;
   images: StoredImage[];
   createdAt: string;
   status: ImageTurnStatus;
@@ -70,8 +93,18 @@ const imageConversationStorage = localforage.createInstance({
   storeName: "image_conversations",
 });
 
+export const IMAGE_CONVERSATIONS_CHANGED_EVENT = "chatgpt2api:image-conversations-changed";
+export const ACTIVE_IMAGE_CONVERSATION_STORAGE_KEY = "chatgpt2api:image_active_conversation_id";
+export const IMAGE_ACTIVE_CONVERSATION_REQUEST_EVENT = "chatgpt2api:image-open-conversation";
 const IMAGE_CONVERSATIONS_KEY_PREFIX = "items";
 let imageConversationWriteQueue: Promise<void> = Promise.resolve();
+
+function dispatchImageConversationsChanged() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.dispatchEvent(new Event(IMAGE_CONVERSATIONS_CHANGED_EVENT));
+}
 
 function conversationScopeFromSession(session: StoredAuthSession | null) {
   if (!session) {
@@ -90,10 +123,26 @@ async function imageConversationsStorageKey() {
 }
 
 function normalizeStoredImage(image: StoredImage): StoredImage {
+  const url = typeof image.url === "string" && image.url ? image.url : undefined;
+  const width = Number(image.width);
+  const height = Number(image.height);
+  const resolution = typeof image.resolution === "string" && image.resolution ? image.resolution : undefined;
   const normalized = {
     ...image,
     taskId: typeof image.taskId === "string" && image.taskId ? image.taskId : undefined,
-    url: typeof image.url === "string" && image.url ? image.url : undefined,
+    path:
+      typeof image.path === "string" && image.path
+        ? image.path
+        : url
+          ? getManagedImagePathFromUrl(url) || undefined
+          : undefined,
+    visibility:
+      image.visibility === "public" || image.visibility === "private" ? image.visibility : undefined,
+    url,
+    width: Number.isFinite(width) && width > 0 ? width : undefined,
+    height: Number.isFinite(height) && height > 0 ? height : undefined,
+    resolution,
+    outputFormat: isImageOutputFormat(image.outputFormat) ? image.outputFormat : undefined,
     revised_prompt: typeof image.revised_prompt === "string" ? image.revised_prompt : undefined,
     text_response: typeof image.text_response === "string" && image.text_response ? image.text_response : undefined,
   };
@@ -135,6 +184,43 @@ function normalizeImageMode(value: unknown, referenceImages: StoredReferenceImag
   return referenceImages.length > 0 ? "image" : "generate";
 }
 
+function normalizeSizeSelection(value: unknown): StoredImageSizeSelection | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const source = value as Record<string, unknown>;
+  const selection = {
+    mode: typeof source.mode === "string" ? source.mode : "",
+    aspectRatio: typeof source.aspectRatio === "string" ? source.aspectRatio : "",
+    resolution: typeof source.resolution === "string" ? source.resolution : "",
+    customRatio: typeof source.customRatio === "string" ? source.customRatio : "",
+    customWidth: typeof source.customWidth === "string" ? source.customWidth : "",
+    customHeight: typeof source.customHeight === "string" ? source.customHeight : "",
+  };
+  if (
+    !selection.mode &&
+    !selection.aspectRatio &&
+    !selection.resolution &&
+    !selection.customRatio &&
+    !selection.customWidth &&
+    !selection.customHeight
+  ) {
+    return undefined;
+  }
+  return selection;
+}
+
+function normalizeOutputCompression(value: unknown): number | undefined {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return undefined;
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return undefined;
+  }
+  return Math.min(100, Math.round(numeric));
+}
+
 function dataUrlMimeType(dataUrl: string) {
   const match = dataUrl.match(/^data:(.*?);base64,/);
   return match?.[1] || "image/png";
@@ -174,22 +260,27 @@ function normalizeTurn(turn: ImageTurn & Record<string, unknown>): ImageTurn {
   const normalizedImages = Array.isArray(turn.images) ? turn.images.map(normalizeStoredImage) : [];
   const referenceImages = getLegacyReferenceImages(turn);
   const mode = normalizeImageMode(turn.mode, referenceImages);
+  const sizeSelection = normalizeSizeSelection(turn.sizeSelection);
+  const visibility: ImageVisibility = turn.visibility === "public" ? "public" : "private";
+  const images = normalizedImages.map((image) =>
+    image.visibility ? image : { ...image, visibility },
+  );
   const model =
     mode === "chat"
       ? isChatModel(turn.model)
         ? turn.model
         : DEFAULT_CHAT_MODEL
-      : isImageTaskModel(turn.model)
+      : isImageCreationModel(turn.model)
         ? turn.model
         : DEFAULT_IMAGE_MODEL;
   const derivedStatus: ImageTurnStatus =
-    normalizedImages.some((image) => image.status === "loading")
+    images.some((image) => image.status === "loading")
       ? "generating"
-      : normalizedImages.some((image) => image.status === "error")
+      : images.some((image) => image.status === "error")
         ? "error"
-        : normalizedImages.some((image) => image.status === "cancelled")
+        : images.some((image) => image.status === "cancelled")
           ? "cancelled"
-          : normalizedImages.some((image) => image.status === "message")
+          : images.some((image) => image.status === "message")
             ? "message"
             : "success";
 
@@ -199,10 +290,14 @@ function normalizeTurn(turn: ImageTurn & Record<string, unknown>): ImageTurn {
     model,
     mode,
     referenceImages,
-    count: Math.max(1, Number(turn.count || normalizedImages.length || 1)),
+    count: Math.max(1, Number(turn.count || images.length || 1)),
     size: typeof turn.size === "string" ? turn.size : "",
+    ...(sizeSelection ? { sizeSelection } : {}),
     quality: isImageQuality(turn.quality) ? turn.quality : undefined,
-    images: normalizedImages,
+    outputFormat: isImageOutputFormat(turn.outputFormat) ? turn.outputFormat : undefined,
+    outputCompression: normalizeOutputCompression(turn.outputCompression),
+    visibility,
+    images,
     createdAt: String(turn.createdAt || new Date().toISOString()),
     status:
       turn.status === "queued" ||
@@ -236,6 +331,8 @@ function normalizeConversation(conversation: ImageConversation & Record<string, 
           count: Number(conversation.count || 1),
           size: typeof conversation.size === "string" ? conversation.size : "",
           quality: isImageQuality(conversation.quality) ? conversation.quality : undefined,
+          outputFormat: isImageOutputFormat(conversation.outputFormat) ? conversation.outputFormat : undefined,
+          outputCompression: normalizeOutputCompression(conversation.outputCompression),
           images: Array.isArray(conversation.images) ? (conversation.images as StoredImage[]) : [],
           createdAt: String(conversation.createdAt || new Date().toISOString()),
           status:
@@ -304,6 +401,7 @@ export async function saveImageConversations(conversations: ImageConversation[])
       storageKey,
       sortImageConversations([...conversationMap.values()]),
     );
+    dispatchImageConversationsChanged();
   });
 }
 
@@ -319,6 +417,7 @@ export async function saveImageConversation(conversation: ImageConversation): Pr
       ...items.filter((item) => item.id !== persistedConversation.id),
     ]);
     await imageConversationStorage.setItem(storageKey, nextItems);
+    dispatchImageConversationsChanged();
   });
 }
 
@@ -330,12 +429,14 @@ export async function deleteImageConversation(id: string): Promise<void> {
       storageKey,
       items.filter((item) => item.id !== id),
     );
+    dispatchImageConversationsChanged();
   });
 }
 
 export async function clearImageConversations(): Promise<void> {
   await queueImageConversationWrite(async () => {
     await imageConversationStorage.removeItem(await imageConversationsStorageKey());
+    dispatchImageConversationsChanged();
   });
 }
 

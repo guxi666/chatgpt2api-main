@@ -31,8 +31,12 @@ func NewProxyService(config ProxyConfig) *ProxyService {
 	return &ProxyService{config: config}
 }
 
+func HTTPClientForProxy(proxy string, timeout time.Duration) *http.Client {
+	return &http.Client{Timeout: timeout, Transport: transportForProxy(proxy)}
+}
+
 func (s *ProxyService) HTTPClient(timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout, Transport: transportForProxy(s.config.Proxy())}
+	return HTTPClientForProxy(s.config.Proxy(), timeout)
 }
 
 func (s *ProxyService) BrowserHTTPClient(timeout time.Duration) *http.Client {

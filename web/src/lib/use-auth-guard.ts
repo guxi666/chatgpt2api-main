@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
-  getDefaultRouteForRole,
+  canAccessPath,
+  getDefaultRouteForSession,
   type AuthRole,
   type StoredAuthSession,
 } from "@/store/auth";
@@ -15,7 +16,7 @@ type UseAuthGuardResult = {
   session: StoredAuthSession | null;
 };
 
-export function useAuthGuard(allowedRoles?: AuthRole[]): UseAuthGuardResult {
+export function useAuthGuard(allowedRoles?: AuthRole[], requiredPath?: string): UseAuthGuardResult {
   const navigate = useNavigate();
   const [session, setSession] = useState<StoredAuthSession | null>(() => getCachedAuthSession() ?? null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(() => getCachedAuthSession() === undefined);
@@ -41,7 +42,14 @@ export function useAuthGuard(allowedRoles?: AuthRole[]): UseAuthGuardResult {
       if (roleList.length > 0 && !roleList.includes(storedSession.role)) {
         setSession(storedSession);
         setIsCheckingAuth(false);
-        navigate(getDefaultRouteForRole(storedSession.role), { replace: true });
+        navigate(getDefaultRouteForSession(storedSession), { replace: true });
+        return;
+      }
+
+      if (requiredPath && !canAccessPath(storedSession, requiredPath)) {
+        setSession(storedSession);
+        setIsCheckingAuth(false);
+        navigate(getDefaultRouteForSession(storedSession), { replace: true });
         return;
       }
 
@@ -53,7 +61,7 @@ export function useAuthGuard(allowedRoles?: AuthRole[]): UseAuthGuardResult {
     return () => {
       active = false;
     };
-  }, [allowedRolesKey, navigate]);
+  }, [allowedRolesKey, navigate, requiredPath]);
 
   return { isCheckingAuth, session };
 }
@@ -72,7 +80,7 @@ export function useRedirectIfAuthenticated() {
       }
 
       if (storedSession) {
-        navigate(getDefaultRouteForRole(storedSession.role), { replace: true });
+        navigate(getDefaultRouteForSession(storedSession), { replace: true });
         return;
       }
 

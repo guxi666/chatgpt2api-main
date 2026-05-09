@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 ARG VERSION=0.0.0-dev
 
 FROM --platform=$BUILDPLATFORM oven/bun:1-alpine AS web-deps
@@ -28,31 +26,37 @@ RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked go mod download
 
 COPY cmd ./cmd
 COPY internal ./internal
+COPY --from=web-build /app/internal/web/dist ./internal/web/dist
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=0.0.0-dev
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w -X chatgpt2api/internal/version.Version=${VERSION}" -o /out/chatgpt2api ./cmd/chatgpt2api
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -tags=embed -ldflags="-s -w -X chatgpt2api/internal/version.Version=${VERSION}" -o /out/chatgpt2api ./cmd/chatgpt2api
 
 
 FROM --platform=$TARGETPLATFORM debian:bookworm-slim AS app
 
 WORKDIR /app
 ENV PORT=80
+ENV CHATGPT2API_DEPLOYMENT=docker
 
 # 运行时依赖：
 # - ca-certificates: HTTPS 上游请求需要
 # - git: Git 存储后端需要
 # - tzdata: 保持容器内时区数据可用
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    git \
-    tzdata \
-    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i 's|http://deb.debian.org/debian|http://mirrors.tuna.tsinghua.edu.cn/debian|g; s|http://security.debian.org/debian-security|http://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      git \
+      tzdata; \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=go-build /out/chatgpt2api ./chatgpt2api
-COPY --from=web-build /app/web/dist ./web_dist
 
 EXPOSE 80
 

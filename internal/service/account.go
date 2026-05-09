@@ -72,6 +72,42 @@ func (s *AccountService) ListTokens() []string {
 	return out
 }
 
+func (s *AccountService) ListTokensByIDs(ids []string) []string {
+	targets := cleanAccountIDs(ids)
+	if len(targets) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(targets))
+	for _, item := range s.items {
+		token := util.Clean(item["access_token"])
+		if token == "" {
+			continue
+		}
+		if _, ok := targets[accountIDFromToken(token)]; ok {
+			out = append(out, token)
+		}
+	}
+	return out
+}
+
+func (s *AccountService) GetTokenByID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.items {
+		token := util.Clean(item["access_token"])
+		if token != "" && accountIDFromToken(token) == id {
+			return token
+		}
+	}
+	return ""
+}
+
 func (s *AccountService) ListAccounts() []map[string]any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -136,7 +172,12 @@ func (s *AccountService) AddAccounts(tokens []string) map[string]any {
 	_ = s.saveLocked()
 	items := publicAccounts(s.items)
 	s.mu.Unlock()
-	s.logs.Add(LogTypeAccount, fmt.Sprintf("新增 %d 个账号，跳过 %d 个", added, skipped), map[string]any{"added": added, "skipped": skipped})
+	s.logs.Add(fmt.Sprintf("新增 %d 个账号，跳过 %d 个", added, skipped), map[string]any{
+		"module":         "accounts",
+		"operation_type": "新增",
+		"added":          added,
+		"skipped":        skipped,
+	})
 	return map[string]any{"added": added, "skipped": skipped, "items": items}
 }
 
@@ -172,7 +213,11 @@ func (s *AccountService) DeleteAccounts(tokens []string) map[string]any {
 	items := publicAccounts(s.items)
 	s.mu.Unlock()
 	if removed > 0 {
-		s.logs.Add(LogTypeAccount, fmt.Sprintf("删除 %d 个账号", removed), map[string]any{"removed": removed})
+		s.logs.Add(fmt.Sprintf("删除 %d 个账号", removed), map[string]any{
+			"module":         "accounts",
+			"operation_type": "删除",
+			"removed":        removed,
+		})
 	}
 	return map[string]any{"removed": removed, "items": items}
 }
@@ -200,12 +245,21 @@ func (s *AccountService) UpdateAccount(accessToken string, updates map[string]an
 		delete(s.imageReservations, accessToken)
 		s.items = append(s.items[:idx], s.items[idx+1:]...)
 		_ = s.saveLocked()
-		s.logs.Add(LogTypeAccount, "自动移除限流账号", map[string]any{"token": util.AnonymizeToken(accessToken)})
+		s.logs.Add("自动移除限流账号", map[string]any{
+			"module":         "accounts",
+			"operation_type": "自动移除",
+			"token":          util.AnonymizeToken(accessToken),
+		})
 		return nil
 	}
 	s.items[idx] = account
 	_ = s.saveLocked()
-	s.logs.Add(LogTypeAccount, "更新账号", map[string]any{"token": util.AnonymizeToken(accessToken), "status": account["status"]})
+	s.logs.Add("更新账号", map[string]any{
+		"module":         "accounts",
+		"operation_type": "更新",
+		"token":          util.AnonymizeToken(accessToken),
+		"status":         account["status"],
+	})
 	return util.CopyMap(account)
 }
 
@@ -236,15 +290,19 @@ func (s *AccountService) GetTextAccessToken() string {
 }
 
 func (s *AccountService) GetAvailableAccessToken(ctx context.Context) (string, error) {
+	return s.GetAvailableAccessTokenFor(ctx, nil)
+}
+
+func (s *AccountService) GetAvailableAccessTokenFor(ctx context.Context, allow func(map[string]any) bool) (string, error) {
 	attempted := map[string]struct{}{}
 	for {
-		reservation, err := s.reserveNextCandidateToken(attempted)
+		reservation, err := s.reserveNextCandidateToken(attempted, allow)
 		if err != nil {
 			return "", err
 		}
 		attempted[reservation.token] = struct{}{}
 		account := s.RefreshAccountState(ctx, reservation.token)
-		if account != nil && s.reservedImageSlotAvailable(reservation) {
+		if account != nil && (allow == nil || allow(account)) && s.reservedImageSlotAvailable(reservation) {
 			return reservation.token, nil
 		}
 		s.releaseImageReservation(reservation.token)
@@ -369,7 +427,11 @@ func (s *AccountService) MarkImageResult(accessToken string, success bool) map[s
 		delete(s.imageReservations, accessToken)
 		s.items = append(s.items[:idx], s.items[idx+1:]...)
 		_ = s.saveLocked()
-		s.logs.Add(LogTypeAccount, "自动移除限流账号", map[string]any{"token": util.AnonymizeToken(accessToken)})
+		s.logs.Add("自动移除限流账号", map[string]any{
+			"module":         "accounts",
+			"operation_type": "自动移除",
+			"token":          util.AnonymizeToken(accessToken),
+		})
 		return nil
 	}
 	s.items[idx] = account
@@ -383,7 +445,12 @@ func (s *AccountService) RemoveInvalidToken(accessToken, event string) bool {
 	}
 	removed := s.RemoveToken(accessToken)
 	if removed {
-		s.logs.Add(LogTypeAccount, "自动移除异常账号", map[string]any{"source": event, "token": util.AnonymizeToken(accessToken)})
+		s.logs.Add("自动移除异常账号", map[string]any{
+			"module":         "accounts",
+			"operation_type": "自动移除",
+			"source":         event,
+			"token":          util.AnonymizeToken(accessToken),
+		})
 	}
 	return removed
 }
@@ -537,7 +604,7 @@ type imageTokenReservation struct {
 	slot  int
 }
 
-func (s *AccountService) reserveNextCandidateToken(excluded map[string]struct{}) (imageTokenReservation, error) {
+func (s *AccountService) reserveNextCandidateToken(excluded map[string]struct{}, allow func(map[string]any) bool) (imageTokenReservation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var tokens []string
@@ -547,6 +614,9 @@ func (s *AccountService) reserveNextCandidateToken(excluded map[string]struct{})
 			continue
 		}
 		if _, ok := excluded[token]; ok {
+			continue
+		}
+		if allow != nil && !allow(item) {
 			continue
 		}
 		if s.availableImageSlotsLocked(item) > 0 {
@@ -761,6 +831,15 @@ func IsImageAccountAvailable(account map[string]any) bool {
 	return util.ToInt(account["quota"], 0) > 0
 }
 
+func IsPaidImageAccount(account map[string]any) bool {
+	switch util.Clean(account["type"]) {
+	case "Plus", "ProLite", "Pro", "Team":
+		return true
+	default:
+		return false
+	}
+}
+
 func IsAccountInvalidErrorMessage(message string) bool {
 	text := strings.ToLower(strings.TrimSpace(message))
 	if text == "" || isBootstrapErrorMessage(text) {
@@ -851,7 +930,8 @@ func publicAccounts(accounts []map[string]any) []map[string]any {
 			continue
 		}
 		out = append(out, map[string]any{
-			"id":                 util.SHA1Short(token, 16),
+			"id":                 accountIDFromToken(token),
+			"token_preview":      util.AnonymizeToken(token),
 			"access_token":       token,
 			"type":               util.ValueOr(account["type"], "Free"),
 			"status":             util.ValueOr(account["status"], "正常"),
@@ -866,6 +946,21 @@ func publicAccounts(accounts []map[string]any) []map[string]any {
 			"fail":               util.ToInt(account["fail"], 0),
 			"lastUsedAt":         account["last_used_at"],
 		})
+	}
+	return out
+}
+
+func accountIDFromToken(token string) string {
+	return util.SHA1Short(token, 16)
+}
+
+func cleanAccountIDs(ids []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			out[id] = struct{}{}
+		}
 	}
 	return out
 }

@@ -7,7 +7,6 @@ import {
   defaultAppMeta,
   fetchAppMeta,
   normalizeAppMeta,
-  resolveAppAssetSrc,
   type AppMeta,
 } from "@/lib/app-meta";
 
@@ -42,19 +41,6 @@ export function useAppMeta() {
       window.removeEventListener(APP_META_UPDATED_EVENT, handleUpdated);
     };
   }, []);
-
-  useEffect(() => {
-    document.title = appMeta.project_name || appMeta.app_title || "chatgpt2api";
-    const iconHref = resolveAppAssetSrc(appMeta.site_icon_url);
-    let link = document.querySelector("link[data-chatgpt2api-site-icon]") as HTMLLinkElement | null;
-    if (!link) {
-      link = document.createElement("link");
-      link.rel = "icon";
-      link.setAttribute("data-chatgpt2api-site-icon", "true");
-      document.head.appendChild(link);
-    }
-    link.href = iconHref;
-  }, [appMeta.app_title, appMeta.project_name, appMeta.site_icon_url]);
 
   return appMeta;
 }

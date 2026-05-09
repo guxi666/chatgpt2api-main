@@ -1,0 +1,1128 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  BadgeCheck,
+  CheckCircle2,
+  Copy,
+  Crown,
+  Gem,
+  LoaderCircle,
+  RefreshCw,
+  Save,
+  ShieldCheck,
+  Sparkles,
+  Users,
+  Wallet,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  activateAgencyUser,
+  fetchAgencyAdminUsers,
+  fetchAgencyCommissionDashboard,
+  fetchAgencyConfig,
+  fetchManagedUsers,
+  fetchWallet,
+  joinAgencyTier,
+  updateAgencyConfig,
+  upgradeAgencyTier,
+  verifySession,
+  type AgencyAdminUser,
+  type AgencyCommissionDashboard,
+  type AgencyCommissionOrder,
+  type AgencyConfig,
+  type AgencyTier,
+  type ManagedUser,
+  type PayType,
+} from "@/lib/api";
+import { resolveBrandAssetURL } from "@/lib/app-meta";
+import { useAppMeta } from "@/lib/use-app-meta";
+import { getCachedAuthSession } from "@/lib/session";
+import { getStoredSessionToken } from "@/store/auth";
+import { cn } from "@/lib/utils";
+
+type TierKey = "basic" | "pro" | "premium";
+type AgencyMenuKey = "overview" | "promotion" | "team" | "income" | "withdraw" | "materials" | "benefits" | "settings";
+
+const TIER_META: Record<TierKey, { subtitle: string; tag?: string; icon: typeof Gem }> = {
+  basic: { subtitle: "基础代理套餐，适合个人起步", icon: Gem },
+  pro: { subtitle: "进阶代理套餐，适合团队运营", tag: "性价比最高", icon: Gem },
+  premium: { subtitle: "旗舰代理套餐，享受更高分成", tag: "分成最高", icon: Crown as unknown as typeof Gem },
+};
+
+const STATUS_TEXT: Record<string, string> = {
+  paid: "已结算",
+  pending: "待结算",
+  failed: "失败",
+};
+
+const AGENCY_MENU: Array<{ key: AgencyMenuKey; label: string; icon: typeof Crown }> = [
+  { key: "overview", label: "代理总览", icon: Crown },
+  { key: "promotion", label: "推广链接", icon: Copy },
+  { key: "team", label: "我的团队", icon: Users },
+  { key: "income", label: "收益明细", icon: Wallet },
+  { key: "withdraw", label: "提现管理", icon: Wallet },
+  { key: "materials", label: "推广素材", icon: Sparkles },
+  { key: "benefits", label: "等级权益", icon: ShieldCheck },
+  { key: "settings", label: "设置中心", icon: CheckCircle2 },
+];
+
+function parsePositiveInt(value: string) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return 0;
+  return Math.max(0, Math.trunc(numberValue));
+}
+
+function parseYuanToCents(value: string) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  return Math.max(0, Math.round(amount * 100));
+}
+
+function formatPercentByBP(bp?: number) {
+  return `${((bp || 0) / 100).toFixed(2)}%`;
+}
+
+function formatYuan(value: string | number | undefined) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return "0.00";
+  return n.toFixed(2);
+}
+
+function tierRank(tier: string) {
+  if (tier === "basic") return 1;
+  if (tier === "pro") return 2;
+  if (tier === "premium") return 3;
+  return 0;
+}
+
+function tierLabel(tierKey: string, tiers: AgencyTier[]) {
+  const tier = tiers.find((item) => item.key === tierKey);
+  return tier?.name || tierKey || "未开通";
+}
+
+function tierFromRole(roleName: string, roleID: string) {
+  const name = String(roleName || "").trim();
+  if (name.includes("代理") && name.includes("旗舰")) return "premium";
+  if (name.includes("代理") && name.includes("进阶")) return "pro";
+  if (name.includes("代理") && name.includes("基础")) return "basic";
+  const id = String(roleID || "").trim().toLowerCase();
+  if (id === "admin" || id === "default-user") return "";
+  return "";
+}
+
+function orderedTiers(tiers: AgencyTier[]) {
+  const orderMap = new Map<TierKey, number>([
+    ["basic", 1],
+    ["pro", 2],
+    ["premium", 3],
+  ]);
+  return [...tiers].sort((a, b) => (orderMap.get(a.key as TierKey) || 99) - (orderMap.get(b.key as TierKey) || 99));
+}
+
+function formatDateTime(value?: string) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function sumOrderAmountYuan(orders: AgencyCommissionOrder[]) {
+  return orders.reduce((sum, item) => {
+    if (item.amount_yuan) {
+      const n = Number(item.amount_yuan);
+      return Number.isFinite(n) ? sum + n : sum;
+    }
+    return sum + Number(item.amount_cents || 0) / 100;
+  }, 0);
+}
+
+function sumPendingCommissionYuan(orders: AgencyCommissionOrder[]) {
+  return orders.reduce((sum, item) => {
+    if ((item.status || "").toLowerCase() !== "pending") return sum;
+    if (item.commission_yuan) {
+      const n = Number(item.commission_yuan);
+      return Number.isFinite(n) ? sum + n : sum;
+    }
+    return sum + Number(item.commission_cents || 0) / 100;
+  }, 0);
+}
+
+function calcTrendRows(orders: AgencyCommissionOrder[]) {
+  const map = new Map<string, number>();
+  for (const item of orders) {
+    const created = String(item.created_at || "").trim();
+    if (!created) continue;
+    const dt = new Date(created);
+    if (Number.isNaN(dt.getTime())) continue;
+    const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+    const commission = item.commission_yuan ? Number(item.commission_yuan) : Number(item.commission_cents || 0) / 100;
+    map.set(key, (map.get(key) || 0) + (Number.isFinite(commission) ? commission : 0));
+  }
+  const out: Array<{ label: string; value: number; key: string }> = [];
+  for (let i = 6; i >= 0; i -= 1) {
+    const dt = new Date();
+    dt.setHours(0, 0, 0, 0);
+    dt.setDate(dt.getDate() - i);
+    const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+    out.push({
+      key,
+      label: `${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`,
+      value: Number((map.get(key) || 0).toFixed(2)),
+    });
+  }
+  return out;
+}
+
+function AgencyPackageShowcase({
+  tiers,
+  currentTier,
+  joiningTier,
+  onJoin,
+}: {
+  tiers: AgencyTier[];
+  currentTier: string;
+  joiningTier: string;
+  onJoin: (tier: TierKey) => Promise<void>;
+}) {
+  const currentRank = tierRank(currentTier);
+  const sorted = [...tiers].sort((a, b) => tierRank(a.key) - tierRank(b.key));
+  const byKey = new Map(sorted.map((t) => [t.key, t]));
+  return (
+    <section className="rounded-2xl border border-[#dde3f5] bg-[linear-gradient(160deg,#f8f9ff_0%,#f3f5ff_45%,#f6f7ff_100%)] p-6 shadow-[0_16px_40px_-28px_rgba(68,87,150,0.35)]">
+      <div className="space-y-6">
+        <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-start">
+          <div>
+            <div className="inline-flex rounded-full bg-[#ececff] px-3 py-1 text-xs font-semibold text-[#5d63ff]">开启你的 AI 业务</div>
+            <h2 className="mt-3 text-3xl font-black tracking-tight text-[#0f2550] md:text-4xl">代理加盟</h2>
+            <p className="mt-3 text-base text-[#365180] md:text-lg">选择适合你的代理方案，享受高额分成与专属支持，共同拓展 AI 服务业务。</p>
+          </div>
+          <div className="grid gap-4 text-[#334f7d] sm:grid-cols-2 xl:grid-cols-4">
+            <div className="space-y-1 text-sm"><div className="font-bold text-[#6a45ff]">高额分成</div><div>利润空间更高</div></div>
+            <div className="space-y-1 text-sm"><div className="font-bold text-[#6a45ff]">专属支持</div><div>1v1 运营指导</div></div>
+            <div className="space-y-1 text-sm"><div className="font-bold text-[#6a45ff]">稳定可靠</div><div>系统安全可控</div></div>
+            <div className="space-y-1 text-sm"><div className="font-bold text-[#6a45ff]">快速结算</div><div>收益按周期到账</div></div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          {sorted.map((tier) => {
+            const meta = TIER_META[tier.key as TierKey] || TIER_META.basic;
+            const Icon = meta.icon;
+            const targetRank = tierRank(tier.key);
+            const isCurrentTier = currentRank > 0 && targetRank === currentRank;
+            const disabled = joiningTier === tier.key || isCurrentTier;
+            const isMiddle = tier.key === "pro";
+            const isPremium = tier.key === "premium";
+            const features = tier.key === "basic"
+              ? ["个人代理授权", "基础技术支持", "标准分成比例", "基础数据看板"]
+              : tier.key === "pro"
+                ? ["团队代理授权", "优先技术支持", "更高分成比例", "高级数据看板", "运营指导手册"]
+                : ["全域代理授权", "专属客户经理", "最高分成比例", "全维数据看板", "定制运营方案", "专属 API 支持"];
+            return (
+              <Card
+                key={tier.key}
+                className={cn(
+                  "relative min-h-[520px] overflow-hidden rounded-2xl border bg-none p-0 [background:linear-gradient(180deg,#ffffff,#f8fbff)] shadow-[0_8px_24px_rgba(79,104,166,0.12)]",
+                  isPremium ? "border-[#f4c978]" : "border-[#d9e3fb]",
+                  isMiddle ? "ring-1 ring-[#7ca5ff]/60" : "",
+                )}
+              >
+                {meta.tag ? (
+                  <div className={cn("absolute left-8 top-0 rounded-b-lg px-3 py-1 text-xs font-bold", isPremium ? "bg-[#f8b133] text-white" : "bg-[#4e6dff] text-white")}>
+                    {meta.tag}
+                  </div>
+                ) : null}
+                <CardContent className="flex min-h-[520px] flex-col gap-4 p-6 pt-8 text-[#1f3d70]">
+                  <div className={cn("inline-flex size-14 items-center justify-center rounded-2xl border", isPremium ? "border-[#f6d08d] bg-[#fff5e1]" : "border-[#d9e3fb] bg-[#eef3ff]")}>
+                    <Icon className={cn("size-7", isPremium ? "text-[#f29a00]" : "text-[#2f6bff]")} />
+                  </div>
+                  <div>
+                    <div className="text-3xl leading-none font-black text-[#0f2f62]">{tier.name}</div>
+                    <div className="mt-3 text-base text-[#3d5b8d]">{meta.subtitle}</div>
+                  </div>
+                  <div className="h-px bg-[#e5ebfb]" />
+                  <div className={cn("text-5xl leading-none font-black", isPremium ? "text-[#f29500]" : isMiddle ? "text-[#275fe6]" : "text-[#4d43df]")}>
+                    ¥{(Number(tier.price_cents || 0) / 100).toLocaleString("zh-CN", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </div>
+                  <div className="text-base text-[#4c6794]">一次性</div>
+                  <div className="h-px bg-[#e5ebfb]" />
+                  <div className="space-y-3 text-base">
+                    {features.map((item) => (
+                      <div key={item} className="flex items-center gap-2">
+                        <BadgeCheck className={cn("size-5", isPremium ? "text-[#f29500]" : "text-[#2f6bff]")} />
+                        <span>{item}</span>
+                      </div>
+                    ))}
+                    <div className="flex items-center gap-2">
+                      <BadgeCheck className={cn("size-5", isPremium ? "text-[#f29500]" : "text-[#2f6bff]")} />
+                      <span>分成比例 {tier.commission_percent || formatPercentByBP(tier.commission_bp)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <BadgeCheck className={cn("size-5", isPremium ? "text-[#f29500]" : "text-[#2f6bff]")} />
+                      <span>充值优惠 {tier.discount_percent || formatPercentByBP(tier.discount_bp)}</span>
+                    </div>
+                  </div>
+                  <Button
+                    className={cn(
+                      "mt-auto h-11 rounded-full text-base font-semibold",
+                      isPremium
+                        ? "border border-[#f4c978] bg-white text-[#f29a00] hover:bg-[#fff7e7]"
+                        : isMiddle
+                          ? "bg-[linear-gradient(90deg,#4774f8,#8e39ef)] text-white"
+                          : "border border-[#c9d8ff] bg-white text-[#4d43df] hover:bg-[#f7f9ff]",
+                    )}
+                    onClick={() => void onJoin(tier.key as TierKey)}
+                    disabled={disabled}
+                  >
+                    {joiningTier === tier.key ? "处理中..." : isCurrentTier ? "当前已开通" : "立即加入"}
+                  </Button>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AgencyCommissionCenter({
+  dashboard,
+  tiers,
+  currentTier,
+  currentTierName,
+  brandTitle,
+  brandLogoURL,
+  isLoading,
+  onReload,
+  onRequestUpgrade,
+}: {
+  dashboard: AgencyCommissionDashboard | null;
+  tiers: AgencyTier[];
+  currentTier: string;
+  currentTierName: string;
+  brandTitle: string;
+  brandLogoURL: string;
+  isLoading: boolean;
+  onReload: () => Promise<boolean>;
+  onRequestUpgrade: (tier: TierKey) => void;
+}) {
+  const [activeMenu, setActiveMenu] = useState<AgencyMenuKey>("overview");
+  const [selectedTierKey, setSelectedTierKey] = useState<TierKey>("basic");
+
+  const summary = dashboard?.summary;
+  const agent = dashboard?.agent;
+  const orders = dashboard?.orders || [];
+
+  const fallbackLink = useMemo(() => {
+    const code = String(agent?.invite_code || "").trim();
+    if (!code || typeof window === "undefined") return "";
+    return `${window.location.origin}/login?invite_code=${encodeURIComponent(code)}`;
+  }, [agent?.invite_code]);
+
+  const link = String(agent?.channel_link || "").trim() || fallbackLink;
+  const qrURL = useMemo(() => {
+    if (!link) return "";
+    return `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=${encodeURIComponent(link)}`;
+  }, [link]);
+
+  const invitedCount = Number(agent?.invited_count || agent?.invited_users?.length || 0);
+  const registeredCount = Number(agent?.invited_users?.length || 0);
+  const rechargeUserCount = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of orders) {
+      const key = String(item.user_id || item.user_email || "").trim();
+      if (key) set.add(key);
+    }
+    return set.size;
+  }, [orders]);
+  const rechargeAmount = sumOrderAmountYuan(orders);
+  const pendingAmount = sumPendingCommissionYuan(orders);
+
+  const totalCommission = Number(summary?.total_commission_yuan || 0);
+  const monthCommission = Number(summary?.month_commission_yuan || 0);
+  const withdrawable = Number(summary?.available_yuan || 0);
+
+  const trendRows = useMemo(() => calcTrendRows(orders), [orders]);
+  const maxTrend = Math.max(1, ...trendRows.map((item) => item.value));
+  const points = trendRows.map((item, idx) => {
+    const x = (idx / Math.max(1, trendRows.length - 1)) * 100;
+    const y = 100 - (item.value / maxTrend) * 70;
+    return { x, y, ...item };
+  });
+  const pointsText = points.map((p) => `${p.x},${p.y}`).join(" ");
+
+  const composition = useMemo(() => {
+    const base = Math.max(0, totalCommission);
+    if (base <= 0) return { recharge: 0, member: 0, consume: 0, rechargePct: 60, memberPct: 25, consumePct: 15 };
+    const recharge = Number((base * 0.6).toFixed(2));
+    const member = Number((base * 0.25).toFixed(2));
+    const consume = Number((base - recharge - member).toFixed(2));
+    return { recharge, member, consume, rechargePct: 60, memberPct: 25, consumePct: 15 };
+  }, [totalCommission]);
+
+  const ringStyle = {
+    background: `conic-gradient(#e9cf9e 0% ${composition.rechargePct}%, #9f7e4c ${composition.rechargePct}% ${composition.rechargePct + composition.memberPct}%, #3c5a8b ${composition.rechargePct + composition.memberPct}% 100%)`,
+  };
+
+  const tierByKey = useMemo(() => {
+    const map = new Map<TierKey, AgencyTier>();
+    for (const t of tiers) {
+      if (t.key === "basic" || t.key === "pro" || t.key === "premium") {
+        map.set(t.key, t);
+      }
+    }
+    return map;
+  }, [tiers]);
+
+  const upgradeCandidates = useMemo(() => {
+    const selectedRank = tierRank(selectedTierKey);
+    return tiers.filter((tier) => tierRank(tier.key) > selectedRank && (tier.key === "basic" || tier.key === "pro" || tier.key === "premium")) as Array<AgencyTier & { key: TierKey }>;
+  }, [selectedTierKey, tiers]);
+
+  const renderOverview = () => (
+    <div className="space-y-4 min-w-0">
+      <div className="relative overflow-hidden rounded-xl border border-[#d9e3fb] bg-[linear-gradient(120deg,#eef3ff,#e9edff_55%,#f1f4ff)] p-5">
+        <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+          <div>
+            <div className="text-2xl font-black tracking-tight text-[#102e60] md:text-3xl">代理分成中心</div>
+            <div className="mt-2 text-base text-[#45639a]">邀请好友加入，享受高额分成奖励</div>
+          </div>
+          <div className="flex items-center justify-end">
+            <div className="flex h-28 w-28 items-center justify-center rounded-full border border-[#f1cd8a] bg-[radial-gradient(circle,#ffe7ba_0%,#f2c77a_55%,#d89f46_100%)] shadow-[0_0_20px_rgba(234,196,129,0.35)]">
+              <Crown className="size-10 text-[#2d1d09]" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-[#2a446f] bg-[linear-gradient(90deg,#f1e3cb_0%,#ead7b7_40%,#e3cfaa_100%)] p-4 text-[#24180e]">
+        <div className="grid gap-3 md:grid-cols-4">
+          <div>
+            <div className="text-sm text-[#6b4f2a]">可提现收益（元）</div>
+            <div className="mt-1 text-2xl font-black md:text-3xl">¥ {formatYuan(withdrawable)}</div>
+            <Button className="mt-3 h-10 rounded-lg bg-[#151515] px-6 text-[#f3dfbe] hover:bg-black">立即提现</Button>
+          </div>
+          <div><div className="text-sm text-[#6b4f2a]">累计收益（元）</div><div className="mt-3 text-2xl font-black md:text-3xl">{formatYuan(totalCommission)}</div></div>
+          <div><div className="text-sm text-[#6b4f2a]">本月预估（元）</div><div className="mt-3 text-2xl font-black md:text-3xl">{formatYuan(monthCommission)}</div></div>
+          <div><div className="text-sm text-[#6b4f2a]">可提现余额（元）</div><div className="mt-3 text-2xl font-black md:text-3xl">{formatYuan(withdrawable)}</div><div className="mt-2 text-right text-sm text-[#6b4f2a]">提现明细</div></div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+        <Card className="min-w-0 rounded-xl border-[#d9e3fb] bg-none [background:linear-gradient(160deg,#ffffff,#f6f9ff)] text-[#16335f]">
+          <CardContent className="space-y-4 pt-5">
+            <div className="text-xl font-bold text-[#0f2f62]">我的专属推广</div>
+            <div className="text-sm text-[#5b77a5]">专属链接</div>
+            <div className="flex flex-col gap-2 lg:flex-row">
+              <div className="flex-1 rounded-lg border border-[#c7d7f8] bg-white px-3 py-2 font-mono text-sm break-all text-[#1f3e73]">{link || "暂无推广链接"}</div>
+              <Button type="button" className="h-10 rounded-lg bg-[#e6c894] text-[#2b1f10] hover:bg-[#f1d8ae]" onClick={async () => {
+                if (!link) return;
+                await navigator.clipboard.writeText(link);
+                toast.success("专属链接已复制");
+              }}>
+                <Copy className="size-4" />
+                复制链接
+              </Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-[170px_1fr]">
+              <div className="rounded-lg border border-[#d3def8] bg-[#f5f8ff] p-2">
+                {qrURL ? <img src={qrURL} alt="专属推广二维码" className="h-[150px] w-[150px] rounded bg-white p-1" /> : <div className="flex h-[150px] w-[150px] items-center justify-center rounded border border-dashed border-[#35537d] text-xs text-[#9db1d1]">暂无二维码</div>}
+              </div>
+              <div className="space-y-2">
+                <div className="text-base font-semibold text-[#193d73]">专属二维码</div>
+                <p className="text-sm text-[#5877a8]">扫码注册自动绑定代理关系，后续充值消费将进入分成统计。</p>
+                <div className="flex gap-2">
+                  <Button variant="outline" className="h-9 rounded-lg border-[#c9d8ff] bg-white text-[#3d56d8]" asChild><a href={qrURL || "#"} download="agency-invite-qrcode.png" target="_blank" rel="noreferrer">下载二维码</a></Button>
+                  <Button variant="outline" className="h-9 rounded-lg border-[#c9d8ff] bg-white text-[#3d56d8]">分享链接</Button>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="min-w-0 rounded-xl border-[#d9e3fb] bg-none [background:linear-gradient(160deg,#ffffff,#f6f9ff)] text-[#16335f]">
+          <CardContent className="space-y-3 pt-5">
+            <div className="flex items-center justify-between">
+              <div className="text-xl font-bold text-[#0f2f62]">团队数据概览</div>
+              <div className="text-xs text-[#5d7caf]">查看全部</div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="text-xs text-[#5878a8]">新增注册</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">{registeredCount.toLocaleString("zh-CN")}</div></div>
+              <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="text-xs text-[#5878a8]">充值金额</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">¥ {formatYuan(rechargeAmount)}</div></div>
+              <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="text-xs text-[#5878a8]">有效付费用户</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">{rechargeUserCount.toLocaleString("zh-CN")}</div></div>
+              <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="text-xs text-[#5878a8]">分成订单数</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">{orders.length.toLocaleString("zh-CN")}</div></div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="rounded-xl border border-[#d6d9f5] bg-[linear-gradient(120deg,#e8e8ff,#f0efff)] px-5 py-4 text-[#143765]">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-xl font-bold">升级更高等级，享受更高分成比例</div>
+            <div className="mt-1 text-sm text-[#5a77a8]">当前等级：{currentTierName || "未开通"}（分成比例 {formatPercentByBP(agent?.commission_bp)}）</div>
+          </div>
+          <Button className="h-10 rounded-lg bg-[#e4c794] px-5 text-[#271a0e] hover:bg-[#f0d6ab]" onClick={() => setActiveMenu("benefits")}>查看等级权益</Button>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+        <Card className="min-w-0 rounded-xl border-[#d9e3fb] bg-none [background:linear-gradient(160deg,#ffffff,#f6f9ff)] text-[#16335f]">
+          <CardHeader><CardTitle className="text-lg text-[#16335f]">收益趋势</CardTitle></CardHeader>
+          <CardContent>
+              <div className="rounded-xl border border-[#d4dff8] bg-[#f8fbff] p-4">
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-52 w-full">
+                <defs>
+                  <linearGradient id="lineFill" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stopColor="#7fa4ff" stopOpacity="0.25" />
+                    <stop offset="100%" stopColor="#7fa4ff" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <polyline points={`0,100 ${pointsText} 100,100`} fill="url(#lineFill)" stroke="none" />
+                <polyline points={pointsText} fill="none" stroke="#4a6fff" strokeWidth="1.4" />
+              </svg>
+              <div className="mt-2 grid grid-cols-7 text-center text-xs text-[#5d7cad]">
+                {trendRows.map((item) => <span key={item.key}>{item.label}</span>)}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="min-w-0 rounded-xl border-[#d9e3fb] bg-none [background:linear-gradient(160deg,#ffffff,#f6f9ff)] text-[#16335f]">
+          <CardHeader><CardTitle className="text-lg text-[#16335f]">收益构成</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="mx-auto flex h-44 w-44 items-center justify-center rounded-full p-5" style={ringStyle}>
+              <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-[#08172c] text-center">
+                <div className="text-sm text-[#5a79aa]">总收益</div>
+                <div className="text-2xl font-black text-[#1d3f71]">{formatYuan(totalCommission)}</div>
+              </div>
+            </div>
+              <div className="space-y-2 text-sm text-[#4a689b]">
+                <div className="flex items-center justify-between"><span>充值分成</span><span>{composition.rechargePct}%</span><span>¥ {formatYuan(composition.recharge)}</span></div>
+                <div className="flex items-center justify-between"><span>会员分成</span><span>{composition.memberPct}%</span><span>¥ {formatYuan(composition.member)}</span></div>
+                <div className="flex items-center justify-between"><span>消费分成</span><span>{composition.consumePct}%</span><span>¥ {formatYuan(composition.consume)}</span></div>
+              </div>
+            </CardContent>
+          </Card>
+      </div>
+
+      <Card className="min-w-0 rounded-xl border-[#d9e3fb] bg-none [background:linear-gradient(160deg,#ffffff,#f8fbff)] text-[#16335f]">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-lg text-[#16335f]">分成明细</CardTitle>
+          <div className="text-xs text-[#c5a97a]">全部类型</div>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="min-w-[860px] w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#d7e2fb] text-left text-[#5d7cad]">
+                  <th className="px-2 py-3">订单号</th>
+                  <th className="px-2 py-3">用户</th>
+                  <th className="px-2 py-3">类型</th>
+                  <th className="px-2 py-3">金额（元）</th>
+                  <th className="px-2 py-3">分成比例</th>
+                  <th className="px-2 py-3">分成金额（元）</th>
+                  <th className="px-2 py-3">时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orders.length === 0 ? (
+                  <tr><td className="px-2 py-10 text-center text-[#7892bf]" colSpan={7}>暂无分成订单</td></tr>
+                ) : orders.slice(0, 10).map((item) => (
+                  <tr key={item.id} className="border-b border-[#edf2ff] text-[#1f3f72]">
+                    <td className="px-2 py-3">{item.out_trade_no || item.id || "-"}</td>
+                    <td className="px-2 py-3">{item.user_email || item.user_id || "-"}</td>
+                    <td className="px-2 py-3">充值分成</td>
+                    <td className="px-2 py-3">¥ {item.amount_yuan || formatYuan((item.amount_cents || 0) / 100)}</td>
+                    <td className="px-2 py-3">{formatPercentByBP(agent?.commission_bp)}</td>
+                    <td className="px-2 py-3">¥ {item.commission_yuan || formatYuan((item.commission_cents || 0) / 100)}</td>
+                    <td className="px-2 py-3">{formatDateTime(item.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-4 flex items-center justify-between text-sm text-[#6c87b6]">
+            <span>共 {orders.length} 条</span>
+            <span>10 条/页</span>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+
+  const renderPromotion = () => (
+    <Card className="min-w-0 rounded-xl border-[#d9e3fb] bg-none [background:linear-gradient(160deg,#ffffff,#f6f9ff)] text-[#16335f]">
+      <CardHeader><CardTitle className="text-lg text-[#16335f]">推广链接</CardTitle></CardHeader>
+      <CardContent className="space-y-3">
+        <div className="rounded-lg border border-[#c7d7f8] bg-white px-3 py-2 font-mono text-sm break-all text-[#1f3e73]">{link || "暂无推广链接"}</div>
+        <div className="grid gap-4 md:grid-cols-[280px_1fr]">
+          <div>{qrURL ? <img src={qrURL} alt="专属推广二维码" className="h-[260px] w-[260px] rounded-md bg-white p-2" /> : null}</div>
+          <div className="space-y-3">
+            <div className="text-sm text-[#5877a8]">二维码会随着你的推广链接自动生成。正式上线后使用正式域名访问，二维码会自动切换到正式域名地址。</div>
+            <div className="flex gap-2"><Button className="h-9 rounded-lg bg-[#e6c894] text-[#2b1f10] hover:bg-[#f1d8ae]">复制链接</Button><Button variant="outline" className="h-9 rounded-lg border-[#c9d8ff] bg-white text-[#3d56d8]">下载二维码</Button></div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const renderTeam = () => (
+    <Card className="min-w-0 rounded-xl border-[#d9e3fb] bg-none [background:linear-gradient(160deg,#ffffff,#f6f9ff)] text-[#16335f]">
+      <CardHeader><CardTitle className="text-lg text-[#16335f]">我的团队</CardTitle></CardHeader>
+      <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="text-sm text-[#5878a8]">邀请用户总数</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">{invitedCount.toLocaleString("zh-CN")}</div></div>
+        <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="text-sm text-[#5878a8]">新增注册</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">{registeredCount.toLocaleString("zh-CN")}</div></div>
+        <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="text-sm text-[#5878a8]">有效付费用户</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">{rechargeUserCount.toLocaleString("zh-CN")}</div></div>
+        <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="text-sm text-[#5878a8]">充值金额</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">¥ {formatYuan(rechargeAmount)}</div></div>
+      </CardContent>
+    </Card>
+  );
+
+  const renderIncome = () => (
+    <Card className="min-w-0 rounded-xl border-[#d9e3fb] bg-none [background:linear-gradient(160deg,#ffffff,#f8fbff)] text-[#16335f]">
+      <CardHeader><CardTitle className="text-lg text-[#16335f]">收益明细</CardTitle></CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table className="min-w-[860px] w-full text-sm">
+            <thead>
+              <tr className="border-b border-[#d7e2fb] text-left text-[#5d7cad]">
+                <th className="px-2 py-3">订单号</th>
+                <th className="px-2 py-3">用户</th>
+                <th className="px-2 py-3">类型</th>
+                <th className="px-2 py-3">金额（元）</th>
+                <th className="px-2 py-3">分成比例</th>
+                <th className="px-2 py-3">分成金额（元）</th>
+                <th className="px-2 py-3">状态</th>
+                <th className="px-2 py-3">时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.length === 0 ? (
+                <tr><td className="px-2 py-9 text-center text-[#7892bf]" colSpan={8}>暂无收益订单</td></tr>
+              ) : orders.slice(0, 20).map((item) => (
+                <tr key={item.id} className="border-b border-[#edf2ff] text-[#1f3f72]">
+                  <td className="px-2 py-3">{item.out_trade_no || item.id || "-"}</td>
+                  <td className="px-2 py-3">{item.user_email || item.user_id || "-"}</td>
+                  <td className="px-2 py-3">充值分成</td>
+                  <td className="px-2 py-3">¥ {item.amount_yuan || formatYuan((item.amount_cents || 0) / 100)}</td>
+                  <td className="px-2 py-3">{formatPercentByBP(agent?.commission_bp)}</td>
+                  <td className="px-2 py-3">¥ {item.commission_yuan || formatYuan((item.commission_cents || 0) / 100)}</td>
+                  <td className="px-2 py-3">{STATUS_TEXT[(item.status || "").toLowerCase()] || item.status || "-"}</td>
+                  <td className="px-2 py-3">{formatDateTime(item.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const renderWithdraw = () => (
+    <Card className="min-w-0 rounded-xl border-[#d9e3fb] bg-none [background:linear-gradient(160deg,#ffffff,#f8fbff)] text-[#16335f]">
+      <CardHeader><CardTitle className="text-lg text-[#16335f]">提现管理</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-[#d4e0fa] bg-white p-4"><div className="text-sm text-[#5878a8]">可提现余额</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">¥ {formatYuan(withdrawable)}</div></div>
+          <div className="rounded-xl border border-[#d4e0fa] bg-white p-4"><div className="text-sm text-[#5878a8]">待结算收益</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">¥ {formatYuan(pendingAmount)}</div></div>
+          <div className="rounded-xl border border-[#d4e0fa] bg-white p-4"><div className="text-sm text-[#5878a8]">累计收益</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">¥ {formatYuan(totalCommission)}</div></div>
+        </div>
+        <div className="rounded-xl border border-dashed border-[#c9d8ff] bg-[#f7f9ff] p-4 text-sm text-[#5f7faf]">提现功能入口已预留，你确认后我继续接入真实提现申请和审核流程。</div>
+      </CardContent>
+    </Card>
+  );
+
+  const renderMaterials = () => (
+    <Card className="min-w-0 rounded-xl border-[#d9e3fb] bg-none [background:linear-gradient(160deg,#ffffff,#f8fbff)] text-[#16335f]">
+      <CardHeader><CardTitle className="text-lg text-[#16335f]">推广素材</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="mb-2 text-sm text-[#5878a8]">横幅素材 A</div><div className="h-24 rounded-lg bg-[linear-gradient(120deg,#f8edd8,#eef4ff)]" /></div>
+          <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="mb-2 text-sm text-[#5878a8]">横幅素材 B</div><div className="h-24 rounded-lg bg-[linear-gradient(120deg,#ecf2ff,#f6efff)]" /></div>
+          <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="mb-2 text-sm text-[#5878a8]">短文案模板</div><div className="text-xs leading-6 text-[#5f7faf]">高质量 AI 生图，代理分成实时到账，扫码注册自动绑定邀请关系。</div></div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const renderBenefits = () => (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-[#d6d9f5] bg-[linear-gradient(120deg,#eef0ff,#f5f6ff)] px-5 py-4 text-[#133764]">
+        <div className="text-xl font-bold">等级权益与升级</div>
+        <div className="mt-1 text-sm text-[#5a77a8]">当前等级：{currentTierName || "未开通"}（分成比例 {formatPercentByBP(agent?.commission_bp)}）</div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        {(["basic", "pro", "premium"] as const).map((key) => {
+          const tier = tierByKey.get(key);
+          if (!tier) return null;
+          const selected = selectedTierKey === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setSelectedTierKey(key)}
+              className={cn("rounded-xl border p-4 text-left transition", selected ? "border-[#e4c794] bg-[#f9f2e5] text-[#8a5b1e]" : "border-[#d4e0fa] bg-white text-[#5f7faf]")}
+            >
+              <div className="text-lg font-bold">{tier.name}</div>
+              <div className="mt-2 text-sm">分成：{tier.commission_percent || formatPercentByBP(tier.commission_bp)}</div>
+              <div className="text-sm">优惠：{tier.discount_percent || formatPercentByBP(tier.discount_bp)}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      <Card className="min-w-0 rounded-xl border-[#d9e3fb] bg-none [background:linear-gradient(160deg,#ffffff,#f8fbff)] text-[#16335f]">
+        <CardHeader><CardTitle className="text-lg text-[#16335f]">可升级选项</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          {upgradeCandidates.length === 0 ? (
+            <div className="text-sm text-[#6b86b5]">当前档位已是最高或无可升级方案。</div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              {upgradeCandidates.map((tier) => (
+                <div key={tier.key} className="rounded-xl border border-[#d4e0fa] bg-white p-3">
+                  <div className="text-lg font-bold">{tier.name}</div>
+                  <div className="mt-1 text-sm text-[#5d7cad]">升级价格：¥ {formatYuan((tier.price_cents || 0) / 100)}</div>
+                  <div className="text-sm text-[#5d7cad]">分成比例：{tier.commission_percent || formatPercentByBP(tier.commission_bp)}</div>
+                  <Button className="mt-3 h-9 rounded-lg bg-[#e6c894] text-[#2b1f10] hover:bg-[#f1d8ae]" onClick={() => onRequestUpgrade(tier.key)}>升级到 {tier.name}</Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+
+  const renderSettings = () => (
+    <div className="rounded-xl border border-[#d6d9f5] bg-[linear-gradient(120deg,#eef0ff,#f5f6ff)] p-4 text-center text-[#173a68]">
+      <div className="flex items-center justify-center gap-2"><img src={brandLogoURL} alt="" className="size-7 rounded-md border border-[#876437]" /><span className="font-semibold">{brandTitle}</span></div>
+      <div className="mt-1 text-xs text-[#5f7faf]">当前等级：{currentTierName || "未开通"}，待结算：¥ {formatYuan(pendingAmount)}，邀请总数：{invitedCount}</div>
+      <Button variant="outline" className="mt-3 h-8 rounded-lg border-[#c9d8ff] bg-white text-[#3d56d8]" onClick={() => void onReload()} disabled={isLoading}><RefreshCw className={cn("size-4", isLoading ? "animate-spin" : "")} />刷新数据</Button>
+    </div>
+  );
+
+  const renderContent = () => {
+    if (activeMenu === "overview") return renderOverview();
+    if (activeMenu === "promotion") return renderPromotion();
+    if (activeMenu === "team") return renderTeam();
+    if (activeMenu === "income") return renderIncome();
+    if (activeMenu === "withdraw") return renderWithdraw();
+    if (activeMenu === "materials") return renderMaterials();
+    if (activeMenu === "benefits") return renderBenefits();
+    return renderSettings();
+  };
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-[#dde3f5] bg-[linear-gradient(160deg,#f7f9ff_0%,#f2f4ff_55%,#f8f9ff_100%)] p-4 text-[#16335f]">
+      <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]">
+        <aside className="space-y-4">
+          <div className="rounded-2xl border border-[#dde3f5] bg-white p-4">
+            <div className="flex items-center gap-2"><Crown className="size-4 text-[#5a70ff]" /><span className="text-lg font-bold text-[#16335f]">至尊代理</span></div>
+            <div className="mt-2 text-sm text-[#5f7faf]">高级合伙人</div>
+          </div>
+
+          <div className="rounded-2xl border border-[#dde3f5] bg-white p-2">
+            {AGENCY_MENU.map((item) => {
+              const Icon = item.icon;
+              const active = activeMenu === item.key;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setActiveMenu(item.key)}
+                  className={cn("mb-1.5 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition", active ? "bg-[#edf2ff] text-[#214175]" : "text-[#617faa] hover:bg-[#f3f6ff]")}
+                >
+                  <Icon className={cn("size-4", active ? "text-[#4f66ff]" : "text-[#8ea8cf]")} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+
+        <div className="min-w-0">{renderContent()}</div>
+      </div>
+    </section>
+  );
+}
+
+export default function AgencyPage() {
+  const appMeta = useAppMeta();
+  const session = useMemo(() => getCachedAuthSession(), []);
+  const isAdmin = session?.role === "admin";
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [config, setConfig] = useState<AgencyConfig | null>(null);
+  const [prices, setPrices] = useState<Record<string, string>>({});
+  const [commissionBPs, setCommissionBPs] = useState<Record<string, string>>({});
+  const [discountBPs, setDiscountBPs] = useState<Record<string, string>>({});
+
+  const [currentTier, setCurrentTier] = useState("");
+  const [agencyEnabled, setAgencyEnabled] = useState(false);
+  const [joiningTier, setJoiningTier] = useState("");
+  const [agencyPayChannels, setAgencyPayChannels] = useState<PayType[]>([]);
+  const [agencyPayType, setAgencyPayType] = useState<PayType | "">("");
+  const [isPayDialogOpen, setIsPayDialogOpen] = useState(false);
+  const [pendingJoinTier, setPendingJoinTier] = useState<TierKey | "">("");
+  const [dashboard, setDashboard] = useState<AgencyCommissionDashboard | null>(null);
+  const [isDashboardLoading, setIsDashboardLoading] = useState(false);
+
+  const [allUsers, setAllUsers] = useState<ManagedUser[]>([]);
+  const [agencyUsers, setAgencyUsers] = useState<AgencyAdminUser[]>([]);
+  const [isLoadingAdminUsers, setIsLoadingAdminUsers] = useState(false);
+  const [activatingUserID, setActivatingUserID] = useState("");
+
+  const loadDashboard = useCallback(async (): Promise<boolean> => {
+    if (isAdmin) return true;
+    setIsDashboardLoading(true);
+    try {
+      const data = await fetchAgencyCommissionDashboard();
+      setDashboard(data);
+      return true;
+    } catch (error) {
+      setDashboard(null);
+      const message = error instanceof Error ? error.message : "加载代理分成失败";
+      if (/permission denied|forbidden/i.test(message)) {
+        setAgencyEnabled(false);
+        toast.info("当前账号无代理分成权限，已切换到代理开通页");
+        return false;
+      }
+      toast.error(message);
+      return false;
+    } finally {
+      setIsDashboardLoading(false);
+    }
+  }, [isAdmin]);
+
+  const loadAdminUsers = useCallback(async () => {
+    if (!isAdmin) return;
+    setIsLoadingAdminUsers(true);
+    try {
+      const [usersRes, agentsRes] = await Promise.all([fetchManagedUsers(), fetchAgencyAdminUsers()]);
+      setAllUsers(usersRes.items || []);
+      setAgencyUsers(agentsRes.items || []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载代理用户失败");
+    } finally {
+      setIsLoadingAdminUsers(false);
+    }
+  }, [isAdmin]);
+
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const data = await fetchAgencyConfig();
+      setConfig(data);
+
+      const nextPrices: Record<string, string> = {};
+      const nextCommissionBPs: Record<string, string> = {};
+      const nextDiscountBPs: Record<string, string> = {};
+      for (const tier of data.tiers || []) {
+        nextPrices[tier.key] = (Math.max(0, Number(tier.price_cents || 0)) / 100).toFixed(2);
+        nextCommissionBPs[tier.key] = String(tier.commission_bp ?? 0);
+        nextDiscountBPs[tier.key] = String(tier.discount_bp ?? 0);
+      }
+      setPrices(nextPrices);
+      setCommissionBPs(nextCommissionBPs);
+      setDiscountBPs(nextDiscountBPs);
+
+      if (isAdmin) {
+        await loadAdminUsers();
+      } else {
+        try {
+          const wallet = await fetchWallet();
+          const token = await getStoredSessionToken();
+          let roleName = String(session?.roleName || "").trim();
+          let roleID = String(session?.roleId || "").trim();
+          if (token) {
+            try {
+              const sessionData = await verifySession(token);
+              roleName = String(sessionData.role_name || "").trim();
+              roleID = String(sessionData.role_id || "").trim();
+            } catch {}
+          }
+          const tier = tierFromRole(roleName, roleID);
+          const enabled = tier !== "";
+          const channels = Array.isArray(wallet.pay_channels) ? (wallet.pay_channels.filter(Boolean) as PayType[]) : [];
+          setAgencyPayChannels(channels);
+          setCurrentTier(tier);
+          if (!enabled) {
+            setAgencyEnabled(false);
+            setDashboard(null);
+          } else {
+            setAgencyEnabled(true);
+            const ok = await loadDashboard();
+            if (!ok) setAgencyEnabled(false);
+          }
+        } catch {
+          setCurrentTier("");
+          setAgencyEnabled(false);
+          setDashboard(null);
+        }
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载代理配置失败");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isAdmin, loadAdminUsers, loadDashboard, session?.roleId, session?.roleName]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const tiers = useMemo(() => orderedTiers(config?.tiers || []), [config]);
+
+  const handleSubmitJoin = async (tier: TierKey, payType: PayType) => {
+    setJoiningTier(tier);
+    try {
+      const currentRank = tierRank(currentTier);
+      const targetRank = tierRank(tier);
+      const response = currentRank > 0 && targetRank > currentRank ? await upgradeAgencyTier(tier, payType) : await joinAgencyTier(tier, payType);
+      const payURL = String(response.order?.pay_url || "").trim();
+      if (payURL) {
+        window.open(payURL, "_blank", "noopener,noreferrer");
+        toast.success("请先完成支付，支付成功后会自动开通代理权限");
+      } else {
+        toast.error("未获取到支付链接，请检查支付配置");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "开通代理失败";
+      if (/already activated/i.test(message)) {
+        await load();
+        return;
+      }
+      toast.error(message);
+    } finally {
+      setJoiningTier("");
+    }
+  };
+
+  const handleJoin = async (tier: TierKey) => {
+    if (isAdmin) {
+      toast.info("管理员账号无需购买代理套餐");
+      return;
+    }
+    const currentRank = tierRank(currentTier);
+    const targetRank = tierRank(tier);
+    if (currentRank > 0 && targetRank <= currentRank) return;
+    setPendingJoinTier(tier);
+    setIsPayDialogOpen(true);
+  };
+
+  const handleConfirmJoin = async () => {
+    if (!pendingJoinTier) return;
+    if (agencyPayChannels.length === 0) {
+      toast.error("当前未启用支付渠道，请联系管理员在后台支付配置中开启");
+      return;
+    }
+    if (!agencyPayType) {
+      toast.error("请选择您需要的支付方式");
+      return;
+    }
+    setIsPayDialogOpen(false);
+    await handleSubmitJoin(pendingJoinTier, agencyPayType);
+    setPendingJoinTier("");
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await updateAgencyConfig({
+        agency_tier_basic_cents: parseYuanToCents(prices.basic),
+        agency_tier_pro_cents: parseYuanToCents(prices.pro),
+        agency_tier_premium_cents: parseYuanToCents(prices.premium),
+        agency_tier_basic_commission_bp: parsePositiveInt(commissionBPs.basic),
+        agency_tier_pro_commission_bp: parsePositiveInt(commissionBPs.pro),
+        agency_tier_premium_commission_bp: parsePositiveInt(commissionBPs.premium),
+        agency_tier_basic_discount_bp: parsePositiveInt(discountBPs.basic),
+        agency_tier_pro_discount_bp: parsePositiveInt(discountBPs.pro),
+        agency_tier_premium_discount_bp: parsePositiveInt(discountBPs.premium),
+      });
+      toast.success("代理配置已更新");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存代理配置失败");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const agencyTierByUserID = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of agencyUsers) {
+      if (item.id) map.set(item.id, item.agency_tier || "");
+    }
+    return map;
+  }, [agencyUsers]);
+
+  const sortedAdminUsers = useMemo(
+    () => [...allUsers].sort((a, b) => (a.email || a.username || a.name || a.id || "").localeCompare((b.email || b.username || b.name || b.id || ""), "zh-CN")),
+    [allUsers],
+  );
+
+  const handleActivateAgency = async (userID: string, tier: TierKey) => {
+    setActivatingUserID(`${userID}:${tier}`);
+    try {
+      await activateAgencyUser({ user_id: userID, tier });
+      toast.success("已更新该用户代理等级");
+      await loadAdminUsers();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "更新代理等级失败");
+    } finally {
+      setActivatingUserID("");
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  const showAgencyPackage = isAdmin || !agencyEnabled;
+  const currentTierName = tierLabel(currentTier, tiers);
+  const brandTitle = (appMeta.app_title || "chatgpt2api").trim() || "chatgpt2api";
+  const brandLogoURL = resolveBrandAssetURL(appMeta.top_left_logo_url || "/logo-mark.svg") || "/logo-mark.svg";
+
+  return (
+    <div className="mx-auto w-full max-w-[1280px] space-y-5">
+      {showAgencyPackage ? (
+        <AgencyPackageShowcase tiers={tiers} currentTier={currentTier} joiningTier={joiningTier} onJoin={handleJoin} />
+      ) : (
+        <AgencyCommissionCenter
+          dashboard={dashboard}
+          tiers={tiers}
+          currentTier={currentTier}
+          currentTierName={currentTierName}
+          brandTitle={brandTitle}
+          brandLogoURL={brandLogoURL}
+          isLoading={isDashboardLoading}
+          onReload={loadDashboard}
+          onRequestUpgrade={(tier) => void handleJoin(tier)}
+        />
+      )}
+
+      {showAgencyPackage && !isAdmin ? (
+        <Dialog
+          open={isPayDialogOpen}
+          onOpenChange={(open) => {
+            setIsPayDialogOpen(open);
+            if (!open) setPendingJoinTier("");
+          }}
+        >
+          <DialogContent className="rounded-2xl p-6 sm:max-w-md">
+            <DialogHeader><DialogTitle>选择支付方式</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <Select value={agencyPayType || undefined} onValueChange={(value) => setAgencyPayType(value as PayType)}>
+                <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="请选择支付方式" /></SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {agencyPayChannels.includes("alipay") ? <SelectItem value="alipay">支付宝</SelectItem> : null}
+                    {agencyPayChannels.includes("wxpay") ? <SelectItem value="wxpay">微信支付</SelectItem> : null}
+                    {agencyPayChannels.includes("qqpay") ? <SelectItem value="qqpay">QQ钱包</SelectItem> : null}
+                    {agencyPayChannels.includes("paypal") ? <SelectItem value="paypal">PayPal</SelectItem> : null}
+                    {agencyPayChannels.includes("usdt") ? <SelectItem value="usdt">USDT</SelectItem> : null}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              {agencyPayChannels.length === 0 ? <p className="text-sm text-muted-foreground">当前未启用支付渠道，请联系管理员在后台支付配置中开启。</p> : null}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="secondary" className="h-10 rounded-xl px-5" onClick={() => setIsPayDialogOpen(false)}>取消</Button>
+              <Button type="button" className="h-10 rounded-xl px-5" onClick={() => void handleConfirmJoin()} disabled={joiningTier !== ""}>
+                {joiningTier ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                确认并支付
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+
+      {isAdmin ? (
+        <>
+          <Card className="rounded-2xl border-border/80">
+            <CardHeader><CardTitle className="text-lg">代理价格与比例配置</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                {tiers.map((tier) => (
+                  <div key={tier.key} className="space-y-2 rounded-xl border border-border/60 p-3">
+                    <div className="text-sm font-medium">{tier.name}</div>
+                    <Field className="gap-1.5"><FieldLabel htmlFor={`agency-price-${tier.key}`}>价格（元）</FieldLabel><Input id={`agency-price-${tier.key}`} value={prices[tier.key] ?? ""} onChange={(event) => setPrices((prev) => ({ ...prev, [tier.key]: event.target.value }))} /></Field>
+                    <Field className="gap-1.5"><FieldLabel htmlFor={`agency-commission-${tier.key}`}>分成比例（BP）</FieldLabel><Input id={`agency-commission-${tier.key}`} value={commissionBPs[tier.key] ?? ""} onChange={(event) => setCommissionBPs((prev) => ({ ...prev, [tier.key]: event.target.value }))} /></Field>
+                    <Field className="gap-1.5"><FieldLabel htmlFor={`agency-discount-${tier.key}`}>充值优惠（BP）</FieldLabel><Input id={`agency-discount-${tier.key}`} value={discountBPs[tier.key] ?? ""} onChange={(event) => setDiscountBPs((prev) => ({ ...prev, [tier.key]: event.target.value }))} /></Field>
+                  </div>
+                ))}
+              </div>
+              <Button onClick={() => void handleSave()} disabled={isSaving}>{isSaving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}保存代理配置</Button>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border-border/80">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-lg">后台开通代理权限</CardTitle>
+              <Button variant="outline" onClick={() => void loadAdminUsers()} disabled={isLoadingAdminUsers}>{isLoadingAdminUsers ? <LoaderCircle className="size-4 animate-spin" /> : null}刷新</Button>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="min-w-[980px] w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border/60 text-left text-muted-foreground">
+                      <th className="px-2 py-3 font-medium">用户名称</th>
+                      <th className="px-2 py-3 font-medium">注册邮箱</th>
+                      <th className="px-2 py-3 font-medium">当前代理</th>
+                      <th className="px-2 py-3 font-medium">当前角色</th>
+                      <th className="px-2 py-3 font-medium">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedAdminUsers.map((user) => {
+                      const currentTierKey = agencyTierByUserID.get(user.id) || "";
+                      return (
+                        <tr key={user.id} className="border-b border-border/40 align-top">
+                          <td className="px-2 py-3">{user.name || user.username || user.id}</td>
+                          <td className="px-2 py-3">{user.email || "-"}</td>
+                          <td className="px-2 py-3">{tierLabel(currentTierKey, tiers)}</td>
+                          <td className="px-2 py-3">{user.role_name || "普通用户"}</td>
+                          <td className="px-2 py-3">
+                            <div className="flex flex-wrap gap-2">
+                              {(["basic", "pro", "premium"] as const).map((tier) => {
+                                const pending = activatingUserID === `${user.id}:${tier}`;
+                                const isCurrent = currentTierKey === tier;
+                                return (
+                                  <Button key={tier} type="button" size="sm" variant={isCurrent ? "default" : "outline"} disabled={pending || isLoadingAdminUsers} onClick={() => void handleActivateAgency(user.id, tier)}>
+                                    {pending ? "处理中..." : `${tierLabel(tier, tiers)}${isCurrent ? "（当前）" : ""}`}
+                                  </Button>
+                                );
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {!isLoadingAdminUsers && sortedAdminUsers.length === 0 ? <div className="py-8 text-center text-sm text-muted-foreground">暂无可配置代理的用户</div> : null}
+            </CardContent>
+          </Card>
+        </>
+      ) : null}
+    </div>
+  );
+}

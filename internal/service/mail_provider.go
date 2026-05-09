@@ -595,10 +595,15 @@ func (p *registerCloudflareTempMailProvider) CreateMailbox(username string) (map
 	if err != nil {
 		return nil, err
 	}
+	enableRandomSubdomain := util.ToBool(p.entry["random_subdomain"])
 	payload := map[string]any{
 		"enablePrefix": true,
 		"name":         firstNonEmpty(strings.TrimSpace(username), registerRandomMailboxName()),
 		"domain":       domain,
+	}
+	if enableRandomSubdomain {
+		// cloudflare_temp_email random subdomain feature is controlled by this request flag.
+		payload["enableRandomSubdomain"] = true
 	}
 	data, err := registerMailRequestJSON(p.client, http.MethodPost, apiBase+"/admin/new_address", map[string]string{
 		"Content-Type": "application/json",

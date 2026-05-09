@@ -22,6 +22,14 @@ type StreamResult struct {
 
 const xmlToolRule = "Tool output adapter: when calling tools, output ONLY this XML and no prose/markdown:\n<tool_calls><tool_call><tool_name>TOOL_NAME</tool_name><parameters><PARAM><![CDATA[value]]></PARAM></parameters></tool_call></tool_calls>"
 
+func bodyImageResolution(body map[string]any) string {
+	return NormalizeImageResolutionTier(firstNonEmpty(util.Clean(body["resolution"]), util.Clean(body["image_resolution"])))
+}
+
+func bodyResolvedImageSize(body map[string]any) string {
+	return ResolveImageSizeWithResolution(util.Clean(body["size"]), bodyImageResolution(body))
+}
+
 func (e *Engine) HandleImageGenerations(ctx context.Context, body map[string]any) (map[string]any, *StreamResult, error) {
 	prompt := util.Clean(body["prompt"])
 	if prompt == "" {
@@ -32,11 +40,17 @@ func (e *Engine) HandleImageGenerations(ctx context.Context, body map[string]any
 	if err != nil {
 		return nil, nil, err
 	}
-	size := util.Clean(body["size"])
+	size := bodyResolvedImageSize(body)
 	quality := util.Clean(body["quality"])
+	outputFormat := NormalizeImageOutputFormat(util.Clean(body["output_format"]))
+	outputCompression, hasOutputCompression := normalizedImageOutputCompression(body["output_compression"])
 	responseFormat := firstNonEmpty(util.Clean(body["response_format"]), "b64_json")
 	baseURL := util.Clean(body["base_url"])
-	request := ConversationRequest{Prompt: prompt, Model: model, Messages: NormalizeMessages(util.AsMapSlice(body["messages"]), nil), N: n, Size: size, Quality: quality, ResponseFormat: responseFormat, BaseURL: baseURL, OwnerID: util.Clean(body["owner_id"]), MessageAsError: true}
+	request := ConversationRequest{Prompt: prompt, Model: model, Messages: NormalizeMessages(util.AsMapSlice(body["messages"]), nil), N: n, Size: size, Quality: quality, OutputFormat: outputFormat, ResponseFormat: responseFormat, BaseURL: baseURL, OwnerID: util.Clean(body["owner_id"]), OwnerName: util.Clean(body["owner_name"]), MessageAsError: true, RequirePaidAccount: RequiresPaidImageSize(size)}
+	if hasOutputCompression {
+		request.OutputCompression = &outputCompression
+	}
+	request = request.Normalized()
 	outputs, errCh := e.StreamImageOutputsWithPool(ctx, request)
 	if util.ToBool(body["stream"]) {
 		return nil, &StreamResult{Items: StreamImageChunks(outputs), Err: errCh, Kind: "openai"}, nil
@@ -50,19 +64,27 @@ func (e *Engine) HandleImageEdits(ctx context.Context, body map[string]any, imag
 	if len(encoded) == 0 {
 		return nil, nil, &ImageGenerationError{Message: "image is required", StatusCode: 502, Type: "server_error", Code: "upstream_error"}
 	}
+	size := bodyResolvedImageSize(body)
 	request := ConversationRequest{
-		Prompt:         util.Clean(body["prompt"]),
-		Model:          firstNonEmpty(util.Clean(body["model"]), util.ImageModelAuto),
-		N:              util.ToInt(body["n"], 1),
-		Size:           util.Clean(body["size"]),
-		Quality:        util.Clean(body["quality"]),
-		ResponseFormat: firstNonEmpty(util.Clean(body["response_format"]), "b64_json"),
-		BaseURL:        util.Clean(body["base_url"]),
-		OwnerID:        util.Clean(body["owner_id"]),
-		Messages:       NormalizeMessages(util.AsMapSlice(body["messages"]), nil),
-		Images:         encoded,
-		MessageAsError: true,
+		Prompt:             util.Clean(body["prompt"]),
+		Model:              firstNonEmpty(util.Clean(body["model"]), util.ImageModelAuto),
+		N:                  util.ToInt(body["n"], 1),
+		Size:               size,
+		Quality:            util.Clean(body["quality"]),
+		OutputFormat:       NormalizeImageOutputFormat(util.Clean(body["output_format"])),
+		ResponseFormat:     firstNonEmpty(util.Clean(body["response_format"]), "b64_json"),
+		BaseURL:            util.Clean(body["base_url"]),
+		OwnerID:            util.Clean(body["owner_id"]),
+		OwnerName:          util.Clean(body["owner_name"]),
+		Messages:           NormalizeMessages(util.AsMapSlice(body["messages"]), nil),
+		Images:             encoded,
+		MessageAsError:     true,
+		RequirePaidAccount: RequiresPaidImageSize(size),
 	}
+	if compression, ok := normalizedImageOutputCompression(body["output_compression"]); ok {
+		request.OutputCompression = &compression
+	}
+	request = request.Normalized()
 	outputs, errCh := e.StreamImageOutputsWithPool(ctx, request)
 	if util.ToBool(body["stream"]) {
 		return nil, &StreamResult{Items: StreamImageChunks(outputs), Err: errCh, Kind: "openai"}, nil
@@ -204,7 +226,10 @@ func (e *Engine) ImageChatResponse(ctx context.Context, body map[string]any) (ma
 	if err != nil {
 		return nil, nil, err
 	}
-	outputs, errCh := e.StreamImageOutputsWithPool(ctx, ConversationRequest{Prompt: prompt, Model: model, Messages: messages, N: n, Size: util.Clean(body["size"]), Quality: util.Clean(body["quality"]), ResponseFormat: "b64_json", OwnerID: util.Clean(body["owner_id"]), Images: EncodeImages(images)})
+	size := bodyResolvedImageSize(body)
+	request := ConversationRequest{Prompt: prompt, Model: model, Messages: messages, N: n, Size: size, Quality: util.Clean(body["quality"]), ResponseFormat: "b64_json", OwnerID: util.Clean(body["owner_id"]), OwnerName: util.Clean(body["owner_name"]), Images: EncodeImages(images), RequirePaidAccount: RequiresPaidImageSize(size)}
+	applyImageOutputOptionsToRequest(&request, ImageOutputOptionsFromPayload(body))
+	outputs, errCh := e.StreamImageOutputsWithPool(ctx, request.Normalized())
 	result, err := e.CollectImageOutputs(outputs, errCh)
 	if err != nil {
 		return nil, nil, err
@@ -223,7 +248,10 @@ func (e *Engine) ImageChatEvents(ctx context.Context, body map[string]any) (<-ch
 			errOut <- err
 			return
 		}
-		outputs, errCh := e.StreamImageOutputsWithPool(ctx, ConversationRequest{Prompt: prompt, Model: model, Messages: messages, N: n, Size: util.Clean(body["size"]), Quality: util.Clean(body["quality"]), ResponseFormat: "b64_json", OwnerID: util.Clean(body["owner_id"]), Images: EncodeImages(images)})
+		size := bodyResolvedImageSize(body)
+		request := ConversationRequest{Prompt: prompt, Model: model, Messages: messages, N: n, Size: size, Quality: util.Clean(body["quality"]), ResponseFormat: "b64_json", OwnerID: util.Clean(body["owner_id"]), OwnerName: util.Clean(body["owner_name"]), Images: EncodeImages(images), RequirePaidAccount: RequiresPaidImageSize(size)}
+		applyImageOutputOptionsToRequest(&request, ImageOutputOptionsFromPayload(body))
+		outputs, errCh := e.StreamImageOutputsWithPool(ctx, request.Normalized())
 		id := "chatcmpl-" + util.NewHex(32)
 		created := time.Now().Unix()
 		sentRole := false
@@ -261,6 +289,14 @@ func (e *Engine) ImageChatEvents(ctx context.Context, body map[string]any) (<-ch
 		errOut <- nil
 	}()
 	return out, errOut
+}
+
+func applyImageOutputOptionsToRequest(request *ConversationRequest, options ImageOutputOptions) {
+	if request == nil {
+		return
+	}
+	request.OutputFormat = options.Format
+	request.OutputCompression = options.Compression
 }
 
 func ChatImageArgs(body map[string]any) (string, string, int, []UploadedImage, []map[string]any, error) {
@@ -477,36 +513,68 @@ func (e *Engine) ResponseEventsScoped(ctx context.Context, body map[string]any, 
 		events = e.rememberResponseContextEventsScoped(scope, events, baseContext)
 		return events, errCh, nil
 	}
-	prompt := LatestUserPrompt(baseContext.Messages)
-	if prompt == "" {
-		return nil, nil, HTTPError{Status: 400, Message: "input text is required"}
-	}
-	n, err := ParseImageCount(body["n"])
+	request, prompt, err := ResponseImageGenerationRequest(body, scope, &previous)
 	if err != nil {
 		return nil, nil, err
 	}
-	imageModel := util.ImageModelAuto
-	if util.IsImageGenerationModel(responseModel) {
-		imageModel = responseModel
-	}
-	images := append([]string(nil), previous.Images...)
-	var currentImages []string
-	size := firstNonEmpty(util.Clean(body["size"]), "1:1")
-	if inputImages := ExtractResponseImages(body["input"]); len(inputImages) > 0 {
-		currentImages = EncodeImages(inputImages)
-		images = append(images, currentImages...)
-		if util.Clean(body["size"]) == "" {
-			size = ""
-		}
-	}
-	if len(images) > maxContextImages {
-		images = images[len(images)-maxContextImages:]
-	}
+	currentImages := ExtractResponseImageReferences(body["input"])
 	baseContext = MergeResponseContext(previous, currentMessages, currentImages)
-	outputs, errCh := e.StreamImageOutputsWithPool(ctx, ConversationRequest{Prompt: prompt, Model: imageModel, Messages: baseContext.Messages, N: n, Size: size, Quality: util.Clean(body["quality"]), ResponseFormat: "b64_json", OwnerID: scope, Images: images})
+	request.Messages = baseContext.Messages
+	outputs, errCh := e.StreamImageOutputsWithPool(ctx, request)
 	events, responseErr := StreamImageResponse(outputs, prompt, responseModel)
 	events = e.rememberResponseContextEventsScoped(scope, events, baseContext)
 	return events, combineErrorChannels(errCh, responseErr), nil
+}
+
+func ResponseImageGenerationRequest(body map[string]any, scope string, previous *ResponseContext) (ConversationRequest, string, error) {
+	responseModel := firstNonEmpty(util.Clean(body["model"]), util.ImageModelAuto)
+	if !util.IsResponsesImageToolModel(responseModel) {
+		return ConversationRequest{}, "", HTTPError{Status: 400, Message: "unsupported image_generation model: " + responseModel}
+	}
+	messages := MessagesFromInput(body["input"], body["instructions"])
+	prompt := LatestUserPrompt(messages)
+	if prompt == "" {
+		return ConversationRequest{}, "", HTTPError{Status: 400, Message: "input text is required"}
+	}
+	n, err := ParseImageCount(body["n"])
+	if err != nil {
+		return ConversationRequest{}, "", err
+	}
+	tool := ResponseImageGenerationTool(body)
+	sizeRaw := firstNonEmpty(util.Clean(tool["size"]), util.Clean(body["size"]), "auto")
+	resolution := NormalizeImageResolutionTier(firstNonEmpty(util.Clean(tool["resolution"]), util.Clean(body["resolution"]), util.Clean(body["image_resolution"])))
+	size := ResolveImageSizeWithResolution(sizeRaw, resolution)
+	inputImages := ExtractResponseImageReferences(body["input"])
+	images := []string(nil)
+	if previous != nil {
+		images = append(images, previous.Images...)
+	}
+	images = append(images, inputImages...)
+	if len(images) > maxContextImages {
+		images = images[len(images)-maxContextImages:]
+	}
+	outputFormat := NormalizeImageOutputFormat(firstNonEmpty(util.Clean(tool["output_format"]), util.Clean(body["output_format"])))
+	request := ConversationRequest{
+		Prompt:             prompt,
+		Model:              responseModel,
+		Messages:           messages,
+		N:                  n,
+		Size:               size,
+		Quality:            firstNonEmpty(util.Clean(tool["quality"]), util.Clean(body["quality"])),
+		OutputFormat:       outputFormat,
+		ResponseFormat:     firstNonEmpty(util.Clean(tool["response_format"]), util.Clean(body["response_format"]), "b64_json"),
+		OwnerID:            scope,
+		OwnerName:          util.Clean(body["owner_name"]),
+		Images:             images,
+		RequirePaidAccount: RequiresPaidImageSize(size),
+		ResponsesImageTool: true,
+	}
+	if outputFormat != "png" {
+		if compression, ok := normalizedImageOutputCompression(firstNonNil(tool["output_compression"], body["output_compression"])); ok {
+			request.OutputCompression = &compression
+		}
+	}
+	return request.Normalized(), prompt, nil
 }
 
 func (e *Engine) StreamTextResponse(ctx context.Context, body map[string]any) (<-chan map[string]any, <-chan error) {
@@ -661,15 +729,19 @@ func ImageOutputItems(prompt string, data []map[string]any, itemID string) []map
 }
 
 func HasResponseImageGenerationTool(body map[string]any) bool {
+	return len(ResponseImageGenerationTool(body)) > 0
+}
+
+func ResponseImageGenerationTool(body map[string]any) map[string]any {
 	for _, raw := range anyList(body["tools"]) {
 		if tool, ok := raw.(map[string]any); ok && util.Clean(tool["type"]) == "image_generation" {
-			return true
+			return tool
 		}
 	}
 	if choice := util.StringMap(body["tool_choice"]); choice != nil && util.Clean(choice["type"]) == "image_generation" {
-		return true
+		return choice
 	}
-	return false
+	return nil
 }
 
 func ExtractResponsePrompt(input any) string {
@@ -724,6 +796,63 @@ func ExtractResponseImages(input any) []UploadedImage {
 		images = images[len(images)-maxContextImages:]
 	}
 	return images
+}
+
+func ExtractResponseImageReferences(input any) []string {
+	var refs []string
+	var walk func(any)
+	walk = func(value any) {
+		if text, ok := value.(string); ok {
+			for _, image := range ExtractImagesFromText(text) {
+				if len(image.Data) == 0 {
+					continue
+				}
+				refs = append(refs, base64.StdEncoding.EncodeToString(image.Data))
+			}
+			return
+		}
+		if list := anyList(value); list != nil {
+			for _, raw := range list {
+				walk(raw)
+			}
+			return
+		}
+		item, ok := value.(map[string]any)
+		if !ok {
+			return
+		}
+		switch util.Clean(item["type"]) {
+		case "input_image":
+			ref := util.Clean(item["image_url"])
+			if imgMap, ok := item["image_url"].(map[string]any); ok {
+				ref = util.Clean(imgMap["url"])
+			}
+			if ref = normalizeResponseImageReference(ref); ref != "" {
+				refs = append(refs, ref)
+			}
+		case "image_generation_call":
+			if result := strings.TrimSpace(util.Clean(item["result"])); result != "" {
+				refs = append(refs, result)
+			}
+		}
+	}
+	walk(input)
+	if len(refs) > maxContextImages {
+		refs = refs[len(refs)-maxContextImages:]
+	}
+	return refs
+}
+
+func normalizeResponseImageReference(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "data:image/") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return value
+	}
+	return ""
 }
 
 func MessagesFromInput(input any, instructions any) []map[string]any {

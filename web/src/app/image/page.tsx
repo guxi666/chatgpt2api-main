@@ -6,9 +6,29 @@ import { toast } from "sonner";
 
 import { ImageComposer } from "@/app/image/components/image-composer";
 import { ImagePromptMarket } from "@/app/image/components/image-prompt-market";
-import { ImageResults, type ImageLightboxItem, type ImageTurnProgress } from "@/app/image/components/image-results";
+import { ImageResults, type ImageLightboxItem } from "@/app/image/components/image-results";
 import type { BananaPrompt } from "@/app/image/banana-prompts";
-import { IMAGE_QUALITY_OPTIONS, IMAGE_SIZE_OPTIONS } from "@/app/image/image-options";
+import {
+  CUSTOM_IMAGE_ASPECT_RATIO,
+  DEFAULT_IMAGE_CUSTOM_HEIGHT,
+  DEFAULT_IMAGE_CUSTOM_RATIO,
+  DEFAULT_IMAGE_CUSTOM_WIDTH,
+  IMAGE_ASPECT_RATIO_OPTIONS,
+  IMAGE_QUALITY_OPTIONS,
+  IMAGE_RESOLUTION_OPTIONS,
+  IMAGE_SIZE_MODE_OPTIONS,
+  buildImageSize,
+  formatImageSizeDisplay,
+  getImageSizeSelectionFromSize,
+  isImageAspectRatio,
+  isImageResolution,
+  isImageSizeMode,
+  parseImageRatio,
+  type ImageAspectRatio,
+  type ImageResolution,
+  type ImageSizeMode,
+  type ImageSizeSelection,
+} from "@/app/image/image-options";
 import { IMAGE_PROMPT_PRESETS, type ImagePromptPreset } from "@/app/image/image-presets";
 import { ImageSidebar } from "@/app/image/components/image-sidebar";
 import { ImageLightbox } from "@/components/image-lightbox";
@@ -32,30 +52,45 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  cancelImageTask,
+  cancelCreationTask,
   CHAT_MODEL_OPTIONS,
-  createChatCompletion,
+  createChatCompletionTask,
   createImageEditTask,
   createImageGenerationTask,
+  createResponseImageGenerationTask,
   DEFAULT_CHAT_MODEL,
   DEFAULT_IMAGE_MODEL,
-  fetchImageTasks,
-  IMAGE_TASK_MODEL_OPTIONS,
+  fetchCreationTasks,
+  IMAGE_CREATION_MODEL_OPTIONS,
+  IMAGE_OUTPUT_FORMAT_OPTIONS,
   isChatModel,
+  isImageCreationModel,
   isImageModel,
+  isImageOutputFormat,
   isImageQuality,
   isImageTaskModel,
+  isResponseImageToolModel,
+  supportsImageQuality,
+  updateManagedImageVisibility,
   type ImageModel,
+  type ImageOutputFormat,
   type ImageQuality,
-  type ImageTask,
-  type ImageTaskMessage,
+  type CreationTask,
+  type CreationTaskMessage,
+  type ImageVisibility,
 } from "@/lib/api";
+import { clearImageManagerCache } from "@/lib/image-manager-cache";
+import { getManagedImagePathFromUrl } from "@/lib/image-path";
+import { useAppMeta } from "@/lib/use-app-meta";
 import { cn } from "@/lib/utils";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import {
+  ACTIVE_IMAGE_CONVERSATION_STORAGE_KEY,
   clearImageConversations,
   deleteImageConversation,
   getImageConversationStats,
+  IMAGE_ACTIVE_CONVERSATION_REQUEST_EVENT,
+  IMAGE_CONVERSATIONS_CHANGED_EVENT,
   listImageConversations,
   saveImageConversation,
   saveImageConversations,
@@ -63,19 +98,37 @@ import {
   type ImageConversationMode,
   type ImageTurn,
   type ImageTurnStatus,
+  type StoredImageSizeSelection,
   type StoredImage,
   type StoredReferenceImage,
 } from "@/store/image-conversations";
+import {
+  clearImageTurnProgress,
+  getImageTurnProgressSnapshot,
+  imageTurnProgressKey,
+  setImageTurnProgress,
+  subscribeImageTurnProgress,
+  type ImageTurnProgress,
+} from "@/store/image-turn-progress";
 
-const ACTIVE_CONVERSATION_STORAGE_KEY = "chatgpt2api:image_active_conversation_id";
 const COMPOSER_MODE_STORAGE_KEY = "chatgpt2api:image_composer_mode";
 const IMAGE_MODEL_STORAGE_KEY = "chatgpt2api:image_last_model";
 const IMAGE_SIZE_STORAGE_KEY = "chatgpt2api:image_last_size";
+const IMAGE_SIZE_MODE_STORAGE_KEY = "chatgpt2api:image_last_size_mode";
+const IMAGE_ASPECT_RATIO_STORAGE_KEY = "chatgpt2api:image_last_aspect_ratio";
+const IMAGE_RESOLUTION_STORAGE_KEY = "chatgpt2api:image_last_resolution";
+const IMAGE_CUSTOM_RATIO_STORAGE_KEY = "chatgpt2api:image_last_custom_ratio";
+const IMAGE_CUSTOM_WIDTH_STORAGE_KEY = "chatgpt2api:image_last_custom_width";
+const IMAGE_CUSTOM_HEIGHT_STORAGE_KEY = "chatgpt2api:image_last_custom_height";
 const IMAGE_QUALITY_STORAGE_KEY = "chatgpt2api:image_last_quality";
+const IMAGE_OUTPUT_FORMAT_STORAGE_KEY = "chatgpt2api:image_last_output_format";
+const IMAGE_OUTPUT_COMPRESSION_STORAGE_KEY = "chatgpt2api:image_last_output_compression";
 const QUOTA_REFRESH_EVENT = "chatgpt2api:quota-refresh";
 const DEFAULT_IMAGE_QUALITY: ImageQuality = "high";
+const DEFAULT_IMAGE_OUTPUT_FORMAT: ImageOutputFormat = "png";
 const activeConversationQueueIds = new Set<string>();
-const EMPTY_IMAGE_SIZE_SELECT_VALUE = "__empty__";
+const EMPTY_IMAGE_ASPECT_RATIO_SELECT_VALUE = "__empty_aspect_ratio__";
+const MISSING_RECOVERABLE_TASK_ID_ERROR = "页面刷新或任务中断，未找到可恢复的任务 ID";
 
 type ComposerMode = "chat" | "image";
 
@@ -86,10 +139,20 @@ type EditingTurnDraft = {
   model: ImageModel;
   mode: ImageConversationMode;
   count: string;
-  size: string;
+  sizeMode: ImageSizeMode;
+  aspectRatio: ImageAspectRatio;
+  resolution: ImageResolution;
+  customRatio: string;
+  customWidth: string;
+  customHeight: string;
   quality: ImageQuality;
+  outputFormat: ImageOutputFormat;
+  outputCompression: string;
+  visibility: ImageVisibility;
   referenceImages: StoredReferenceImage[];
 };
+
+type CreationTaskDataItem = NonNullable<CreationTask["data"]>[number];
 
 function buildConversationTitle(prompt: string) {
   const trimmed = prompt.trim();
@@ -218,17 +281,41 @@ async function buildReferenceImageFromStoredImage(image: StoredImage, fileName: 
 }
 
 const IMAGE_TASK_IMAGE_COUNT = 1;
+const MAX_REFERENCE_IMAGES = 16;
 
-function normalizeRequestedImageCount(value: string | number) {
-  return Math.max(1, Math.min(10, Number(value) || 1));
+function normalizeRequestedImageCount(value: string | number, maxCount = 10) {
+  return Math.max(1, Math.min(maxCount, Number(value) || 1));
+}
+
+function isInvalidCustomRatioSelection(sizeMode: ImageSizeMode, aspectRatio: ImageAspectRatio, customRatio: string) {
+  return sizeMode === "ratio" && aspectRatio === CUSTOM_IMAGE_ASPECT_RATIO && !parseImageRatio(customRatio);
+}
+
+function positiveDimension(value: unknown) {
+  const dimension = Number(value);
+  return Number.isFinite(dimension) && dimension > 0 ? Math.round(dimension) : undefined;
+}
+
+function normalizeOutputCompressionValue(value: unknown): number | undefined {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return undefined;
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return undefined;
+  }
+  return Math.min(100, Math.round(numeric));
+}
+
+function imageOutputCompressionForFormat(format: ImageOutputFormat, value: unknown) {
+  if (format === "png") {
+    return undefined;
+  }
+  return normalizeOutputCompressionValue(value);
 }
 
 function imageTaskBatchId(turnId: string, imageIndex: number) {
   return `${turnId}-task-${Math.floor(imageIndex / IMAGE_TASK_IMAGE_COUNT)}`;
-}
-
-function imageTurnProgressKey(conversationId: string, turnId: string) {
-  return `${conversationId}:${turnId}`;
 }
 
 function imageTaskIdForImage(turnId: string, images: StoredImage[], imageIndex: number) {
@@ -247,8 +334,14 @@ const STORED_IMAGE_FIELDS: Array<keyof StoredImage> = [
   "id",
   "taskId",
   "status",
+  "path",
+  "visibility",
   "b64_json",
   "url",
+  "width",
+  "height",
+  "resolution",
+  "outputFormat",
   "revised_prompt",
   "error",
   "text_response",
@@ -259,8 +352,41 @@ function updateStoredImage(image: StoredImage, updates: Partial<StoredImage>): S
   return STORED_IMAGE_FIELDS.every((field) => image[field] === next[field]) ? image : next;
 }
 
-function taskDataToStoredImage(image: StoredImage, task: ImageTask, dataIndex = 0): StoredImage {
+function taskDataToStoredImage(image: StoredImage, task: CreationTask, dataIndex = 0, fallbackVisibility?: ImageVisibility): StoredImage {
+  const taskVisibility = task.visibility || fallbackVisibility || image.visibility || "private";
+  const successUpdates = (item: CreationTaskDataItem) => {
+    const width = positiveDimension(item.width);
+    const height = positiveDimension(item.height);
+    return {
+      taskId: task.id,
+      status: "success" as const,
+      b64_json: item.b64_json,
+      url: item.url,
+      path: item.url ? getManagedImagePathFromUrl(item.url) || image.path : image.path,
+      visibility: taskVisibility,
+      width,
+      height,
+      resolution: item.resolution || (width && height ? `${width}x${height}` : image.resolution),
+      outputFormat: item.output_format || task.output_format || image.outputFormat,
+      revised_prompt: item.revised_prompt,
+      text_response: undefined,
+      error: undefined,
+    };
+  };
   if (task.status === "success") {
+    if (task.output_type === "text") {
+      return updateStoredImage(image, {
+        taskId: task.id,
+        status: "message",
+        text_response: task.data?.[dataIndex]?.text_response || task.error || "",
+        b64_json: undefined,
+        url: undefined,
+        path: undefined,
+        visibility: undefined,
+        revised_prompt: undefined,
+        error: undefined,
+      });
+    }
     const item = task.data?.[dataIndex];
     if (!item?.b64_json && !item?.url) {
       if (dataIndex > 0 && image.taskId !== image.id) {
@@ -276,15 +402,7 @@ function taskDataToStoredImage(image: StoredImage, task: ImageTask, dataIndex = 
         error: `未返回第 ${dataIndex + 1} 张图片数据`,
       });
     }
-    return updateStoredImage(image, {
-      taskId: task.id,
-      status: "success",
-      b64_json: item.b64_json,
-      url: item.url,
-      revised_prompt: item.revised_prompt,
-      text_response: undefined,
-      error: undefined,
-    });
+    return updateStoredImage(image, successUpdates(item));
   }
 
   if (task.status === "error") {
@@ -295,42 +413,28 @@ function taskDataToStoredImage(image: StoredImage, task: ImageTask, dataIndex = 
         text_response: task.error || "",
         b64_json: undefined,
         url: undefined,
+        path: undefined,
+        visibility: undefined,
         revised_prompt: undefined,
         error: undefined,
       });
     }
     const item = task.data?.[dataIndex];
     if (item?.b64_json || item?.url) {
-      return updateStoredImage(image, {
-        taskId: task.id,
-        status: "success",
-        b64_json: item.b64_json,
-        url: item.url,
-        revised_prompt: item.revised_prompt,
-        text_response: undefined,
-        error: undefined,
-      });
+      return updateStoredImage(image, successUpdates(item));
     }
     return updateStoredImage(image, {
       taskId: task.id,
       status: "error",
       text_response: undefined,
-      error: formatImageTaskErrorMessage(task.error || "生成失败"),
+      error: formatCreationTaskErrorMessage(task.error || "生成失败"),
     });
   }
 
   if (task.status === "cancelled") {
     const item = task.data?.[dataIndex];
     if (item?.b64_json || item?.url) {
-      return updateStoredImage(image, {
-        taskId: task.id,
-        status: "success",
-        b64_json: item.b64_json,
-        url: item.url,
-        revised_prompt: item.revised_prompt,
-        text_response: undefined,
-        error: undefined,
-      });
+      return updateStoredImage(image, successUpdates(item));
     }
     return updateStoredImage(image, {
       taskId: task.id,
@@ -385,6 +489,72 @@ function getStoredImageQuality(): ImageQuality {
   return isImageQuality(storedQuality) ? storedQuality : DEFAULT_IMAGE_QUALITY;
 }
 
+function getStoredImageSizeSelection(): ImageSizeSelection {
+  if (typeof window === "undefined") {
+    return getImageSizeSelectionFromSize("");
+  }
+  const fallbackSelection = getImageSizeSelectionFromSize(window.localStorage.getItem(IMAGE_SIZE_STORAGE_KEY) || "");
+  const storedSizeMode = window.localStorage.getItem(IMAGE_SIZE_MODE_STORAGE_KEY);
+  const storedAspectRatio = window.localStorage.getItem(IMAGE_ASPECT_RATIO_STORAGE_KEY) || "";
+  const storedResolution = window.localStorage.getItem(IMAGE_RESOLUTION_STORAGE_KEY);
+  const customRatio = window.localStorage.getItem(IMAGE_CUSTOM_RATIO_STORAGE_KEY) || fallbackSelection.customRatio;
+  const customWidth = window.localStorage.getItem(IMAGE_CUSTOM_WIDTH_STORAGE_KEY) || fallbackSelection.customWidth;
+  const customHeight = window.localStorage.getItem(IMAGE_CUSTOM_HEIGHT_STORAGE_KEY) || fallbackSelection.customHeight;
+  if (isImageSizeMode(storedSizeMode) && isImageAspectRatio(storedAspectRatio) && isImageResolution(storedResolution)) {
+    return {
+      mode: storedSizeMode,
+      aspectRatio: storedAspectRatio,
+      resolution: storedResolution,
+      customRatio,
+      customWidth,
+      customHeight,
+    };
+  }
+  return fallbackSelection;
+}
+
+function getStoredImageOutputFormat(): ImageOutputFormat {
+  if (typeof window === "undefined") {
+    return DEFAULT_IMAGE_OUTPUT_FORMAT;
+  }
+  const storedFormat = window.localStorage.getItem(IMAGE_OUTPUT_FORMAT_STORAGE_KEY);
+  return isImageOutputFormat(storedFormat) ? storedFormat : DEFAULT_IMAGE_OUTPUT_FORMAT;
+}
+
+function getStoredImageOutputCompression(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const normalized = normalizeOutputCompressionValue(window.localStorage.getItem(IMAGE_OUTPUT_COMPRESSION_STORAGE_KEY));
+  return normalized === undefined ? "" : String(normalized);
+}
+
+function serializeImageSizeSelection(selection: ImageSizeSelection): StoredImageSizeSelection {
+  return {
+    mode: selection.mode,
+    aspectRatio: selection.aspectRatio,
+    resolution: selection.resolution,
+    customRatio: selection.customRatio,
+    customWidth: selection.customWidth,
+    customHeight: selection.customHeight,
+  };
+}
+
+function restoreImageSizeSelection(stored: StoredImageSizeSelection | undefined, fallbackSize: string): ImageSizeSelection {
+  const fallbackSelection = getImageSizeSelectionFromSize(fallbackSize);
+  if (!stored) {
+    return fallbackSelection;
+  }
+  return {
+    mode: isImageSizeMode(stored.mode) ? stored.mode : fallbackSelection.mode,
+    aspectRatio: isImageAspectRatio(stored.aspectRatio) ? stored.aspectRatio : fallbackSelection.aspectRatio,
+    resolution: isImageResolution(stored.resolution) ? stored.resolution : fallbackSelection.resolution,
+    customRatio: stored.customRatio || fallbackSelection.customRatio,
+    customWidth: stored.customWidth || fallbackSelection.customWidth,
+    customHeight: stored.customHeight || fallbackSelection.customHeight,
+  };
+}
+
 function buildTurnOutcomeMessage(successCount: number, failedCount: number, cancelledCount: number) {
   const parts = [`成功 ${successCount} 张`];
   if (failedCount > 0) {
@@ -396,7 +566,7 @@ function buildTurnOutcomeMessage(successCount: number, failedCount: number, canc
   return parts.join("，");
 }
 
-function formatImageTaskErrorMessage(message: string) {
+function formatCreationTaskErrorMessage(message: string) {
   const trimmed = String(message || "").trim();
   if (!trimmed) {
     return "生成图片失败";
@@ -426,8 +596,8 @@ function formatImageTaskErrorMessage(message: string) {
   return trimmed;
 }
 
-function formatImageTaskError(error: unknown, fallback = "生成图片失败") {
-  return formatImageTaskErrorMessage(error instanceof Error ? error.message : String(error || fallback));
+function formatCreationTaskError(error: unknown, fallback = "生成图片失败") {
+  return formatCreationTaskErrorMessage(error instanceof Error ? error.message : String(error || fallback));
 }
 
 function deriveTurnStatus(turn: ImageTurn): Pick<ImageTurn, "status" | "error"> {
@@ -466,8 +636,16 @@ function usesReferenceImages(mode: ImageConversationMode) {
   return mode === "image" || mode === "edit";
 }
 
+function usesResponseImageTaskModel(model: ImageModel) {
+  return isResponseImageToolModel(model);
+}
+
 function isMissingBatchImageDataError(error?: string) {
   return typeof error === "string" && error.startsWith("未返回第 ") && error.endsWith(" 张图片数据");
+}
+
+function isMissingRecoverableTaskIdError(error?: string) {
+  return error === MISSING_RECOVERABLE_TASK_ID_ERROR;
 }
 
 function getComposerConversationMode(composerMode: ComposerMode, referenceImages: StoredReferenceImage[]): ImageConversationMode {
@@ -480,31 +658,12 @@ function getComposerConversationMode(composerMode: ComposerMode, referenceImages
   return referenceImages.some((image) => image.source === "conversation") ? "edit" : "image";
 }
 
-function chatCompletionContentToText(content: unknown): string {
-  if (typeof content === "string") {
-    return content;
-  }
-  if (!Array.isArray(content)) {
-    return "";
-  }
-  return content
-    .map((item) => {
-      if (!item || typeof item !== "object") {
-        return "";
-      }
-      const block = item as { text?: unknown };
-      return typeof block.text === "string" ? block.text : "";
-    })
-    .filter(Boolean)
-    .join("\n");
+function imageQualityForModel(model: ImageModel, quality: ImageQuality) {
+  return supportsImageQuality(model) ? quality : undefined;
 }
 
-function chatCompletionResponseText(response: Awaited<ReturnType<typeof createChatCompletion>>) {
-  return chatCompletionContentToText(response.choices?.[0]?.message?.content).trim();
-}
-
-function buildImageTaskMessages(conversation: ImageConversation, activeTurnId: string): ImageTaskMessage[] {
-  const messages: ImageTaskMessage[] = [];
+function buildCreationTaskMessages(conversation: ImageConversation, activeTurnId: string): CreationTaskMessage[] {
+  const messages: CreationTaskMessage[] = [];
   for (const turn of conversation.turns) {
     const prompt = turn.prompt.trim();
     if (prompt) {
@@ -530,7 +689,7 @@ function buildImageTaskMessages(conversation: ImageConversation, activeTurnId: s
   return messages;
 }
 
-async function syncConversationImageTasks(items: ImageConversation[]) {
+async function syncConversationCreationTasks(items: ImageConversation[]) {
   const taskIds = Array.from(
     new Set(
       items.flatMap((conversation) =>
@@ -544,9 +703,9 @@ async function syncConversationImageTasks(items: ImageConversation[]) {
     return items;
   }
 
-  let taskList: Awaited<ReturnType<typeof fetchImageTasks>>;
+  let taskList: Awaited<ReturnType<typeof fetchCreationTasks>>;
   try {
-    taskList = await fetchImageTasks(taskIds);
+    taskList = await fetchCreationTasks(taskIds);
   } catch {
     return items;
   }
@@ -564,7 +723,7 @@ async function syncConversationImageTasks(items: ImageConversation[]) {
         if (!task) {
           return image;
         }
-        const nextImage = taskDataToStoredImage(image, task, imageDataIndexForTask(turn.images, imageIndex));
+        const nextImage = taskDataToStoredImage(image, task, imageDataIndexForTask(turn.images, imageIndex), turn.visibility);
         if (nextImage !== image) {
           turnChanged = true;
         }
@@ -611,7 +770,7 @@ async function recoverConversationHistory(items: ImageConversation[]) {
   const normalized = items.map((conversation) => {
     const turns = conversation.turns.map((turn) => {
       let turnChanged = false;
-      const recoveredImages = turn.images.map((image) => {
+      const recoveredImages = turn.images.map((image, imageIndex) => {
         if (image.status === "error" && isMissingBatchImageDataError(image.error)) {
           turnChanged = true;
           return {
@@ -619,6 +778,22 @@ async function recoverConversationHistory(items: ImageConversation[]) {
             taskId: image.id,
             status: "loading" as const,
             error: undefined,
+          };
+        }
+        if (turn.mode === "chat" && image.status === "error" && isMissingRecoverableTaskIdError(image.error)) {
+          turnChanged = true;
+          return {
+            ...image,
+            taskId: imageTaskIdForImage(turn.id, turn.images, imageIndex),
+            status: "loading" as const,
+            error: undefined,
+          };
+        }
+        if (turn.mode === "chat" && image.status === "loading" && !image.taskId) {
+          turnChanged = true;
+          return {
+            ...image,
+            taskId: imageTaskIdForImage(turn.id, turn.images, imageIndex),
           };
         }
         return image;
@@ -645,7 +820,7 @@ async function recoverConversationHistory(items: ImageConversation[]) {
         return {
           ...image,
           status: "error" as const,
-          error: "页面刷新或任务中断，未找到可恢复的任务 ID",
+          error: MISSING_RECOVERABLE_TASK_ID_ERROR,
         };
       });
       const derived = deriveTurnStatus({ ...turn, images });
@@ -675,7 +850,7 @@ async function recoverConversationHistory(items: ImageConversation[]) {
     await saveImageConversations(normalized);
   }
 
-  return syncConversationImageTasks(normalized);
+  return syncConversationCreationTasks(normalized);
 }
 
 
@@ -695,8 +870,16 @@ function ImagePageContent() {
   const [composerMode, setComposerMode] = useState<ComposerMode>(getStoredComposerMode);
   const [imageModel, setImageModel] = useState<ImageModel>(getStoredImageModel);
   const [imageCount, setImageCount] = useState("1");
-  const [imageSize, setImageSize] = useState("");
+  const [imageSizeMode, setImageSizeMode] = useState<ImageSizeMode>(() => getStoredImageSizeSelection().mode);
+  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(() => getStoredImageSizeSelection().aspectRatio);
+  const [imageResolution, setImageResolution] = useState<ImageResolution>(() => getStoredImageSizeSelection().resolution);
+  const [imageCustomRatio, setImageCustomRatio] = useState(() => getStoredImageSizeSelection().customRatio);
+  const [imageCustomWidth, setImageCustomWidth] = useState(() => getStoredImageSizeSelection().customWidth);
+  const [imageCustomHeight, setImageCustomHeight] = useState(() => getStoredImageSizeSelection().customHeight);
   const [imageQuality, setImageQuality] = useState<ImageQuality>(getStoredImageQuality);
+  const [imageOutputFormat, setImageOutputFormat] = useState<ImageOutputFormat>(getStoredImageOutputFormat);
+  const [imageOutputCompression, setImageOutputCompression] = useState(getStoredImageOutputCompression);
+  const [defaultImageVisibility, setDefaultImageVisibility] = useState<ImageVisibility>("private");
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isPromptMarketOpen, setIsPromptMarketOpen] = useState(false);
   const [referenceImages, setReferenceImages] = useState<StoredReferenceImage[]>([]);
@@ -708,12 +891,80 @@ function ImagePageContent() {
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "one"; id: string } | { type: "all" } | null>(null);
   const [editingTurnDraft, setEditingTurnDraft] = useState<EditingTurnDraft | null>(null);
-  const [progressByTurnKey, setProgressByTurnKey] = useState<Record<string, ImageTurnProgress>>({});
+  const [progressByTurnKey, setProgressByTurnKey] = useState<Record<string, ImageTurnProgress>>(
+    getImageTurnProgressSnapshot,
+  );
   const [progressNow, setProgressNow] = useState(Date.now());
   const [composerDockHeight, setComposerDockHeight] = useState(0);
+  const [visibilityMutatingImageKey, setVisibilityMutatingImageKey] = useState("");
+  const appMeta = useAppMeta();
+  const imageSingleCountLimit = useMemo(
+    () => Math.max(1, Math.min(10, Number(appMeta.image_single_count_limit) || 10)),
+    [appMeta.image_single_count_limit],
+  );
 
-  const parsedCount = useMemo(() => normalizeRequestedImageCount(imageCount), [imageCount]);
-  const composerModelOptions = composerMode === "chat" ? CHAT_MODEL_OPTIONS : IMAGE_TASK_MODEL_OPTIONS;
+  const parsedCount = useMemo(
+    () => normalizeRequestedImageCount(imageCount, imageSingleCountLimit),
+    [imageCount, imageSingleCountLimit],
+  );
+
+  const imageSize = useMemo(
+    () =>
+      buildImageSize({
+        mode: imageSizeMode,
+        aspectRatio: imageAspectRatio,
+        resolution: imageResolution,
+        customRatio: imageCustomRatio,
+        customWidth: imageCustomWidth,
+        customHeight: imageCustomHeight,
+      }),
+    [imageAspectRatio, imageCustomHeight, imageCustomRatio, imageCustomWidth, imageResolution, imageSizeMode],
+  );
+  const editingDraftImageSize = useMemo(() => {
+    if (!editingTurnDraft || editingTurnDraft.mode === "chat") {
+      return "";
+    }
+    return buildImageSize({
+      mode: editingTurnDraft.sizeMode,
+      aspectRatio: editingTurnDraft.aspectRatio,
+      resolution: editingTurnDraft.resolution,
+      customRatio: editingTurnDraft.customRatio,
+      customWidth: editingTurnDraft.customWidth,
+      customHeight: editingTurnDraft.customHeight,
+    });
+  }, [editingTurnDraft]);
+  const editingDraftCustomRatioInvalid = editingTurnDraft
+    ? isInvalidCustomRatioSelection(editingTurnDraft.sizeMode, editingTurnDraft.aspectRatio, editingTurnDraft.customRatio)
+    : false;
+  const editingDraftSizePreviewLabel =
+    editingTurnDraft && editingTurnDraft.mode !== "chat"
+      ? editingDraftImageSize
+        ? formatImageSizeDisplay(editingDraftImageSize)
+        : editingTurnDraft.sizeMode === "auto" ||
+            (editingTurnDraft.sizeMode === "ratio" &&
+              editingTurnDraft.resolution === "auto" &&
+              !editingDraftCustomRatioInvalid)
+          ? "Auto"
+          : "尺寸无效"
+      : "";
+  const editingDraftSizePreviewDetail =
+    editingTurnDraft?.sizeMode === "ratio"
+      ? editingDraftCustomRatioInvalid
+        ? "比例需要填写为宽:高"
+        : editingTurnDraft.resolution === "auto"
+          ? editingDraftImageSize
+            ? `将按 ${editingDraftImageSize} 比例下发`
+            : "Auto 比例将交给模型决定"
+          : editingDraftImageSize
+            ? `将下发计算后的 ${formatImageSizeDisplay(editingDraftImageSize)}`
+            : "比例需要填写为宽:高"
+      : editingTurnDraft?.sizeMode === "custom"
+        ? editingDraftImageSize
+          ? `已按链路限制校准为 ${formatImageSizeDisplay(editingDraftImageSize)}`
+          : "宽高需要填写正整数"
+        : "不会强制指定尺寸";
+  const composerModelOptions = composerMode === "chat" ? CHAT_MODEL_OPTIONS : IMAGE_CREATION_MODEL_OPTIONS;
+  const imageQualityOptions = supportsImageQuality(imageModel) ? IMAGE_QUALITY_OPTIONS : [];
   const selectedConversation = useMemo(
     () => conversations.find((item) => item.id === selectedConversationId) ?? null,
     [conversations, selectedConversationId],
@@ -741,16 +992,24 @@ function ImagePageContent() {
           Low / Medium / High 会随请求下发，并补充到生成提示中；实际生效仍取决于当前账号和上游链路能力。
         </div>
         <div className="mt-2">
+          <span className="font-semibold text-stone-800">输出格式：</span>
+          支持 PNG / JPEG / WebP；PNG 不支持压缩率，JPEG / WebP 会下发 0-100 的压缩率参数。
+        </div>
+        <div className="mt-2">
           <span className="font-semibold text-stone-800">分辨率限制：</span>
-          Free 账号建议按约 1.57M 像素总量控制；Paid 账号的图片最长边最高支持 3840。需要 2K / 4K 时，请在提示词中明确目标尺寸。
+          Free 账号建议按约 1.57M 像素总量控制；Paid 账号支持按分辨率档位生成。按比例选择 1K / 2K / 4K，或手动指定宽高时，会把具体像素尺寸下发并补充到生成提示中。
         </div>
         <div className="mt-2">
           <span className="font-semibold text-stone-800">账号要求：</span>
-          2K 及以上像素档建议使用 Plus / Pro / Team 等 Paid 账号。
+          超过 Free 像素预算的分辨率档会优先使用 Plus / Pro / Team 等 Paid 账号；没有可用 Paid 账号时任务会直接提示失败原因。
         </div>
         <div className="mt-2">
           <span className="font-semibold text-stone-800">Auto 模式补充：</span>
           Auto 不会强制指定比例和分辨率，请直接在提示词里写明横竖版、画幅比例和目标输出尺寸。
+        </div>
+        <div className="mt-2">
+          <span className="font-semibold text-stone-800">手动宽高：</span>
+          手动输入的宽高会按生成链路要求校准为 16 的倍数，并控制在最长边 4096、宽高比不超过 3:1、总像素 655360-16777216 的范围内。
         </div>
       </>
     ),
@@ -781,6 +1040,41 @@ function ImagePageContent() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const refreshConversations = async () => {
+      try {
+        const items = await listImageConversations();
+        if (cancelled) {
+          return;
+        }
+        conversationsRef.current = items;
+        setConversations(items);
+      } catch {
+        // Background updates should not surface noisy toasts while the user is on another workflow.
+      }
+    };
+
+    const handleConversationsChanged = () => {
+      void refreshConversations();
+    };
+
+    window.addEventListener(IMAGE_CONVERSATIONS_CHANGED_EVENT, handleConversationsChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(IMAGE_CONVERSATIONS_CHANGED_EVENT, handleConversationsChanged);
+    };
+  }, []);
+
+  useEffect(
+    () =>
+      subscribeImageTurnProgress(() => {
+        setProgressByTurnKey(getImageTurnProgressSnapshot());
+      }),
+    [],
+  );
+
+  useEffect(() => {
     if (activeTaskCount === 0 && Object.keys(progressByTurnKey).length === 0) {
       return;
     }
@@ -799,8 +1093,15 @@ function ImagePageContent() {
 
     const loadHistory = async () => {
       try {
-        const storedSize = typeof window !== "undefined" ? window.localStorage.getItem(IMAGE_SIZE_STORAGE_KEY) : null;
-        setImageSize(storedSize || "");
+        const storedSelection = getStoredImageSizeSelection();
+        setImageSizeMode(storedSelection.mode);
+        setImageAspectRatio(storedSelection.aspectRatio);
+        setImageResolution(storedSelection.resolution);
+        setImageCustomRatio(storedSelection.customRatio);
+        setImageCustomWidth(storedSelection.customWidth);
+        setImageCustomHeight(storedSelection.customHeight);
+        setImageOutputFormat(getStoredImageOutputFormat());
+        setImageOutputCompression(getStoredImageOutputCompression());
 
         const items = await listImageConversations();
         const normalizedItems = await recoverConversationHistory(items);
@@ -811,7 +1112,7 @@ function ImagePageContent() {
         conversationsRef.current = normalizedItems;
         setConversations(normalizedItems);
         const storedConversationId =
-          typeof window !== "undefined" ? window.localStorage.getItem(ACTIVE_CONVERSATION_STORAGE_KEY) : null;
+          typeof window !== "undefined" ? window.localStorage.getItem(ACTIVE_IMAGE_CONVERSATION_STORAGE_KEY) : null;
         const nextSelectedConversationId =
           (storedConversationId && normalizedItems.some((conversation) => conversation.id === storedConversationId)
             ? storedConversationId
@@ -850,11 +1151,25 @@ function ImagePageContent() {
     }
 
     if (selectedConversationId) {
-      window.localStorage.setItem(ACTIVE_CONVERSATION_STORAGE_KEY, selectedConversationId);
+      window.localStorage.setItem(ACTIVE_IMAGE_CONVERSATION_STORAGE_KEY, selectedConversationId);
     } else {
-      window.localStorage.removeItem(ACTIVE_CONVERSATION_STORAGE_KEY);
+      window.localStorage.removeItem(ACTIVE_IMAGE_CONVERSATION_STORAGE_KEY);
     }
   }, [selectedConversationId]);
+
+  useEffect(() => {
+    const handleOpenConversation = (event: Event) => {
+      const conversationId = (event as CustomEvent<{ conversationId?: string }>).detail?.conversationId;
+      if (conversationId) {
+        setSelectedConversationId(conversationId);
+      }
+    };
+
+    window.addEventListener(IMAGE_ACTIVE_CONVERSATION_REQUEST_EVENT, handleOpenConversation);
+    return () => {
+      window.removeEventListener(IMAGE_ACTIVE_CONVERSATION_REQUEST_EVENT, handleOpenConversation);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -878,7 +1193,7 @@ function ImagePageContent() {
       return;
     }
 
-    if (!isImageTaskModel(imageModel)) {
+    if (!isImageCreationModel(imageModel)) {
       setImageModel(DEFAULT_IMAGE_MODEL);
     }
   }, [composerMode, imageModel, referenceImages.length]);
@@ -896,12 +1211,22 @@ function ImagePageContent() {
       return;
     }
 
+    window.localStorage.setItem(IMAGE_SIZE_MODE_STORAGE_KEY, imageSizeMode);
+    if (imageAspectRatio) {
+      window.localStorage.setItem(IMAGE_ASPECT_RATIO_STORAGE_KEY, imageAspectRatio);
+    } else {
+      window.localStorage.removeItem(IMAGE_ASPECT_RATIO_STORAGE_KEY);
+    }
+    window.localStorage.setItem(IMAGE_RESOLUTION_STORAGE_KEY, imageResolution);
+    window.localStorage.setItem(IMAGE_CUSTOM_RATIO_STORAGE_KEY, imageCustomRatio);
+    window.localStorage.setItem(IMAGE_CUSTOM_WIDTH_STORAGE_KEY, imageCustomWidth);
+    window.localStorage.setItem(IMAGE_CUSTOM_HEIGHT_STORAGE_KEY, imageCustomHeight);
     if (imageSize) {
       window.localStorage.setItem(IMAGE_SIZE_STORAGE_KEY, imageSize);
       return;
     }
     window.localStorage.removeItem(IMAGE_SIZE_STORAGE_KEY);
-  }, [imageSize]);
+  }, [imageAspectRatio, imageCustomHeight, imageCustomRatio, imageCustomWidth, imageResolution, imageSize, imageSizeMode]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -910,6 +1235,20 @@ function ImagePageContent() {
 
     window.localStorage.setItem(IMAGE_QUALITY_STORAGE_KEY, imageQuality);
   }, [imageQuality]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(IMAGE_OUTPUT_FORMAT_STORAGE_KEY, imageOutputFormat);
+    const normalizedCompression = normalizeOutputCompressionValue(imageOutputCompression);
+    if (normalizedCompression === undefined || imageOutputFormat === "png") {
+      window.localStorage.removeItem(IMAGE_OUTPUT_COMPRESSION_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(IMAGE_OUTPUT_COMPRESSION_STORAGE_KEY, String(normalizedCompression));
+  }, [imageOutputCompression, imageOutputFormat]);
 
   useEffect(() => {
     if (selectedConversationId && !conversations.some((conversation) => conversation.id === selectedConversationId)) {
@@ -950,34 +1289,22 @@ function ImagePageContent() {
 
   const updateTurnProgress = useCallback(
     (conversationId: string, turnId: string, updates: Omit<ImageTurnProgress, "startedAt"> & { startedAt?: number }) => {
-      const key = imageTurnProgressKey(conversationId, turnId);
-      setProgressByTurnKey((current) => ({
-        ...current,
-        [key]: {
-          ...updates,
-          startedAt: updates.startedAt ?? current[key]?.startedAt ?? Date.now(),
-        },
-      }));
+      setImageTurnProgress(conversationId, turnId, updates);
     },
     [],
   );
 
   const clearTurnProgress = useCallback((conversationId: string, turnId: string) => {
-    const key = imageTurnProgressKey(conversationId, turnId);
-    setProgressByTurnKey((current) => {
-      if (!current[key]) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[key];
-      return next;
-    });
+    clearImageTurnProgress(conversationId, turnId);
   }, []);
 
   const clearComposerInputs = useCallback(() => {
     promptApplyRequestIdRef.current += 1;
     setImagePrompt("");
     setImageCount("1");
+    setImageOutputFormat(DEFAULT_IMAGE_OUTPUT_FORMAT);
+    setImageOutputCompression("");
+    setDefaultImageVisibility("private");
     setReferenceImages([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -992,6 +1319,7 @@ function ImagePageContent() {
     setComposerMode(mode);
     if (mode === "chat") {
       promptApplyRequestIdRef.current += 1;
+      setDefaultImageVisibility("private");
       setReferenceImages([]);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -1012,7 +1340,16 @@ function ImagePageContent() {
     setComposerMode("image");
     setImagePrompt(preset.prompt);
     setImageCount(String(preset.count));
-    setImageSize(preset.size);
+    const presetSizeSelection = getImageSizeSelectionFromSize(preset.size);
+    setImageSizeMode(presetSizeSelection.mode);
+    setImageAspectRatio(presetSizeSelection.aspectRatio);
+    setImageResolution(presetSizeSelection.resolution);
+    setImageCustomRatio(presetSizeSelection.customRatio);
+    setImageCustomWidth(presetSizeSelection.customWidth);
+    setImageCustomHeight(presetSizeSelection.customHeight);
+    setImageOutputFormat(DEFAULT_IMAGE_OUTPUT_FORMAT);
+    setImageOutputCompression("");
+    setDefaultImageVisibility("private");
     setReferenceImages([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -1048,7 +1385,15 @@ function ImagePageContent() {
     setComposerMode("image");
     setImagePrompt(prompt.prompt);
     setImageCount("1");
-    setImageSize("");
+    setImageSizeMode("auto");
+    setImageAspectRatio("");
+    setImageResolution("auto");
+    setImageCustomRatio(DEFAULT_IMAGE_CUSTOM_RATIO);
+    setImageCustomWidth(DEFAULT_IMAGE_CUSTOM_WIDTH);
+    setImageCustomHeight(DEFAULT_IMAGE_CUSTOM_HEIGHT);
+    setImageOutputFormat(DEFAULT_IMAGE_OUTPUT_FORMAT);
+    setImageOutputCompression("");
+    setDefaultImageVisibility("private");
     setReferenceImages([]);
     setIsPromptMarketOpen(false);
     if (fileInputRef.current) {
@@ -1072,7 +1417,7 @@ function ImagePageContent() {
       return;
     }
     if (loadedReferences.length > 0) {
-      setReferenceImages(loadedReferences);
+      setReferenceImages(loadedReferences.slice(0, MAX_REFERENCE_IMAGES));
     }
     if (loadedReferences.length === referenceImageUrls.length) {
       toast.success("已套用提示词和参考图");
@@ -1157,7 +1502,7 @@ function ImagePageContent() {
       );
 
       setComposerMode("image");
-      setReferenceImages((prev) => [...prev, ...previews]);
+      setReferenceImages((prev) => [...prev, ...previews].slice(-MAX_REFERENCE_IMAGES));
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -1207,9 +1552,9 @@ function ImagePageContent() {
           ...prev,
           {
             ...nextReference.referenceImage,
-            source: "conversation",
+            source: "conversation" as const,
           },
-        ]);
+        ].slice(-MAX_REFERENCE_IMAGES));
         setImagePrompt("");
         textareaRef.current?.focus();
         toast.success("已加入当前参考图，继续输入描述即可编辑");
@@ -1231,6 +1576,71 @@ function ImagePageContent() {
     setLightboxOpen(true);
   }, []);
 
+  const handleImageVisibilityChange = useCallback(
+    async (conversationId: string, turnId: string, imageIndex: number, visibility: ImageVisibility) => {
+      const targetConversation = conversationsRef.current.find((conversation) => conversation.id === conversationId);
+      const targetTurn = targetConversation?.turns.find((turn) => turn.id === turnId);
+      const targetImage = targetTurn?.images[imageIndex];
+      if (!targetConversation || !targetTurn || !targetImage) {
+        toast.error("未找到对应的图片记录");
+        return;
+      }
+      if (targetImage.status !== "success") {
+        toast.error("图片生成成功后才能修改公开状态");
+        return;
+      }
+      const path = targetImage.path || (targetImage.url ? getManagedImagePathFromUrl(targetImage.url) : "");
+      if (!path) {
+        toast.error("未找到可同步到图库的图片路径");
+        return;
+      }
+
+      const mutatingKey = `${conversationId}:${turnId}:${targetImage.id}`;
+      if (visibilityMutatingImageKey === mutatingKey) {
+        return;
+      }
+      if (visibilityMutatingImageKey) {
+        return;
+      }
+      setVisibilityMutatingImageKey(mutatingKey);
+      try {
+        const data = await updateManagedImageVisibility(path, visibility);
+        const updatedVisibility = data.item.visibility || visibility;
+        const updatedPath = data.item.path || path;
+        await updateConversation(conversationId, (current) => {
+          const conversation = current ?? targetConversation;
+          return {
+            ...conversation,
+            updatedAt: new Date().toISOString(),
+            turns: conversation.turns.map((turn) =>
+              turn.id === turnId
+                ? {
+                    ...turn,
+                    images: turn.images.map((image, index) =>
+                      index === imageIndex
+                        ? {
+                            ...image,
+                            path: updatedPath,
+                            visibility: updatedVisibility,
+                          }
+                        : image,
+                    ),
+                  }
+                : turn,
+            ),
+          };
+        });
+        clearImageManagerCache();
+        toast.success(updatedVisibility === "public" ? "已公开到公开图库" : "已取消公开");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "更新公开状态失败");
+      } finally {
+        setVisibilityMutatingImageKey("");
+      }
+    },
+    [updateConversation, visibilityMutatingImageKey],
+  );
+
   const openEditTurnDialog = useCallback((conversationId: string, turnId: string) => {
     const targetConversation = conversationsRef.current.find((conversation) => conversation.id === conversationId);
     const targetTurn = targetConversation?.turns.find((turn) => turn.id === turnId);
@@ -1242,6 +1652,7 @@ function ImagePageContent() {
       toast.error("当前轮次正在处理，稍后再编辑");
       return;
     }
+    const sizeSelection = restoreImageSizeSelection(targetTurn.sizeSelection, targetTurn.size);
     setEditingTurnDraft({
       conversationId,
       turnId,
@@ -1251,13 +1662,24 @@ function ImagePageContent() {
           ? isChatModel(targetTurn.model)
             ? targetTurn.model
             : DEFAULT_CHAT_MODEL
-          : isImageTaskModel(targetTurn.model)
+          : isImageCreationModel(targetTurn.model)
             ? targetTurn.model
             : DEFAULT_IMAGE_MODEL,
       mode: targetTurn.mode,
       count: targetTurn.mode === "chat" ? "1" : String(normalizeRequestedImageCount(targetTurn.count || targetTurn.images.length || 1)),
-      size: targetTurn.mode === "chat" ? "" : targetTurn.size,
+      sizeMode: targetTurn.mode === "chat" ? "auto" : sizeSelection.mode,
+      aspectRatio: targetTurn.mode === "chat" ? "" : sizeSelection.aspectRatio,
+      resolution: targetTurn.mode === "chat" ? "auto" : sizeSelection.resolution,
+      customRatio: targetTurn.mode === "chat" ? DEFAULT_IMAGE_CUSTOM_RATIO : sizeSelection.customRatio,
+      customWidth: targetTurn.mode === "chat" ? DEFAULT_IMAGE_CUSTOM_WIDTH : sizeSelection.customWidth,
+      customHeight: targetTurn.mode === "chat" ? DEFAULT_IMAGE_CUSTOM_HEIGHT : sizeSelection.customHeight,
       quality: targetTurn.quality || DEFAULT_IMAGE_QUALITY,
+      outputFormat: targetTurn.outputFormat || DEFAULT_IMAGE_OUTPUT_FORMAT,
+      outputCompression:
+        targetTurn.outputCompression === undefined || targetTurn.outputCompression === null
+          ? ""
+          : String(targetTurn.outputCompression),
+      visibility: targetTurn.visibility || "private",
       referenceImages: targetTurn.mode === "chat" ? [] : targetTurn.referenceImages,
     });
   }, []);
@@ -1328,7 +1750,7 @@ function ImagePageContent() {
             ? "正在整理上下文"
             : `准备处理 ${activeTurn.images.filter((image) => image.status === "loading").length || activeTurn.count} 张图片`,
       });
-      const applyTasks = async (tasks: ImageTask[]) => {
+      const applyTasks = async (tasks: CreationTask[]) => {
         const taskMap = new Map(tasks.map((task) => [task.id, task]));
         await updateConversation(conversationId, (current) => {
           const conversation = current ?? snapshot;
@@ -1341,7 +1763,7 @@ function ImagePageContent() {
               const taskId = image.taskId || image.id;
               const task = taskMap.get(taskId);
               const taskImage = image.taskId === taskId ? image : { ...image, taskId };
-              return task ? taskDataToStoredImage(taskImage, task, imageDataIndexForTask(turn.images, imageIndex)) : image;
+              return task ? taskDataToStoredImage(taskImage, task, imageDataIndexForTask(turn.images, imageIndex), turn.visibility) : image;
             });
             const derived = deriveTurnStatus({ ...turn, status: "generating", images });
             const nextTurn = {
@@ -1382,10 +1804,7 @@ function ImagePageContent() {
                       image.status === "loading"
                         ? {
                             ...image,
-                            taskId:
-                              activeTurn.mode === "chat"
-                                ? undefined
-                                : imageTaskIdForImage(turn.id, turn.images, imageIndex),
+                            taskId: imageTaskIdForImage(turn.id, turn.images, imageIndex),
                           }
                         : image,
                     ),
@@ -1395,57 +1814,15 @@ function ImagePageContent() {
           };
         });
 
-        if (activeTurn.mode === "chat") {
-          updateTurnProgress(conversationId, activeTurn.id, {
-            message: "正在请求对话回复",
-            detail: "请求已提交，等待模型返回文本",
-          });
-          const response = await createChatCompletion(activeTurn.model, buildImageTaskMessages(snapshot, activeTurn.id));
-          if (cancelledTurnIdsRef.current.has(activeTurnKey)) {
-            return;
-          }
-          const text = chatCompletionResponseText(response);
-          if (!text) {
-            throw new Error("模型没有返回文本内容");
-          }
-          await updateConversation(conversationId, (current) => {
-            const conversation = current ?? snapshot;
-            return {
-              ...conversation,
-              updatedAt: new Date().toISOString(),
-              turns: conversation.turns.map((turn) => {
-                if (turn.id !== activeTurn.id) {
-                  return turn;
-                }
-                const images = turn.images.map((image) =>
-                  image.status === "loading"
-                    ? {
-                        ...image,
-                        taskId: undefined,
-                        status: "message" as const,
-                        text_response: text,
-                        error: undefined,
-                      }
-                    : image,
-                );
-                return {
-                  ...turn,
-                  ...deriveTurnStatus({ ...turn, images }),
-                  images,
-                };
-              }),
-            };
-          });
-          updateTurnProgress(conversationId, activeTurn.id, {
-            message: "回复完成",
-            detail: "正在刷新会话",
-          });
-          return;
-        }
-
         updateTurnProgress(conversationId, activeTurn.id, {
-          message: usesReferenceImages(activeTurn.mode) ? "正在整理参考图" : "正在准备生成请求",
-          detail: usesReferenceImages(activeTurn.mode) ? "正在读取参考图并准备上传" : "正在创建图片生成任务",
+          message:
+            activeTurn.mode === "chat" ? "正在准备对话请求" : usesReferenceImages(activeTurn.mode) ? "正在整理参考图" : "正在准备生成请求",
+          detail:
+            activeTurn.mode === "chat"
+              ? "正在整理上下文并创建后台任务"
+              : usesReferenceImages(activeTurn.mode)
+                ? "正在读取参考图并准备上传"
+                : "正在创建图片生成任务",
         });
         const referenceFiles = activeTurn.referenceImages.map((image, index) =>
           dataUrlToFile(image.dataUrl, image.name || `${activeTurn.id}-${index + 1}.png`, image.type),
@@ -1453,7 +1830,9 @@ function ImagePageContent() {
         if (usesReferenceImages(activeTurn.mode) && referenceFiles.length === 0) {
           throw new Error("未找到可用的参考图");
         }
-        const taskMessages = buildImageTaskMessages(snapshot, activeTurn.id);
+        const taskMessages = buildCreationTaskMessages(snapshot, activeTurn.id);
+        const taskOutputFormat = activeTurn.outputFormat || DEFAULT_IMAGE_OUTPUT_FORMAT;
+        const taskOutputCompression = imageOutputCompressionForFormat(taskOutputFormat, activeTurn.outputCompression);
         const pendingTaskGroups = activeTurn.images.reduce<Array<{ taskId: string; count: number }>>(
           (groups, image, imageIndex) => {
             if (image.status !== "loading") {
@@ -1470,37 +1849,64 @@ function ImagePageContent() {
           },
           [],
         );
+        const submitTaskGroup = (group: { taskId: string; count: number }) => {
+          if (activeTurn.mode === "chat") {
+            return createChatCompletionTask(group.taskId, activeTurn.prompt, activeTurn.model, taskMessages);
+          }
+          if (usesResponseImageTaskModel(activeTurn.model)) {
+            return createResponseImageGenerationTask(
+              group.taskId,
+              activeTurn.prompt,
+              activeTurn.model,
+              activeTurn.size,
+              imageQualityForModel(activeTurn.model, activeTurn.quality || DEFAULT_IMAGE_QUALITY),
+              group.count,
+              taskMessages,
+              activeTurn.referenceImages.map((image) => image.dataUrl),
+              activeTurn.visibility || "private",
+              activeTurn.sizeSelection?.resolution,
+              taskOutputFormat,
+              taskOutputCompression,
+            );
+          }
+          if (usesReferenceImages(activeTurn.mode)) {
+            return createImageEditTask(
+              group.taskId,
+              referenceFiles,
+              activeTurn.prompt,
+              activeTurn.model,
+              activeTurn.size,
+              imageQualityForModel(activeTurn.model, activeTurn.quality || DEFAULT_IMAGE_QUALITY),
+              group.count,
+              taskMessages,
+              activeTurn.visibility || "private",
+              activeTurn.sizeSelection?.resolution,
+              taskOutputFormat,
+              taskOutputCompression,
+            );
+          }
+          return createImageGenerationTask(
+            group.taskId,
+            activeTurn.prompt,
+            activeTurn.model,
+            activeTurn.size,
+            imageQualityForModel(activeTurn.model, activeTurn.quality || DEFAULT_IMAGE_QUALITY),
+            group.count,
+            taskMessages,
+            activeTurn.visibility || "private",
+            activeTurn.sizeSelection?.resolution,
+            taskOutputFormat,
+            taskOutputCompression,
+          );
+        };
         updateTurnProgress(conversationId, activeTurn.id, {
-          message: "正在提交生成请求",
-          detail: `${pendingTaskGroups.length} 个图片任务正在入队`,
+          message: activeTurn.mode === "chat" ? "正在提交对话请求" : "正在提交生成请求",
+          detail: activeTurn.mode === "chat" ? "对话任务正在入队" : `${pendingTaskGroups.length} 个图片任务正在入队`,
         });
-        const submitted = await Promise.all(
-          pendingTaskGroups.map((group) =>
-            usesReferenceImages(activeTurn.mode)
-              ? createImageEditTask(
-                  group.taskId,
-                  referenceFiles,
-                  activeTurn.prompt,
-                  activeTurn.model,
-                  activeTurn.size,
-                  activeTurn.quality || DEFAULT_IMAGE_QUALITY,
-                  group.count,
-                  taskMessages,
-                )
-              : createImageGenerationTask(
-                  group.taskId,
-                  activeTurn.prompt,
-                  activeTurn.model,
-                  activeTurn.size,
-                  activeTurn.quality || DEFAULT_IMAGE_QUALITY,
-                  group.count,
-                  taskMessages,
-                ),
-          ),
-        );
+        const submitted = await Promise.all(pendingTaskGroups.map(submitTaskGroup));
         await applyTasks(submitted);
         updateTurnProgress(conversationId, activeTurn.id, {
-          message: "等待生成结果",
+          message: activeTurn.mode === "chat" ? "等待对话回复" : "等待生成结果",
           detail: "请求已提交，正在轮询任务状态",
         });
 
@@ -1519,47 +1925,24 @@ function ImagePageContent() {
           }
 
           updateTurnProgress(conversationId, activeTurn.id, {
-            message: "等待生成结果",
-            detail: `还有 ${loadingTaskIds.length} 张图片处理中`,
+            message: activeTurn.mode === "chat" ? "等待对话回复" : "等待生成结果",
+            detail: activeTurn.mode === "chat" ? "对话任务处理中" : `还有 ${loadingTaskIds.length} 张图片处理中`,
           });
           await sleep(2000);
-          const taskList = await fetchImageTasks(loadingTaskIds);
+          const taskList = await fetchCreationTasks(loadingTaskIds);
           if (taskList.items.length > 0) {
             await applyTasks(taskList.items);
           }
           if (taskList.missing_ids.length > 0 && latestTurn) {
             updateTurnProgress(conversationId, activeTurn.id, {
-              message: "正在恢复生成任务",
+              message: activeTurn.mode === "chat" ? "正在恢复对话任务" : "正在恢复生成任务",
               detail: `${taskList.missing_ids.length} 个任务状态丢失，正在重新提交`,
             });
             const missingTaskGroups = taskList.missing_ids.flatMap((taskId) => {
               const count = latestTurn.images.filter((image) => image.status === "loading" && image.taskId === taskId).length;
               return count > 0 ? [{ taskId, count }] : [];
             });
-            const resubmitted = await Promise.all(
-              missingTaskGroups.map((group) =>
-                usesReferenceImages(activeTurn.mode)
-                  ? createImageEditTask(
-                      group.taskId,
-                      referenceFiles,
-                      activeTurn.prompt,
-                      activeTurn.model,
-                      activeTurn.size,
-                      activeTurn.quality || DEFAULT_IMAGE_QUALITY,
-                      group.count,
-                      taskMessages,
-                    )
-                  : createImageGenerationTask(
-                      group.taskId,
-                      activeTurn.prompt,
-                      activeTurn.model,
-                      activeTurn.size,
-                      activeTurn.quality || DEFAULT_IMAGE_QUALITY,
-                      group.count,
-                      taskMessages,
-                    ),
-              ),
-            );
+            const resubmitted = await Promise.all(missingTaskGroups.map(submitTaskGroup));
             if (resubmitted.length > 0) {
               await applyTasks(resubmitted);
             }
@@ -1567,12 +1950,14 @@ function ImagePageContent() {
         }
 
         updateTurnProgress(conversationId, activeTurn.id, {
-          message: "生成完成",
+          message: activeTurn.mode === "chat" ? "回复完成" : "生成完成",
           detail: "正在刷新会话",
         });
-        window.dispatchEvent(new Event(QUOTA_REFRESH_EVENT));
+        if (activeTurn.mode !== "chat") {
+          window.dispatchEvent(new Event(QUOTA_REFRESH_EVENT));
+        }
       } catch (error) {
-        const message = formatImageTaskError(error, activeTurn.mode === "chat" ? "对话请求失败" : "生成图片失败");
+        const message = formatCreationTaskError(error, activeTurn.mode === "chat" ? "对话请求失败" : "生成图片失败");
         await updateConversation(conversationId, (current) => {
           const conversation = current ?? snapshot;
           return {
@@ -1675,7 +2060,7 @@ function ImagePageContent() {
         return;
       }
 
-      const results = await Promise.allSettled(taskIds.map((taskId) => cancelImageTask(taskId)));
+      const results = await Promise.allSettled(taskIds.map((taskId) => cancelCreationTask(taskId)));
       const taskMap = new Map(
         results.flatMap((result) => (result.status === "fulfilled" ? [[result.value.id, result.value] as const] : [])),
       );
@@ -1697,7 +2082,7 @@ function ImagePageContent() {
               const taskId = image.taskId || image.id;
               const task = taskMap.get(taskId);
               if (task) {
-                return taskDataToStoredImage({ ...image, taskId }, task, imageDataIndexForTask(turn.images, imageIndex));
+                return taskDataToStoredImage({ ...image, taskId }, task, imageDataIndexForTask(turn.images, imageIndex), turn.visibility);
               }
               return {
                 ...image,
@@ -1773,10 +2158,15 @@ function ImagePageContent() {
                 index === imageIndex
                   ? {
                       ...image,
-                      taskId: turn.mode === "chat" ? undefined : retryTaskId,
+                      taskId: retryTaskId,
                       status: "loading" as const,
                       b64_json: undefined,
                       url: undefined,
+                      path: undefined,
+                      width: undefined,
+                      height: undefined,
+                      resolution: undefined,
+                      visibility: targetTurn.mode === "chat" ? undefined : targetTurn.visibility || "private",
                       revised_prompt: undefined,
                       text_response: undefined,
                       error: undefined,
@@ -1795,7 +2185,7 @@ function ImagePageContent() {
         void runConversationQueue(conversationId);
         toast.success("已加入重试队列");
       } catch (error) {
-        toast.error(formatImageTaskError(error, "提交重试失败"));
+        toast.error(formatCreationTaskError(error, "提交重试失败"));
       } finally {
         retryingImageIdsRef.current.delete(retryKey);
       }
@@ -1838,7 +2228,11 @@ function ImagePageContent() {
               return turn;
             }
 
-            const imageCount = turn.mode === "chat" ? 1 : normalizeRequestedImageCount(turn.count || turn.images.length || 1);
+            const imageCount =
+              turn.mode === "chat"
+                ? 1
+                : normalizeRequestedImageCount(turn.count || turn.images.length || 1, imageSingleCountLimit);
+            const visibility = turn.mode === "chat" ? undefined : turn.visibility || "private";
             return {
               ...turn,
               count: imageCount,
@@ -1848,8 +2242,9 @@ function ImagePageContent() {
                 const imageId = `${turn.id}-${regenerationId}-${index}`;
                 return {
                   id: imageId,
-                  taskId: turn.mode === "chat" ? undefined : imageTaskBatchId(`${turn.id}-${regenerationId}`, index),
+                  taskId: imageTaskBatchId(`${turn.id}-${regenerationId}`, index),
                   status: "loading" as const,
+                  visibility,
                 };
               }),
             };
@@ -1885,9 +2280,37 @@ function ImagePageContent() {
         return;
       }
 
-      const imageCount = draft.mode === "chat" ? 1 : normalizeRequestedImageCount(draft.count);
+      const imageCount = draft.mode === "chat" ? 1 : normalizeRequestedImageCount(draft.count, imageSingleCountLimit);
       const mode = draft.mode === "chat" ? "chat" : getComposerConversationMode("image", draft.referenceImages);
       const referenceImages = usesReferenceImages(mode) ? draft.referenceImages : [];
+      if (mode !== "chat" && isInvalidCustomRatioSelection(draft.sizeMode, draft.aspectRatio, draft.customRatio)) {
+        toast.error("请输入有效的自定义比例，例如 5:4 或 2.39:1");
+        return;
+      }
+      const draftImageSize =
+        mode === "chat"
+          ? ""
+          : buildImageSize({
+              mode: draft.sizeMode,
+              aspectRatio: draft.aspectRatio,
+              resolution: draft.resolution,
+              customRatio: draft.customRatio,
+              customWidth: draft.customWidth,
+              customHeight: draft.customHeight,
+            });
+      const draftSizeSelection = serializeImageSizeSelection({
+        mode: draft.sizeMode,
+        aspectRatio: draft.aspectRatio,
+        resolution: draft.resolution,
+        customRatio: draft.customRatio,
+        customWidth: draft.customWidth,
+        customHeight: draft.customHeight,
+      });
+      if (mode !== "chat" && draft.sizeMode === "custom" && !draftImageSize) {
+        toast.error("请填写有效的宽度和高度");
+        return;
+      }
+      const draftOutputCompression = imageOutputCompressionForFormat(draft.outputFormat, draft.outputCompression);
       const now = new Date().toISOString();
       const regenerationId = createId();
       await updateConversation(draft.conversationId, (current) => {
@@ -1909,8 +2332,12 @@ function ImagePageContent() {
               mode,
               referenceImages,
               count: imageCount,
-              size: mode === "chat" ? "" : draft.size,
-              quality: mode === "chat" ? undefined : draft.quality,
+              size: draftImageSize,
+              sizeSelection: mode === "chat" ? undefined : draftSizeSelection,
+              quality: mode === "chat" ? undefined : imageQualityForModel(draft.model, draft.quality),
+              outputFormat: mode === "chat" ? undefined : draft.outputFormat,
+              outputCompression: mode === "chat" ? undefined : draftOutputCompression,
+              visibility: mode === "chat" ? "private" : draft.visibility,
             };
             if (!regenerate) {
               return baseTurn;
@@ -1923,8 +2350,9 @@ function ImagePageContent() {
                 const imageId = `${turn.id}-${regenerationId}-${index}`;
                 return {
                   id: imageId,
-                  taskId: mode === "chat" ? undefined : imageTaskBatchId(`${turn.id}-${regenerationId}`, index),
+                  taskId: imageTaskBatchId(`${turn.id}-${regenerationId}`, index),
                   status: "loading" as const,
+                  visibility: baseTurn.mode === "chat" ? undefined : baseTurn.visibility,
                 };
               }),
             };
@@ -1956,6 +2384,18 @@ function ImagePageContent() {
       toast.error("请输入提示词");
       return;
     }
+    if (composerMode === "image" && imageSizeMode === "custom" && !imageSize) {
+      toast.error("请填写有效的宽度和高度");
+      return;
+    }
+    if (composerMode === "image" && isInvalidCustomRatioSelection(imageSizeMode, imageAspectRatio, imageCustomRatio)) {
+      toast.error("请输入有效的自定义比例，例如 5:4 或 2.39:1");
+      return;
+    }
+    if (composerMode === "image" && (Number(imageCount) || 1) > imageSingleCountLimit) {
+      toast.error(`超出单次出图数量限制（最多 ${imageSingleCountLimit} 张）`);
+      return;
+    }
     isSubmitDispatchingRef.current = true;
     let draftProgressTarget: { conversationId: string; turnId: string } | null = null;
 
@@ -1966,10 +2406,19 @@ function ImagePageContent() {
           ? isChatModel(imageModel)
             ? imageModel
             : DEFAULT_CHAT_MODEL
-          : isImageTaskModel(imageModel)
+          : isImageCreationModel(imageModel)
             ? imageModel
             : DEFAULT_IMAGE_MODEL;
       const requestedCount = effectiveImageMode === "chat" ? 1 : parsedCount;
+      const effectiveOutputCompression = imageOutputCompressionForFormat(imageOutputFormat, imageOutputCompression);
+      const currentImageSizeSelection = serializeImageSizeSelection({
+        mode: imageSizeMode,
+        aspectRatio: imageAspectRatio,
+        resolution: imageResolution,
+        customRatio: imageCustomRatio,
+        customWidth: imageCustomWidth,
+        customHeight: imageCustomHeight,
+      });
 
       const targetConversation = selectedConversationId
         ? conversationsRef.current.find((conversation) => conversation.id === selectedConversationId) ?? null
@@ -1985,13 +2434,18 @@ function ImagePageContent() {
         referenceImages: usesReferenceImages(effectiveImageMode) ? referenceImages : [],
         count: requestedCount,
         size: effectiveImageMode === "chat" ? "" : imageSize,
-        quality: effectiveImageMode === "chat" ? undefined : imageQuality,
+        sizeSelection: effectiveImageMode === "chat" ? undefined : currentImageSizeSelection,
+        quality: effectiveImageMode === "chat" ? undefined : imageQualityForModel(effectiveModel, imageQuality),
+        outputFormat: effectiveImageMode === "chat" ? undefined : imageOutputFormat,
+        outputCompression: effectiveImageMode === "chat" ? undefined : effectiveOutputCompression,
+        visibility: effectiveImageMode === "chat" ? "private" : defaultImageVisibility,
         images: Array.from({ length: requestedCount }, (_, index) => {
           const imageId = `${turnId}-${index}`;
           return {
             id: imageId,
-            taskId: effectiveImageMode === "chat" ? undefined : imageTaskBatchId(turnId, index),
+            taskId: imageTaskBatchId(turnId, index),
             status: "loading" as const,
+            visibility: effectiveImageMode === "chat" ? undefined : defaultImageVisibility,
           };
         }),
         createdAt: now,
@@ -2035,7 +2489,7 @@ function ImagePageContent() {
       if (draftProgressTarget) {
         clearTurnProgress(draftProgressTarget.conversationId, draftProgressTarget.turnId);
       }
-      toast.error(formatImageTaskError(error, "提交任务失败"));
+      toast.error(formatCreationTaskError(error, "提交任务失败"));
     } finally {
       isSubmitDispatchingRef.current = false;
     }
@@ -2043,7 +2497,7 @@ function ImagePageContent() {
 
   return (
     <>
-      <section className="mx-auto grid h-[calc(100dvh-7.5rem)] min-h-0 w-full max-w-[1380px] grid-cols-1 gap-2 overflow-hidden px-0 pb-[calc(env(safe-area-inset-bottom)+0.25rem)] sm:h-[calc(100dvh-7rem)] sm:gap-3 sm:px-3 sm:pb-3 lg:grid-cols-[240px_minmax(0,1fr)]">
+      <section className="mx-auto grid h-[calc(100dvh-6.25rem)] min-h-0 w-full max-w-[1380px] grid-cols-1 gap-2 px-0 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:h-[calc(100dvh-5rem)] sm:gap-3 sm:px-3 sm:pb-6 lg:grid-cols-[240px_minmax(0,1fr)]">
         <div className="hidden h-full min-h-0 border-r border-[#f2f3f5] pr-3 lg:block">
           <ImageSidebar
             conversations={conversations}
@@ -2163,7 +2617,7 @@ function ImagePageContent() {
                             <button
                               type="button"
                               onClick={() => handleRemoveEditReferenceImage(index)}
-                              className="absolute -top-1 -right-1 inline-flex size-6 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:text-stone-900"
+                              className="absolute -top-1 -right-1 z-10 inline-flex size-6 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 shadow-sm transition hover:text-stone-900"
                               aria-label={`移除参考图 ${image.name || index + 1}`}
                             >
                               <X className="size-3.5" />
@@ -2175,7 +2629,7 @@ function ImagePageContent() {
                   </div>
                   ) : null}
 
-                  <div className={cn("grid grid-cols-1 gap-3", editingTurnDraft.mode === "chat" ? "sm:grid-cols-1" : "sm:grid-cols-[120px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]")}>
+                  <div className={cn("grid grid-cols-1 gap-3", editingTurnDraft.mode === "chat" ? "sm:grid-cols-1" : "sm:grid-cols-2 lg:grid-cols-4")}>
                     {editingTurnDraft.mode !== "chat" ? (
                     <label className="flex flex-col gap-2 text-sm font-medium text-stone-700">
                       张数
@@ -2209,7 +2663,7 @@ function ImagePageContent() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
-                            {(editingTurnDraft.mode === "chat" ? CHAT_MODEL_OPTIONS : IMAGE_TASK_MODEL_OPTIONS).map((option) => (
+                            {(editingTurnDraft.mode === "chat" ? CHAT_MODEL_OPTIONS : IMAGE_CREATION_MODEL_OPTIONS).map((option) => (
                               <SelectItem key={option.value} value={option.value}>
                                 {option.label}
                               </SelectItem>
@@ -2221,15 +2675,81 @@ function ImagePageContent() {
                     {editingTurnDraft.mode !== "chat" ? (
                     <>
                     <label className="flex flex-col gap-2 text-sm font-medium text-stone-700">
+                      尺寸
+                      <Select
+                        value={editingTurnDraft.sizeMode}
+                        onValueChange={(value) =>
+                          setEditingTurnDraft((current) =>
+                            current && isImageSizeMode(value) ? { ...current, sizeMode: value } : current,
+                          )
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {IMAGE_SIZE_MODE_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </label>
+                    {editingTurnDraft.sizeMode === "custom" ? (
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-2 lg:col-span-2">
+                      <label className="flex min-w-0 flex-col gap-2 text-sm font-medium text-stone-700">
+                        宽度
+                        <Input
+                          type="number"
+                          inputMode="numeric"
+                          min="1"
+                          step="1"
+                          value={editingTurnDraft.customWidth}
+                          onChange={(event) =>
+                            setEditingTurnDraft((current) =>
+                              current ? { ...current, customWidth: event.target.value } : current,
+                            )
+                          }
+                        />
+                      </label>
+                      <span className="pb-2 text-sm font-medium text-stone-400">x</span>
+                      <label className="flex min-w-0 flex-col gap-2 text-sm font-medium text-stone-700">
+                        高度
+                        <Input
+                          type="number"
+                          inputMode="numeric"
+                          min="1"
+                          step="1"
+                          value={editingTurnDraft.customHeight}
+                          onChange={(event) =>
+                            setEditingTurnDraft((current) =>
+                              current ? { ...current, customHeight: event.target.value } : current,
+                            )
+                          }
+                        />
+                      </label>
+                    </div>
+                    ) : null}
+                    {editingTurnDraft.sizeMode === "ratio" ? (
+                    <>
+                    <label className="flex flex-col gap-2 text-sm font-medium text-stone-700">
                       比例
                       <Select
-                        value={editingTurnDraft.size || EMPTY_IMAGE_SIZE_SELECT_VALUE}
+                        value={editingTurnDraft.aspectRatio || EMPTY_IMAGE_ASPECT_RATIO_SELECT_VALUE}
                         onValueChange={(value) =>
                           setEditingTurnDraft((current) =>
                             current
                               ? {
                                   ...current,
-                                  size: value === EMPTY_IMAGE_SIZE_SELECT_VALUE ? "" : value,
+                                  aspectRatio:
+                                    value === EMPTY_IMAGE_ASPECT_RATIO_SELECT_VALUE
+                                      ? ""
+                                      : isImageAspectRatio(value)
+                                        ? value
+                                        : current.aspectRatio,
                                 }
                               : current,
                           )
@@ -2240,10 +2760,10 @@ function ImagePageContent() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
-                            {IMAGE_SIZE_OPTIONS.map((option) => (
+                            {IMAGE_ASPECT_RATIO_OPTIONS.map((option) => (
                               <SelectItem
                                 key={option.label}
-                                value={option.value || EMPTY_IMAGE_SIZE_SELECT_VALUE}
+                                value={option.value || EMPTY_IMAGE_ASPECT_RATIO_SELECT_VALUE}
                               >
                                 {option.label}
                               </SelectItem>
@@ -2252,6 +2772,104 @@ function ImagePageContent() {
                         </SelectContent>
                       </Select>
                     </label>
+                    <label className="flex flex-col gap-2 text-sm font-medium text-stone-700">
+                      分辨率
+                      <Select
+                        value={editingTurnDraft.resolution}
+                        onValueChange={(value) =>
+                          setEditingTurnDraft((current) =>
+                            current && isImageResolution(value) ? { ...current, resolution: value } : current,
+                          )
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {IMAGE_RESOLUTION_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </label>
+                    {editingTurnDraft.aspectRatio === CUSTOM_IMAGE_ASPECT_RATIO ? (
+                    <label className="flex flex-col gap-2 text-sm font-medium text-stone-700 sm:col-span-2">
+                      自定义比例
+                      <Input
+                        value={editingTurnDraft.customRatio}
+                        onChange={(event) =>
+                          setEditingTurnDraft((current) =>
+                            current ? { ...current, customRatio: event.target.value } : current,
+                          )
+                        }
+                        placeholder="例如 5:4 / 2.39:1"
+                        aria-invalid={editingDraftCustomRatioInvalid}
+                        className={cn(editingDraftCustomRatioInvalid && "border-red-300 focus-visible:ring-red-500/20")}
+                      />
+                    </label>
+                    ) : null}
+                    <label className="flex flex-col gap-2 text-sm font-medium text-stone-700">
+                      格式
+                      <Select
+                        value={editingTurnDraft.outputFormat}
+                        onValueChange={(value) =>
+                          setEditingTurnDraft((current) =>
+                            current && isImageOutputFormat(value)
+                              ? { ...current, outputFormat: value, outputCompression: value === "png" ? "" : current.outputCompression }
+                              : current,
+                          )
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {IMAGE_OUTPUT_FORMAT_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </label>
+                    <label className="flex flex-col gap-2 text-sm font-medium text-stone-700">
+                      压缩率
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={editingTurnDraft.outputCompression}
+                        disabled={editingTurnDraft.outputFormat === "png"}
+                        onChange={(event) =>
+                          setEditingTurnDraft((current) =>
+                            current ? { ...current, outputCompression: event.target.value } : current,
+                          )
+                        }
+                        placeholder={editingTurnDraft.outputFormat === "png" ? "PNG 不适用" : "0-100"}
+                      />
+                    </label>
+                    </>
+                    ) : null}
+                    {editingTurnDraft.sizeMode !== "auto" ? (
+                    <div className="rounded-2xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm sm:col-span-2 lg:col-span-4">
+                      <div className="flex min-w-0 items-center justify-between gap-3">
+                        <span className="shrink-0 font-medium text-stone-600">计算后分辨率</span>
+                        <span className="min-w-0 truncate text-right font-mono font-semibold text-stone-900">
+                          {editingDraftSizePreviewLabel}
+                        </span>
+                      </div>
+                      <div className="mt-1 truncate text-xs text-stone-500">{editingDraftSizePreviewDetail}</div>
+                    </div>
+                    ) : null}
+                    {supportsImageQuality(editingTurnDraft.model) ? (
                     <label className="flex flex-col gap-2 text-sm font-medium text-stone-700">
                       质量
                       <Select
@@ -2276,6 +2894,7 @@ function ImagePageContent() {
                         </SelectContent>
                       </Select>
                     </label>
+                    ) : null}
                     </>
                     ) : null}
                   </div>
@@ -2323,17 +2942,12 @@ function ImagePageContent() {
                 <Trash2 className="size-4" />
               </Button>
             </div>
-            {activeTaskCount > 0 ? (
-              <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-amber-50 px-3 text-xs font-medium text-amber-700 ring-1 ring-amber-100 lg:absolute lg:top-0 lg:right-4 lg:z-20">
-                <LoaderCircle className="size-3.5 animate-spin" />
-                {activeTaskCount}<span className="hidden sm:inline"> 个任务处理中</span>
-              </div>
-            ) : null}
           </div>
 
           <div
             ref={resultsViewportRef}
-            className="hide-scrollbar min-h-0 flex-1 overflow-y-auto px-1 pt-2 sm:px-4 sm:pt-4"
+            className="hide-scrollbar min-h-0 flex-1 overflow-y-auto px-1 pt-2 pb-[14rem] sm:px-4 sm:pt-4 sm:pb-[15rem]"
+            style={composerDockHeight > 0 ? { paddingBottom: composerDockHeight + 24 } : undefined}
           >
             <ImageResults
               selectedConversation={selectedConversation}
@@ -2347,29 +2961,39 @@ function ImagePageContent() {
               onCancelTurn={handleCancelTurn}
               onRegenerateTurn={handleRegenerateTurn}
               onRetryImage={handleRetryImage}
+              onImageVisibilityChange={handleImageVisibilityChange}
+              visibilityMutatingImageKey={visibilityMutatingImageKey}
               formatConversationTime={formatConversationTime}
             />
           </div>
 
           <div
             ref={composerDockRef}
-            className="relative z-30 px-1 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:px-4 sm:pb-2"
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-30 px-1 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:px-4 sm:pb-2"
             style={
               {
                 "--image-composer-dock-height": `${composerDockHeight}px`,
               } as CSSProperties
             }
           >
-            <div className="mx-auto w-full max-w-[900px]">
+            <div className="pointer-events-auto mx-auto w-full max-w-[900px]">
               <ImageComposer
                 composerMode={composerMode}
                 prompt={imagePrompt}
                 imageCount={imageCount}
+                imageCountLimit={imageSingleCountLimit}
                 imageModel={imageModel}
                 imageModelOptions={composerModelOptions}
-                imageSize={imageSize}
+                imageSizeMode={imageSizeMode}
+                imageAspectRatio={imageAspectRatio}
+                imageResolution={imageResolution}
+                imageCustomRatio={imageCustomRatio}
+                imageCustomWidth={imageCustomWidth}
+                imageCustomHeight={imageCustomHeight}
                 imageQuality={imageQuality}
-                imageQualityOptions={IMAGE_QUALITY_OPTIONS}
+                imageQualityOptions={imageQualityOptions}
+                imageOutputFormat={imageOutputFormat}
+                imageOutputCompression={imageOutputCompression}
                 imageOutputHint={imageOutputHint}
                 referenceImages={referenceImages}
                 textareaRef={textareaRef}
@@ -2378,10 +3002,17 @@ function ImagePageContent() {
                 onPromptChange={setImagePrompt}
                 onImageCountChange={setImageCount}
                 onImageModelChange={setImageModel}
-                onImageSizeChange={setImageSize}
+                onImageSizeModeChange={setImageSizeMode}
+                onImageAspectRatioChange={setImageAspectRatio}
+                onImageResolutionChange={setImageResolution}
+                onImageCustomRatioChange={setImageCustomRatio}
+                onImageCustomWidthChange={setImageCustomWidth}
+                onImageCustomHeightChange={setImageCustomHeight}
                 onImageQualityChange={setImageQuality}
+                onImageOutputFormatChange={setImageOutputFormat}
+                onImageOutputCompressionChange={setImageOutputCompression}
                 onSubmit={handleSubmit}
-                onPickReferenceImage={() => fileInputRef.current?.click()}
+                showPromptMarket
                 onOpenPromptMarket={() => setIsPromptMarketOpen(true)}
                 onReferenceImageChange={handleReferenceImageChange}
                 onRemoveReferenceImage={handleRemoveReferenceImage}
@@ -2430,7 +3061,7 @@ function ImagePageContent() {
 }
 
 export default function ImagePage() {
-  const { isCheckingAuth, session } = useAuthGuard();
+  const { isCheckingAuth, session } = useAuthGuard(undefined, "/image");
 
   if (isCheckingAuth || !session) {
     return (

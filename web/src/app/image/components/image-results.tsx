@@ -1,25 +1,21 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Check, CircleStop, Clock3, Download, Eye, LoaderCircle, PencilLine, Plus, RotateCcw, Sparkles } from "lucide-react";
+import { Check, CircleStop, Clock3, Download, Eye, Globe2, LoaderCircle, Lock, PencilLine, Plus, RotateCcw, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { ImagePromptPreset } from "@/app/image/image-presets";
+import type { ImageVisibility } from "@/lib/api";
 import { formatBase64ImageFileSize, formatImageFileSize } from "@/lib/image-size";
 import { cn } from "@/lib/utils";
 import type { ImageConversation, ImageTurn, ImageTurnStatus, StoredImage, StoredReferenceImage } from "@/store/image-conversations";
+import type { ImageTurnProgress } from "@/store/image-turn-progress";
 
 export type ImageLightboxItem = {
   id: string;
   src: string;
   sizeLabel?: string;
   dimensions?: string;
-};
-
-export type ImageTurnProgress = {
-  message: string;
-  detail?: string;
-  startedAt: number;
 };
 
 type DownloadableImage = {
@@ -42,12 +38,19 @@ type ImageResultsProps = {
   onCancelTurn: (conversationId: string, turnId: string) => void | Promise<void>;
   onRegenerateTurn: (conversationId: string, turnId: string) => void | Promise<void>;
   onRetryImage: (conversationId: string, turnId: string, imageIndex: number) => void | Promise<void>;
+  onImageVisibilityChange: (
+    conversationId: string,
+    turnId: string,
+    imageIndex: number,
+    visibility: ImageVisibility,
+  ) => void | Promise<void>;
+  visibilityMutatingImageKey: string;
   formatConversationTime: (value: string) => string;
 };
 
 function getStoredImageSrc(image: StoredImage) {
   if (image.b64_json) {
-    return `data:image/png;base64,${image.b64_json}`;
+    return `data:image/${image.outputFormat || "png"};base64,${image.b64_json}`;
   }
   return image.url || "";
 }
@@ -72,11 +75,67 @@ function getImageFormatLabel(image: StoredImage, src: string) {
   return `IMAGE ${format.toUpperCase()}`;
 }
 
-function buildDownloadName(createdAt: string, turnId: string, index: number) {
+function imageResolutionLabel(image: StoredImage, dimensions?: string) {
+  if (image.resolution) {
+    return image.resolution.replace(/x/g, " x ");
+  }
+  if (image.width && image.height) {
+    return formatImageDimensions(image.width, image.height);
+  }
+  return dimensions || "";
+}
+
+function getTurnResultSizeLabel(turn: ImageTurn, dimensionsByImageId: Record<string, string>) {
+  const labels = Array.from(
+    new Set(
+      turn.images
+        .filter((image) => image.status === "success")
+        .map((image) => imageResolutionLabel(image, dimensionsByImageId[image.id]))
+        .filter(Boolean),
+    ),
+  );
+  if (labels.length === 1) {
+    return labels[0];
+  }
+  if (labels.length > 1) {
+    return `${labels.length} 种尺寸`;
+  }
+  return isTurnBusy(turn) && turn.size ? `请求 ${turn.size}` : "";
+}
+
+function imageVisibilityLabel(visibility?: ImageVisibility) {
+  return visibility === "public" ? "已公开" : "私有";
+}
+
+function imageVisibilityPillClass(visibility?: ImageVisibility) {
+  return visibility === "public"
+    ? "bg-[#e8f2ff] text-[#1456f0] ring-1 ring-[#bfdbfe]"
+    : "bg-[#181e25]/82 text-white ring-1 ring-white/20";
+}
+
+function imageVisibilityActionClass(visibility?: ImageVisibility) {
+  return visibility === "public"
+    ? "bg-white/95 text-[#1456f0] hover:bg-[#e8f2ff]"
+    : "bg-white/95 text-stone-800 hover:bg-stone-100";
+}
+
+function blurFocusedElementInContainer(container: HTMLElement) {
+  const activeElement = document.activeElement;
+  if (activeElement instanceof HTMLElement && container.contains(activeElement)) {
+    activeElement.blur();
+  }
+}
+
+function imageExtension(outputFormat?: string) {
+  return outputFormat === "jpeg" ? "jpg" : outputFormat || "png";
+}
+
+function buildDownloadName(createdAt: string, turnId: string, index: number, outputFormat?: string) {
   const date = new Date(createdAt);
   const safeIndex = String(index + 1).padStart(2, "0");
+  const extension = imageExtension(outputFormat);
   if (Number.isNaN(date.getTime())) {
-    return `chatgpt-image-${turnId.slice(0, 8)}-${safeIndex}.png`;
+    return `chatgpt-image-${turnId.slice(0, 8)}-${safeIndex}.${extension}`;
   }
 
   const yyyy = String(date.getFullYear());
@@ -85,7 +144,7 @@ function buildDownloadName(createdAt: string, turnId: string, index: number) {
   const hh = String(date.getHours()).padStart(2, "0");
   const min = String(date.getMinutes()).padStart(2, "0");
   const sec = String(date.getSeconds()).padStart(2, "0");
-  return `chatgpt-image-${yyyy}${mm}${dd}-${hh}${min}${sec}-${safeIndex}.png`;
+  return `chatgpt-image-${yyyy}${mm}${dd}-${hh}${min}${sec}-${safeIndex}.${extension}`;
 }
 
 async function downloadImage(image: DownloadableImage) {
@@ -150,6 +209,8 @@ export function ImageResults({
   onCancelTurn,
   onRegenerateTurn,
   onRetryImage,
+  onImageVisibilityChange,
+  visibilityMutatingImageKey,
   formatConversationTime,
 }: ImageResultsProps) {
   const [imageDimensions, setImageDimensions] = useState<Record<string, string>>({});
@@ -219,6 +280,8 @@ export function ImageResults({
   };
 
   if (!selectedConversation) {
+    const emptyTitle = "Turn ideas into images";
+    const emptyDescription = "选择一组真实案例预设快速开始，也可以直接在下方输入自己的画面描述。";
     return (
       <div className="flex h-full min-h-[300px] items-center justify-center px-0 py-3 text-center sm:min-h-[420px] sm:py-6">
         <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-5">
@@ -227,11 +290,9 @@ export function ImageResults({
               <Sparkles className="size-4 text-[#1456f0]" />
               生图预设
             </div>
-            <h1 className="font-display text-3xl leading-[1.08] font-medium text-[#222222] sm:text-5xl">
-              Turn ideas into images
-            </h1>
+            <h1 className="font-display text-3xl leading-[1.08] font-medium text-[#222222] sm:text-5xl">{emptyTitle}</h1>
             <p className="mx-auto mt-3 max-w-[460px] text-sm leading-6 text-[#45515e] sm:text-[15px]">
-              选择一组真实案例预设快速开始，也可以直接在下方输入自己的画面描述。
+              {emptyDescription}
             </p>
           </div>
           <div className="hide-scrollbar flex gap-3 overflow-x-auto px-1 pb-1 text-left sm:grid sm:grid-cols-2 sm:overflow-visible lg:grid-cols-4">
@@ -288,7 +349,7 @@ export function ImageResults({
                   id: image.id,
                   selectionKey: imageSelectionKey(selectedConversation.id, turn.id, image.id),
                   src,
-                  fileName: buildDownloadName(turn.createdAt, turn.id, index),
+                  fileName: buildDownloadName(turn.createdAt, turn.id, index, image.outputFormat || turn.outputFormat),
                   imageIndex: index,
                 },
               ]
@@ -321,6 +382,7 @@ export function ImageResults({
         const resultCount = visualImages.length || (turnBusy ? turn.count : 0);
         const outcomeLabel = getTurnOutcomeLabel(successCount, failedCount, cancelledCount);
         const showResultSummary = turn.mode !== "chat" && (visualImages.length > 0 || turnBusy);
+        const resultSizeLabel = getTurnResultSizeLabel(turn, imageDimensions);
         const progressStartedAt =
           progress && Number.isFinite(progress.startedAt) ? progress.startedAt : null;
         const elapsedClock = turnBusy
@@ -466,9 +528,15 @@ export function ImageResults({
                       {turn.count !== resultCount ? (
                         <span className="rounded-full bg-[#f0f0f0] px-3 py-1">目标 {turn.count} 张</span>
                       ) : null}
-                      {turn.size ? <span className="rounded-full bg-[#f0f0f0] px-3 py-1">{turn.size}</span> : null}
+                      {resultSizeLabel ? <span className="rounded-full bg-[#f0f0f0] px-3 py-1">{resultSizeLabel}</span> : null}
                       {turn.quality ? (
                         <span className="rounded-full bg-[#f0f0f0] px-3 py-1">Quality {turn.quality}</span>
+                      ) : null}
+                      {turn.outputFormat ? (
+                        <span className="rounded-full bg-[#f0f0f0] px-3 py-1">{turn.outputFormat.toUpperCase()}</span>
+                      ) : null}
+                      {turn.outputCompression != null && turn.outputFormat && turn.outputFormat !== "png" ? (
+                        <span className="rounded-full bg-[#f0f0f0] px-3 py-1">压缩 {turn.outputCompression}</span>
                       ) : null}
                       {outcomeLabel ? <span className="rounded-full bg-[#f0f0f0] px-3 py-1">{outcomeLabel}</span> : null}
                       <span className={cn("rounded-full px-3 py-1", getStatusChipClass(turn.status))}>
@@ -528,9 +596,14 @@ export function ImageResults({
                       const selectionKey = imageSelectionKey(selectedConversation.id, turn.id, image.id);
                       const selected = Boolean(selectedImageIds[selectionKey]);
                       const sizeLabel = image.b64_json ? formatBase64ImageFileSize(image.b64_json) : imageSizeLabels[image.id] || "";
-                      const dimensions = imageDimensions[image.id];
+                      const dimensions = imageResolutionLabel(image, imageDimensions[image.id]);
                       const imageMeta = [dimensions, sizeLabel].filter(Boolean).join(" | ");
                       const formatLabel = getImageFormatLabel(image, imageSrc);
+                      const visibility = image.visibility || turn.visibility || "private";
+                      const nextVisibility = visibility === "public" ? "private" : "public";
+                      const visibilityMutatingKey = `${selectedConversation.id}:${turn.id}:${image.id}`;
+                      const isVisibilityMutating = visibilityMutatingImageKey === visibilityMutatingKey;
+                      const canUpdateVisibility = Boolean(image.path || image.url);
 
                       return (
                         <figure
@@ -539,10 +612,14 @@ export function ImageResults({
                             "group relative mb-3 inline-block w-full break-inside-avoid overflow-hidden rounded-[22px] bg-[#f0f0f0] shadow-[0_0_15px_rgba(44,30,116,0.16)] sm:mb-4",
                             selected && "ring-2 ring-[#1456f0]/90 ring-offset-2",
                           )}
+                          onMouseLeave={(event) => blurFocusedElementInContainer(event.currentTarget)}
                         >
                           <button
                             type="button"
-                            onClick={() => toggleImageSelection(selectionKey)}
+                            onClick={(event) => {
+                              toggleImageSelection(selectionKey);
+                              event.currentTarget.blur();
+                            }}
                             className="block w-full cursor-pointer overflow-hidden text-left"
                             aria-label={selected ? "取消选择图片" : "选择图片"}
                           >
@@ -564,7 +641,10 @@ export function ImageResults({
                           </button>
                           <button
                             type="button"
-                            onClick={() => toggleImageSelection(selectionKey)}
+                            onClick={(event) => {
+                              toggleImageSelection(selectionKey);
+                              event.currentTarget.blur();
+                            }}
                             className={cn(
                               "absolute top-2 left-2 z-10 inline-flex size-6 items-center justify-center rounded-full border transition duration-150",
                               selected
@@ -578,7 +658,10 @@ export function ImageResults({
                           <div className="pointer-events-none absolute top-2 right-2 z-10 flex items-center gap-1 opacity-0 transition duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
                             <button
                               type="button"
-                              onClick={() => onOpenLightbox(successfulTurnImages, currentIndex)}
+                              onClick={(event) => {
+                                event.currentTarget.blur();
+                                onOpenLightbox(successfulTurnImages, currentIndex);
+                              }}
                               className="inline-flex h-7 items-center gap-1 rounded-full bg-white/95 px-2 text-[11px] font-medium text-stone-800 shadow-sm transition hover:bg-white hover:text-stone-950"
                               aria-label="View Original"
                               title="View Original"
@@ -588,7 +671,10 @@ export function ImageResults({
                             </button>
                             <button
                               type="button"
-                              onClick={() => onContinueEdit(selectedConversation.id, image)}
+                              onClick={(event) => {
+                                event.currentTarget.blur();
+                                onContinueEdit(selectedConversation.id, image);
+                              }}
                               className="inline-flex size-7 items-center justify-center rounded-full bg-white/95 text-stone-800 shadow-sm transition hover:bg-white hover:text-stone-950"
                               aria-label="加入编辑"
                               title="加入编辑"
@@ -596,7 +682,49 @@ export function ImageResults({
                               <Plus className="size-3.5" />
                             </button>
                           </div>
-                          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/55 via-black/20 to-transparent px-2.5 pt-8 pb-2 opacity-0 transition duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+                          <div className="absolute right-2 bottom-2 z-20 flex items-center gap-1">
+                            {canUpdateVisibility ? (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  event.currentTarget.blur();
+                                  void onImageVisibilityChange(
+                                    selectedConversation.id,
+                                    turn.id,
+                                    index,
+                                    nextVisibility,
+                                  );
+                                }}
+                                disabled={isVisibilityMutating}
+                                className={cn(
+                                  "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium opacity-0 shadow-sm transition group-hover:opacity-100 group-focus-within:opacity-100 disabled:cursor-not-allowed disabled:opacity-70",
+                                  imageVisibilityActionClass(visibility),
+                                )}
+                                aria-label={visibility === "public" ? "取消公开图片" : "公开图片"}
+                                title={visibility === "public" ? "取消公开" : "公开"}
+                              >
+                                {isVisibilityMutating ? (
+                                  <LoaderCircle className="size-3 animate-spin" />
+                                ) : visibility === "public" ? (
+                                  <Lock className="size-3" />
+                                ) : (
+                                  <Globe2 className="size-3" />
+                                )}
+                                {visibility === "public" ? "取消公开" : "公开"}
+                              </button>
+                            ) : null}
+                            <div
+                              className={cn(
+                                "pointer-events-none inline-flex h-7 items-center gap-1 rounded-full px-2 text-[11px] font-medium shadow-sm backdrop-blur-sm",
+                                imageVisibilityPillClass(visibility),
+                              )}
+                            >
+                              {visibility === "public" ? <Globe2 className="size-3" /> : <Lock className="size-3" />}
+                              {imageVisibilityLabel(visibility)}
+                            </div>
+                          </div>
+                          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/55 via-black/20 to-transparent px-2.5 pt-8 pb-11 opacity-0 transition duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
                             <div className="text-left text-white drop-shadow-sm">
                               <div className="text-[10px] font-bold tracking-wide">{formatLabel}</div>
                               {imageMeta ? (

@@ -11,7 +11,7 @@ import (
 const (
 	maxStoredResponseContexts = 32
 	maxContextMessages        = 16
-	maxContextImages          = 4
+	maxContextImages          = 16
 	maxContextMessageChars    = 2000
 )
 

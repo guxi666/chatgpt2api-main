@@ -25,7 +25,7 @@ type SettingsCardProps = {
   children: ReactNode;
   className?: string;
   contentClassName?: string;
-  description: string;
+  description?: string;
   icon: LucideIcon;
   meta?: ReactNode;
   title: string;

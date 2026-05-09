@@ -4,10 +4,12 @@ import { create } from "zustand";
 import { toast } from "sonner";
 
 import {
+  cleanupLogs,
   createCPAPool,
   deleteCPAPool,
   fetchCPAPoolFiles,
   fetchCPAPools,
+  fetchLogGovernance,
   fetchRegisterConfig,
   resetRegister as resetRegisterApi,
   fetchSettingsConfig,
@@ -20,6 +22,8 @@ import {
   updateSettingsConfig,
   type CPAPool,
   type CPARemoteFile,
+  type LogCleanupResult,
+  type LogGovernanceSummary,
   type LoginPageImageSettings,
   type RegisterConfig,
   type SettingsConfig,
@@ -36,6 +40,20 @@ export const PAGE_SIZE_OPTIONS = ["50", "100", "200"] as const;
 
 export type PageSizeOption = (typeof PAGE_SIZE_OPTIONS)[number];
 
+function centsToYuanInput(value: unknown, fallbackCents: number) {
+  const cents = Number(value || fallbackCents);
+  const safe = Number.isFinite(cents) ? Math.max(0, cents) : Math.max(0, fallbackCents);
+  return (safe / 100).toFixed(2);
+}
+
+function yuanInputToCents(value: unknown, fallbackCents: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return Math.max(1, fallbackCents);
+  }
+  return Math.max(1, Math.round(parsed * 100));
+}
+
 function normalizeConfig(config: SettingsConfig): SettingsConfig {
   const loginImageTransform = normalizeLoginPageImageTransform({
     zoom: Number(config.login_page_image_zoom),
@@ -44,36 +62,49 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
   });
   return {
     ...config,
-    app_title: typeof config.app_title === "string" ? config.app_title : "chatgpt2api",
-    project_name: typeof config.project_name === "string" ? config.project_name : "chatgpt2api",
-    app_logo_url: typeof config.app_logo_url === "string" ? config.app_logo_url : "/logo-mark.svg",
-    site_icon_url: typeof config.site_icon_url === "string" ? config.site_icon_url : "/logo-mark.svg",
     refresh_account_interval_minute: Number(config.refresh_account_interval_minute || 5),
     image_concurrent_limit: Number(config.image_concurrent_limit || 4),
+    image_single_count_limit: Number(config.image_single_count_limit || 10),
+    image_task_timeout_seconds: Number(config.image_task_timeout_seconds || 300),
     user_default_concurrent_limit: Number(config.user_default_concurrent_limit || 0),
     user_default_rpm_limit: Number(config.user_default_rpm_limit || 0),
     image_retention_days: Number(config.image_retention_days || 30),
+    log_retention_days: Number(config.log_retention_days || 7),
     auto_remove_invalid_accounts: Boolean(config.auto_remove_invalid_accounts),
     auto_remove_rate_limited_accounts: Boolean(config.auto_remove_rate_limited_accounts),
     log_levels: Array.isArray(config.log_levels) ? config.log_levels : [],
     proxy: typeof config.proxy === "string" ? config.proxy : "",
     base_url: typeof config.base_url === "string" ? config.base_url : "",
-    linuxdo_enabled: Boolean(config.linuxdo_enabled),
-    linuxdo_client_id: typeof config.linuxdo_client_id === "string" ? config.linuxdo_client_id : "",
-    linuxdo_client_secret: "",
-    linuxdo_client_secret_configured: Boolean(config.linuxdo_client_secret_configured),
-    linuxdo_redirect_url: typeof config.linuxdo_redirect_url === "string" ? config.linuxdo_redirect_url : "",
-    linuxdo_frontend_redirect_url:
-      typeof config.linuxdo_frontend_redirect_url === "string" ? config.linuxdo_frontend_redirect_url : "/auth/linuxdo/callback",
+    brand_top_left_name: typeof config.brand_top_left_name === "string" ? config.brand_top_left_name : "chatgpt2api",
+    brand_site_name: typeof config.brand_site_name === "string" ? config.brand_site_name : "chatgpt2api",
+    brand_top_left_logo_url:
+      typeof config.brand_top_left_logo_url === "string" ? config.brand_top_left_logo_url : "/logo-mark.svg",
+    brand_site_logo_url:
+      typeof config.brand_site_logo_url === "string" ? config.brand_site_logo_url : "/logo-mark.svg",
+    registration_enabled: Boolean(config.registration_enabled),
+    registration_allowed_email_domains:
+      typeof config.registration_allowed_email_domains === "string"
+        ? config.registration_allowed_email_domains
+        : "qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,icloud.com,yahoo.com,foxmail.com,sina.com",
+    cf_turnstile_site_key: typeof config.cf_turnstile_site_key === "string" ? config.cf_turnstile_site_key : "",
+    cf_turnstile_secret_key: "",
+    cf_turnstile_secret_key_configured: Boolean(config.cf_turnstile_secret_key_configured),
     email_smtp_enabled: Boolean(config.email_smtp_enabled),
     email_smtp_host: typeof config.email_smtp_host === "string" ? config.email_smtp_host : "smtp.qq.com",
     email_smtp_port: Number(config.email_smtp_port || 465),
-    email_smtp_use_ssl: config.email_smtp_use_ssl !== false,
+    email_smtp_use_ssl: Boolean(config.email_smtp_use_ssl ?? true),
     email_smtp_username: typeof config.email_smtp_username === "string" ? config.email_smtp_username : "",
     email_smtp_auth_code: "",
     email_smtp_auth_code_configured: Boolean(config.email_smtp_auth_code_configured),
     email_smtp_from_email: typeof config.email_smtp_from_email === "string" ? config.email_smtp_from_email : "",
     email_smtp_from_name: typeof config.email_smtp_from_name === "string" ? config.email_smtp_from_name : "chatgpt2api",
+    image_price_cents: Number(config.image_price_cents || 8),
+    image_price_1k_cents: centsToYuanInput(config.image_price_1k_cents || config.image_price_cents || 8, 8),
+    image_price_2k_cents: centsToYuanInput(config.image_price_2k_cents || 16, 16),
+    image_price_4k_cents: centsToYuanInput(config.image_price_4k_cents || 32, 32),
+    agency_tier_basic_cents: Number(config.agency_tier_basic_cents || 19900),
+    agency_tier_pro_cents: Number(config.agency_tier_pro_cents || 49900),
+    agency_tier_premium_cents: Number(config.agency_tier_premium_cents || 99900),
     yipay_enabled: Boolean(config.yipay_enabled),
     yipay_pid: typeof config.yipay_pid === "string" ? config.yipay_pid : "",
     yipay_key: "",
@@ -88,6 +119,16 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     usdt_network: typeof config.usdt_network === "string" ? config.usdt_network : "TRC20",
     usdt_address: typeof config.usdt_address === "string" ? config.usdt_address : "",
     usdt_payment_url: typeof config.usdt_payment_url === "string" ? config.usdt_payment_url : "",
+    linuxdo_enabled: Boolean(config.linuxdo_enabled),
+    linuxdo_client_id: typeof config.linuxdo_client_id === "string" ? config.linuxdo_client_id : "",
+    linuxdo_client_secret: "",
+    linuxdo_client_secret_configured: Boolean(config.linuxdo_client_secret_configured),
+    linuxdo_redirect_url: typeof config.linuxdo_redirect_url === "string" ? config.linuxdo_redirect_url : "",
+    linuxdo_frontend_redirect_url:
+      typeof config.linuxdo_frontend_redirect_url === "string" ? config.linuxdo_frontend_redirect_url : "/auth/linuxdo/callback",
+    update_repo: typeof config.update_repo === "string" ? config.update_repo : "ZyphrZero/chatgpt2api",
+    update_github_token: "",
+    update_github_token_configured: Boolean(config.update_github_token_configured),
     login_page_image_url: typeof config.login_page_image_url === "string" ? config.login_page_image_url : "",
     login_page_image_mode: normalizeLoginPageImageMode(config.login_page_image_mode),
     login_page_image_zoom: loginImageTransform.zoom,
@@ -117,6 +158,10 @@ type SettingsStore = {
   config: SettingsConfig | null;
   isLoadingConfig: boolean;
   isSavingConfig: boolean;
+  logGovernance: LogGovernanceSummary | null;
+  lastLogCleanup: LogCleanupResult | null;
+  isLoadingLogGovernance: boolean;
+  isCleaningLogs: boolean;
 
   registerConfig: RegisterConfig | null;
   isLoadingRegister: boolean;
@@ -147,25 +192,27 @@ type SettingsStore = {
   initialize: () => Promise<void>;
   loadConfig: () => Promise<void>;
   saveConfig: () => Promise<void>;
-  setAppTitle: (value: string) => void;
-  setProjectName: (value: string) => void;
-  setAppLogoUrl: (value: string) => void;
-  setSiteIconUrl: (value: string) => void;
   setRefreshAccountIntervalMinute: (value: string) => void;
   setImageConcurrentLimit: (value: string) => void;
+  setImageSingleCountLimit: (value: string) => void;
+  setImageTaskTimeoutSeconds: (value: string) => void;
   setUserDefaultConcurrentLimit: (value: string) => void;
   setUserDefaultRpmLimit: (value: string) => void;
   setImageRetentionDays: (value: string) => void;
+  setLogRetentionDays: (value: string) => void;
   setAutoRemoveInvalidAccounts: (value: boolean) => void;
   setAutoRemoveRateLimitedAccounts: (value: boolean) => void;
   setLogLevel: (level: string, enabled: boolean) => void;
   setProxy: (value: string) => void;
   setBaseUrl: (value: string) => void;
-  setLinuxDoEnabled: (value: boolean) => void;
-  setLinuxDoClientId: (value: string) => void;
-  setLinuxDoClientSecret: (value: string) => void;
-  setLinuxDoRedirectUrl: (value: string) => void;
-  setLinuxDoFrontendRedirectUrl: (value: string) => void;
+  setBrandTopLeftName: (value: string) => void;
+  setBrandSiteName: (value: string) => void;
+  setBrandTopLeftLogoURL: (value: string) => void;
+  setBrandSiteLogoURL: (value: string) => void;
+  setRegistrationEnabled: (value: boolean) => void;
+  setRegistrationAllowedEmailDomains: (value: string) => void;
+  setCFTurnstileSiteKey: (value: string) => void;
+  setCFTurnstileSecretKey: (value: string) => void;
   setEmailSMTPEnabled: (value: boolean) => void;
   setEmailSMTPHost: (value: string) => void;
   setEmailSMTPPort: (value: string) => void;
@@ -174,6 +221,9 @@ type SettingsStore = {
   setEmailSMTPAuthCode: (value: string) => void;
   setEmailSMTPFromEmail: (value: string) => void;
   setEmailSMTPFromName: (value: string) => void;
+  setImagePrice1K: (value: string) => void;
+  setImagePrice2K: (value: string) => void;
+  setImagePrice4K: (value: string) => void;
   setYiPayEnabled: (value: boolean) => void;
   setYiPayPID: (value: string) => void;
   setYiPayKey: (value: string) => void;
@@ -181,17 +231,20 @@ type SettingsStore = {
   setYiPayNotifyUrl: (value: string) => void;
   setYiPayReturnUrl: (value: string) => void;
   setYiPaySiteName: (value: string) => void;
-  setPayPalEnabled: (value: boolean) => void;
-  setPayPalCheckoutUrl: (value: string) => void;
-  setUSDTEnabled: (value: boolean) => void;
-  setUSDTNetwork: (value: string) => void;
-  setUSDTAddress: (value: string) => void;
-  setUSDTPaymentUrl: (value: string) => void;
+  setLinuxDoEnabled: (value: boolean) => void;
+  setLinuxDoClientId: (value: string) => void;
+  setLinuxDoClientSecret: (value: string) => void;
+  setLinuxDoRedirectUrl: (value: string) => void;
+  setLinuxDoFrontendRedirectUrl: (value: string) => void;
+  setUpdateRepo: (value: string) => void;
+  setUpdateGitHubToken: (value: string) => void;
   setLoginPageImageUrl: (value: string) => void;
   setLoginPageImageMode: (value: LoginPageImageMode) => void;
   setLoginPageImageTransform: (transform: { zoom: number; positionX: number; positionY: number }) => void;
   restoreDefaultLoginPageImage: () => void;
   saveLoginPageImage: (options: { file?: File | null; action: "keep" | "replace" | "remove" }) => Promise<boolean>;
+  loadLogGovernance: (silent?: boolean) => Promise<void>;
+  cleanupLogsByRetention: () => Promise<void>;
 
   loadRegister: (silent?: boolean) => Promise<void>;
   setRegisterConfig: (config: RegisterConfig) => void;
@@ -235,6 +288,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   config: null,
   isLoadingConfig: true,
   isSavingConfig: false,
+  logGovernance: null,
+  lastLogCleanup: null,
+  isLoadingLogGovernance: true,
+  isCleaningLogs: false,
 
   registerConfig: null,
   isLoadingRegister: true,
@@ -263,7 +320,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   isStartingImport: false,
 
   initialize: async () => {
-    await Promise.allSettled([get().loadConfig(), get().loadPools()]);
+    await Promise.allSettled([get().loadConfig(), get().loadPools(), get().loadLogGovernance()]);
   },
 
   loadConfig: async () => {
@@ -289,28 +346,32 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     set({ isSavingConfig: true });
     try {
       const linuxDoClientSecret = String(config.linuxdo_client_secret || "").trim();
+      const updateGitHubToken = String(config.update_github_token || "").trim();
+      const cfTurnstileSecretKey = String(config.cf_turnstile_secret_key || "").trim();
       const emailSMTPAuthCode = String(config.email_smtp_auth_code || "").trim();
       const yiPayKey = String(config.yipay_key || "").trim();
       const payload: SettingsConfig = {
         ...config,
-        app_title: String(config.app_title || "").trim(),
-        project_name: String(config.project_name || "").trim(),
-        app_logo_url: String(config.app_logo_url || "").trim(),
-        site_icon_url: String(config.site_icon_url || "").trim(),
         refresh_account_interval_minute: Math.max(1, Number(config.refresh_account_interval_minute) || 1),
         image_concurrent_limit: Math.max(1, Number(config.image_concurrent_limit) || 4),
+        image_single_count_limit: Math.min(10, Math.max(1, Number(config.image_single_count_limit) || 10)),
+        image_task_timeout_seconds: Math.min(3600, Math.max(30, Number(config.image_task_timeout_seconds) || 300)),
         user_default_concurrent_limit: Math.max(0, Number(config.user_default_concurrent_limit) || 0),
         user_default_rpm_limit: Math.max(0, Number(config.user_default_rpm_limit) || 0),
         image_retention_days: Math.max(1, Number(config.image_retention_days) || 30),
+        log_retention_days: Math.min(3650, Math.max(1, Number(config.log_retention_days) || 7)),
         auto_remove_invalid_accounts: Boolean(config.auto_remove_invalid_accounts),
         auto_remove_rate_limited_accounts: Boolean(config.auto_remove_rate_limited_accounts),
         proxy: config.proxy.trim(),
         base_url: String(config.base_url || "").trim(),
-        linuxdo_enabled: Boolean(config.linuxdo_enabled),
-        linuxdo_client_id: String(config.linuxdo_client_id || "").trim(),
-        linuxdo_client_secret: linuxDoClientSecret,
-        linuxdo_redirect_url: String(config.linuxdo_redirect_url || "").trim(),
-        linuxdo_frontend_redirect_url: String(config.linuxdo_frontend_redirect_url || "").trim(),
+        brand_top_left_name: String(config.brand_top_left_name || "").trim(),
+        brand_site_name: String(config.brand_site_name || "").trim(),
+        brand_top_left_logo_url: String(config.brand_top_left_logo_url || "").trim(),
+        brand_site_logo_url: String(config.brand_site_logo_url || "").trim(),
+        registration_enabled: Boolean(config.registration_enabled),
+        registration_allowed_email_domains: String(config.registration_allowed_email_domains || "").trim(),
+        cf_turnstile_site_key: String(config.cf_turnstile_site_key || "").trim(),
+        cf_turnstile_secret_key: cfTurnstileSecretKey,
         email_smtp_enabled: Boolean(config.email_smtp_enabled),
         email_smtp_host: String(config.email_smtp_host || "").trim(),
         email_smtp_port: Math.max(1, Number(config.email_smtp_port) || 465),
@@ -319,6 +380,13 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         email_smtp_auth_code: emailSMTPAuthCode,
         email_smtp_from_email: String(config.email_smtp_from_email || "").trim(),
         email_smtp_from_name: String(config.email_smtp_from_name || "").trim(),
+        image_price_cents: Math.max(1, Number(config.image_price_cents) || 8),
+        image_price_1k_cents: yuanInputToCents(config.image_price_1k_cents, Number(config.image_price_cents) || 8),
+        image_price_2k_cents: yuanInputToCents(config.image_price_2k_cents, 16),
+        image_price_4k_cents: yuanInputToCents(config.image_price_4k_cents, 32),
+        agency_tier_basic_cents: Math.max(0, Number(config.agency_tier_basic_cents) || 19900),
+        agency_tier_pro_cents: Math.max(0, Number(config.agency_tier_pro_cents) || 49900),
+        agency_tier_premium_cents: Math.max(0, Number(config.agency_tier_premium_cents) || 99900),
         yipay_enabled: Boolean(config.yipay_enabled),
         yipay_pid: String(config.yipay_pid || "").trim(),
         yipay_key: yiPayKey,
@@ -332,9 +400,22 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         usdt_network: String(config.usdt_network || "").trim(),
         usdt_address: String(config.usdt_address || "").trim(),
         usdt_payment_url: String(config.usdt_payment_url || "").trim(),
+        linuxdo_enabled: Boolean(config.linuxdo_enabled),
+        linuxdo_client_id: String(config.linuxdo_client_id || "").trim(),
+        linuxdo_client_secret: linuxDoClientSecret,
+        linuxdo_redirect_url: String(config.linuxdo_redirect_url || "").trim(),
+        linuxdo_frontend_redirect_url: String(config.linuxdo_frontend_redirect_url || "").trim(),
+        update_repo: String(config.update_repo ?? "ZyphrZero/chatgpt2api").trim(),
+        update_github_token: updateGitHubToken,
       };
       if (!linuxDoClientSecret) {
         delete payload.linuxdo_client_secret;
+      }
+      if (!updateGitHubToken) {
+        delete payload.update_github_token;
+      }
+      if (!cfTurnstileSecretKey) {
+        delete payload.cf_turnstile_secret_key;
       }
       if (!emailSMTPAuthCode) {
         delete payload.email_smtp_auth_code;
@@ -343,19 +424,19 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         delete payload.yipay_key;
       }
       delete payload.linuxdo_client_secret_configured;
+      delete payload.update_github_token_configured;
+      delete payload.cf_turnstile_secret_key_configured;
       delete payload.email_smtp_auth_code_configured;
       delete payload.yipay_key_configured;
 
       const data = await updateSettingsConfig(payload);
-      const normalized = normalizeConfig(data.config);
-      set({
-        config: normalized,
-      });
+      const nextConfig = normalizeConfig(data.config);
+      set({ config: nextConfig });
       dispatchAppMetaUpdated({
-        app_title: String(normalized.app_title || "chatgpt2api"),
-        project_name: String(normalized.project_name || "chatgpt2api"),
-        app_logo_url: String(normalized.app_logo_url || "/logo-mark.svg"),
-        site_icon_url: String(normalized.site_icon_url || "/logo-mark.svg"),
+        app_title: String(nextConfig.brand_top_left_name || "chatgpt2api"),
+        project_name: String(nextConfig.brand_site_name || "chatgpt2api"),
+        top_left_logo_url: String(nextConfig.brand_top_left_logo_url || "/logo-mark.svg"),
+        site_logo_url: String(nextConfig.brand_site_logo_url || "/logo-mark.svg"),
       });
       toast.success("配置已保存");
     } catch (error) {
@@ -379,28 +460,24 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     });
   },
 
-  setAppTitle: (value) => {
-    set((state) => state.config ? { config: { ...state.config, app_title: value } } : {});
-  },
-
-  setProjectName: (value) => {
-    set((state) => state.config ? { config: { ...state.config, project_name: value } } : {});
-  },
-
-  setAppLogoUrl: (value) => {
-    set((state) => state.config ? { config: { ...state.config, app_logo_url: value } } : {});
-  },
-
-  setSiteIconUrl: (value) => {
-    set((state) => state.config ? { config: { ...state.config, site_icon_url: value } } : {});
-  },
-
   setImageRetentionDays: (value) => {
     set((state) => state.config ? { config: { ...state.config, image_retention_days: value } } : {});
   },
 
+  setLogRetentionDays: (value) => {
+    set((state) => state.config ? { config: { ...state.config, log_retention_days: value } } : {});
+  },
+
   setImageConcurrentLimit: (value) => {
     set((state) => state.config ? { config: { ...state.config, image_concurrent_limit: value } } : {});
+  },
+
+  setImageSingleCountLimit: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_single_count_limit: value } } : {});
+  },
+
+  setImageTaskTimeoutSeconds: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_task_timeout_seconds: value } } : {});
   },
 
   setUserDefaultConcurrentLimit: (value) => {
@@ -457,24 +534,36 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     });
   },
 
-  setLinuxDoEnabled: (value) => {
-    set((state) => state.config ? { config: { ...state.config, linuxdo_enabled: value } } : {});
+  setBrandTopLeftName: (value) => {
+    set((state) => state.config ? { config: { ...state.config, brand_top_left_name: value } } : {});
   },
 
-  setLinuxDoClientId: (value) => {
-    set((state) => state.config ? { config: { ...state.config, linuxdo_client_id: value } } : {});
+  setBrandSiteName: (value) => {
+    set((state) => state.config ? { config: { ...state.config, brand_site_name: value } } : {});
   },
 
-  setLinuxDoClientSecret: (value) => {
-    set((state) => state.config ? { config: { ...state.config, linuxdo_client_secret: value } } : {});
+  setBrandTopLeftLogoURL: (value) => {
+    set((state) => state.config ? { config: { ...state.config, brand_top_left_logo_url: value } } : {});
   },
 
-  setLinuxDoRedirectUrl: (value) => {
-    set((state) => state.config ? { config: { ...state.config, linuxdo_redirect_url: value } } : {});
+  setBrandSiteLogoURL: (value) => {
+    set((state) => state.config ? { config: { ...state.config, brand_site_logo_url: value } } : {});
   },
 
-  setLinuxDoFrontendRedirectUrl: (value) => {
-    set((state) => state.config ? { config: { ...state.config, linuxdo_frontend_redirect_url: value } } : {});
+  setRegistrationEnabled: (value) => {
+    set((state) => state.config ? { config: { ...state.config, registration_enabled: value } } : {});
+  },
+
+  setRegistrationAllowedEmailDomains: (value) => {
+    set((state) => state.config ? { config: { ...state.config, registration_allowed_email_domains: value } } : {});
+  },
+
+  setCFTurnstileSiteKey: (value) => {
+    set((state) => state.config ? { config: { ...state.config, cf_turnstile_site_key: value } } : {});
+  },
+
+  setCFTurnstileSecretKey: (value) => {
+    set((state) => state.config ? { config: { ...state.config, cf_turnstile_secret_key: value } } : {});
   },
 
   setEmailSMTPEnabled: (value) => {
@@ -509,6 +598,18 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     set((state) => state.config ? { config: { ...state.config, email_smtp_from_name: value } } : {});
   },
 
+  setImagePrice1K: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_price_1k_cents: value } } : {});
+  },
+
+  setImagePrice2K: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_price_2k_cents: value } } : {});
+  },
+
+  setImagePrice4K: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_price_4k_cents: value } } : {});
+  },
+
   setYiPayEnabled: (value) => {
     set((state) => state.config ? { config: { ...state.config, yipay_enabled: value } } : {});
   },
@@ -537,28 +638,32 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     set((state) => state.config ? { config: { ...state.config, yipay_site_name: value } } : {});
   },
 
-  setPayPalEnabled: (value) => {
-    set((state) => state.config ? { config: { ...state.config, paypal_enabled: value } } : {});
+  setLinuxDoEnabled: (value) => {
+    set((state) => state.config ? { config: { ...state.config, linuxdo_enabled: value } } : {});
   },
 
-  setPayPalCheckoutUrl: (value) => {
-    set((state) => state.config ? { config: { ...state.config, paypal_checkout_url: value } } : {});
+  setLinuxDoClientId: (value) => {
+    set((state) => state.config ? { config: { ...state.config, linuxdo_client_id: value } } : {});
   },
 
-  setUSDTEnabled: (value) => {
-    set((state) => state.config ? { config: { ...state.config, usdt_enabled: value } } : {});
+  setLinuxDoClientSecret: (value) => {
+    set((state) => state.config ? { config: { ...state.config, linuxdo_client_secret: value } } : {});
   },
 
-  setUSDTNetwork: (value) => {
-    set((state) => state.config ? { config: { ...state.config, usdt_network: value } } : {});
+  setLinuxDoRedirectUrl: (value) => {
+    set((state) => state.config ? { config: { ...state.config, linuxdo_redirect_url: value } } : {});
   },
 
-  setUSDTAddress: (value) => {
-    set((state) => state.config ? { config: { ...state.config, usdt_address: value } } : {});
+  setLinuxDoFrontendRedirectUrl: (value) => {
+    set((state) => state.config ? { config: { ...state.config, linuxdo_frontend_redirect_url: value } } : {});
   },
 
-  setUSDTPaymentUrl: (value) => {
-    set((state) => state.config ? { config: { ...state.config, usdt_payment_url: value } } : {});
+  setUpdateRepo: (value) => {
+    set((state) => state.config ? { config: { ...state.config, update_repo: value } } : {});
+  },
+
+  setUpdateGitHubToken: (value) => {
+    set((state) => state.config ? { config: { ...state.config, update_github_token: value } } : {});
   },
 
   setLoginPageImageUrl: (value) => {
@@ -617,10 +722,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const nextConfig = normalizeConfig(data.config);
       set({ config: nextConfig });
       dispatchAppMetaUpdated({
-        app_title: String(nextConfig.app_title || "chatgpt2api"),
-        project_name: String(nextConfig.project_name || "chatgpt2api"),
-        app_logo_url: String(nextConfig.app_logo_url || "/logo-mark.svg"),
-        site_icon_url: String(nextConfig.site_icon_url || "/logo-mark.svg"),
+        app_title: String(nextConfig.brand_top_left_name || "chatgpt2api"),
+        project_name: String(nextConfig.brand_site_name || "chatgpt2api"),
+        top_left_logo_url: String(nextConfig.brand_top_left_logo_url || "/logo-mark.svg"),
+        site_logo_url: String(nextConfig.brand_site_logo_url || "/logo-mark.svg"),
         login_page_image_url: String(nextConfig.login_page_image_url || ""),
         login_page_image_mode: normalizeLoginPageImageMode(nextConfig.login_page_image_mode),
         login_page_image_zoom: Number(nextConfig.login_page_image_zoom),
@@ -634,6 +739,39 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       return false;
     } finally {
       set({ isSavingConfig: false });
+    }
+  },
+
+  loadLogGovernance: async (silent = false) => {
+    if (!silent) set({ isLoadingLogGovernance: true });
+    try {
+      const data = await fetchLogGovernance();
+      set({ logGovernance: data.governance });
+    } catch (error) {
+      if (!silent) toast.error(error instanceof Error ? error.message : "加载日志治理数据失败");
+    } finally {
+      if (!silent) set({ isLoadingLogGovernance: false });
+    }
+  },
+
+  cleanupLogsByRetention: async () => {
+    const { config } = get();
+    if (!config) {
+      return;
+    }
+    const retentionDays = Math.min(3650, Math.max(1, Number(config.log_retention_days) || 7));
+    set({ isCleaningLogs: true });
+    try {
+      const data = await cleanupLogs(retentionDays);
+      set({
+        lastLogCleanup: data.cleanup,
+        logGovernance: data.governance,
+      });
+      toast.success(`已清理 ${data.cleanup.deleted} 条历史日志`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "清理日志失败");
+    } finally {
+      set({ isCleaningLogs: false });
     }
   },
 

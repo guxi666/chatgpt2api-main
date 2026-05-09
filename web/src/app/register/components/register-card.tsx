@@ -47,7 +47,7 @@ export function RegisterCard() {
     updateProvider(index, {
       type,
       enable: true,
-      ...(type === "cloudflare_temp_email" ? { api_base: "", admin_password: "", domain: [] } : {}),
+      ...(type === "cloudflare_temp_email" ? { api_base: "", admin_password: "", domain: [], random_subdomain: false } : {}),
       ...(type === "tempmail_lol" ? { api_key: "", domain: [] } : {}),
       ...(type === "duckmail" ? { api_key: "", default_domain: "duckmail.sbs" } : {}),
       ...(type === "gptmail" ? { api_key: "", default_domain: "" } : {}),
@@ -56,8 +56,8 @@ export function RegisterCard() {
   };
 
   return (
-    <div className="grid min-h-[520px] items-stretch gap-0 rounded-[24px] border border-[#f2f3f5] bg-card shadow-[0_0_15px_rgba(44,30,116,0.16)] xl:grid-cols-2">
-      <section className="space-y-4 border-b border-border p-4 xl:border-r xl:border-b-0">
+    <div className="grid h-[calc(100vh-132px)] min-h-[640px] items-stretch gap-0 overflow-hidden rounded-[24px] border border-[#f2f3f5] bg-card shadow-[0_0_15px_rgba(44,30,116,0.16)] xl:grid-cols-2">
+      <section className="space-y-4 overflow-y-auto border-b border-border p-4 xl:border-r xl:border-b-0">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="flex size-9 items-center justify-center rounded-md bg-muted">
@@ -184,6 +184,17 @@ export function RegisterCard() {
                           <div className="space-y-2">
                             <label className="text-sm text-stone-700">Admin Password</label>
                             <Input value={String(provider.admin_password || "")} onChange={(event) => updateProvider(index, { admin_password: event.target.value })} className="h-10 rounded-xl border-stone-200 bg-white" disabled={config.enabled} />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm text-stone-700">Random Subdomain</label>
+                            <label className="flex h-10 items-center gap-3 rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-700">
+                              <Checkbox
+                                checked={Boolean(provider.random_subdomain)}
+                                onCheckedChange={(checked) => updateProvider(index, { random_subdomain: Boolean(checked) })}
+                                disabled={config.enabled}
+                              />
+                              开启后自动生成随机二级域名
+                            </label>
                           </div>
                         </>
                       ) : null}

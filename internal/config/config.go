@@ -18,69 +18,91 @@ import (
 )
 
 var settingEnvKeys = map[string]string{
-	"auth-key":                          "CHATGPT2API_AUTH_KEY",
-	"app_title":                         "CHATGPT2API_APP_TITLE",
-	"project_name":                      "CHATGPT2API_PROJECT_NAME",
-	"app_logo_url":                      "CHATGPT2API_APP_LOGO_URL",
-	"site_icon_url":                     "CHATGPT2API_SITE_ICON_URL",
-	"base_url":                          "CHATGPT2API_BASE_URL",
-	"proxy":                             "CHATGPT2API_PROXY",
-	"refresh_account_interval_minute":   "CHATGPT2API_REFRESH_ACCOUNT_INTERVAL_MINUTE",
-	"image_concurrent_limit":            "CHATGPT2API_IMAGE_CONCURRENT_LIMIT",
-	"user_default_concurrent_limit":     "CHATGPT2API_USER_DEFAULT_CONCURRENT_LIMIT",
-	"user_default_rpm_limit":            "CHATGPT2API_USER_DEFAULT_RPM_LIMIT",
-	"image_retention_days":              "CHATGPT2API_IMAGE_RETENTION_DAYS",
-	"auto_remove_invalid_accounts":      "CHATGPT2API_AUTO_REMOVE_INVALID_ACCOUNTS",
-	"auto_remove_rate_limited_accounts": "CHATGPT2API_AUTO_REMOVE_RATE_LIMITED_ACCOUNTS",
-	"log_levels":                        "CHATGPT2API_LOG_LEVELS",
-	"linuxdo_enabled":                   "CHATGPT2API_LINUXDO_ENABLED",
-	"linuxdo_client_id":                 "CHATGPT2API_LINUXDO_CLIENT_ID",
-	"linuxdo_client_secret":             "CHATGPT2API_LINUXDO_CLIENT_SECRET",
-	"linuxdo_redirect_url":              "CHATGPT2API_LINUXDO_REDIRECT_URL",
-	"linuxdo_frontend_redirect_url":     "CHATGPT2API_LINUXDO_FRONTEND_REDIRECT_URL",
-	"login_page_image_url":              "CHATGPT2API_LOGIN_PAGE_IMAGE_URL",
-	"login_page_image_mode":             "CHATGPT2API_LOGIN_PAGE_IMAGE_MODE",
-	"login_page_image_zoom":             "CHATGPT2API_LOGIN_PAGE_IMAGE_ZOOM",
-	"login_page_image_position_x":       "CHATGPT2API_LOGIN_PAGE_IMAGE_POSITION_X",
-	"login_page_image_position_y":       "CHATGPT2API_LOGIN_PAGE_IMAGE_POSITION_Y",
-	"email_allowed_domains":             "CHATGPT2API_EMAIL_ALLOWED_DOMAINS",
-	"email_smtp_enabled":                "CHATGPT2API_EMAIL_SMTP_ENABLED",
-	"email_smtp_host":                   "CHATGPT2API_EMAIL_SMTP_HOST",
-	"email_smtp_port":                   "CHATGPT2API_EMAIL_SMTP_PORT",
-	"email_smtp_use_ssl":                "CHATGPT2API_EMAIL_SMTP_USE_SSL",
-	"email_smtp_username":               "CHATGPT2API_EMAIL_SMTP_USERNAME",
-	"email_smtp_auth_code":              "CHATGPT2API_EMAIL_SMTP_AUTH_CODE",
-	"email_smtp_from_email":             "CHATGPT2API_EMAIL_SMTP_FROM_EMAIL",
-	"email_smtp_from_name":              "CHATGPT2API_EMAIL_SMTP_FROM_NAME",
-	"image_price_cents":                 "CHATGPT2API_IMAGE_PRICE_CENTS",
-	"yipay_enabled":                     "CHATGPT2API_YIPAY_ENABLED",
-	"yipay_pid":                         "CHATGPT2API_YIPAY_PID",
-	"yipay_key":                         "CHATGPT2API_YIPAY_KEY",
-	"yipay_submit_url":                  "CHATGPT2API_YIPAY_SUBMIT_URL",
-	"yipay_notify_url":                  "CHATGPT2API_YIPAY_NOTIFY_URL",
-	"yipay_return_url":                  "CHATGPT2API_YIPAY_RETURN_URL",
-	"yipay_site_name":                   "CHATGPT2API_YIPAY_SITE_NAME",
-	"paypal_enabled":                    "CHATGPT2API_PAYPAL_ENABLED",
-	"paypal_checkout_url":               "CHATGPT2API_PAYPAL_CHECKOUT_URL",
-	"usdt_enabled":                      "CHATGPT2API_USDT_ENABLED",
-	"usdt_network":                      "CHATGPT2API_USDT_NETWORK",
-	"usdt_address":                      "CHATGPT2API_USDT_ADDRESS",
-	"usdt_payment_url":                  "CHATGPT2API_USDT_PAYMENT_URL",
+	"base_url":                           "CHATGPT2API_BASE_URL",
+	"brand_top_left_name":                "CHATGPT2API_BRAND_TOP_LEFT_NAME",
+	"brand_site_name":                    "CHATGPT2API_BRAND_SITE_NAME",
+	"brand_top_left_logo_url":            "CHATGPT2API_BRAND_TOP_LEFT_LOGO_URL",
+	"brand_site_logo_url":                "CHATGPT2API_BRAND_SITE_LOGO_URL",
+	"proxy":                              "CHATGPT2API_PROXY",
+	"refresh_account_interval_minute":    "CHATGPT2API_REFRESH_ACCOUNT_INTERVAL_MINUTE",
+	"image_concurrent_limit":             "CHATGPT2API_IMAGE_CONCURRENT_LIMIT",
+	"image_single_count_limit":           "CHATGPT2API_IMAGE_SINGLE_COUNT_LIMIT",
+	"image_task_timeout_seconds":         "CHATGPT2API_IMAGE_TASK_TIMEOUT_SECONDS",
+	"user_default_concurrent_limit":      "CHATGPT2API_USER_DEFAULT_CONCURRENT_LIMIT",
+	"user_default_rpm_limit":             "CHATGPT2API_USER_DEFAULT_RPM_LIMIT",
+	"image_retention_days":               "CHATGPT2API_IMAGE_RETENTION_DAYS",
+	"auto_remove_invalid_accounts":       "CHATGPT2API_AUTO_REMOVE_INVALID_ACCOUNTS",
+	"auto_remove_rate_limited_accounts":  "CHATGPT2API_AUTO_REMOVE_RATE_LIMITED_ACCOUNTS",
+	"log_retention_days":                 "CHATGPT2API_LOG_RETENTION_DAYS",
+	"log_levels":                         "CHATGPT2API_LOG_LEVELS",
+	"linuxdo_enabled":                    "CHATGPT2API_LINUXDO_ENABLED",
+	"linuxdo_client_id":                  "CHATGPT2API_LINUXDO_CLIENT_ID",
+	"linuxdo_client_secret":              "CHATGPT2API_LINUXDO_CLIENT_SECRET",
+	"linuxdo_redirect_url":               "CHATGPT2API_LINUXDO_REDIRECT_URL",
+	"linuxdo_frontend_redirect_url":      "CHATGPT2API_LINUXDO_FRONTEND_REDIRECT_URL",
+	"update_repo":                        "CHATGPT2API_UPDATE_REPO",
+	"update_github_token":                "CHATGPT2API_UPDATE_GITHUB_TOKEN",
+	"registration_enabled":               "CHATGPT2API_REGISTRATION_ENABLED",
+	"registration_allowed_email_domains": "CHATGPT2API_REGISTRATION_ALLOWED_EMAIL_DOMAINS",
+	"cf_turnstile_site_key":              "CHATGPT2API_CF_TURNSTILE_SITE_KEY",
+	"cf_turnstile_secret_key":            "CHATGPT2API_CF_TURNSTILE_SECRET_KEY",
+	"email_smtp_enabled":                 "CHATGPT2API_EMAIL_SMTP_ENABLED",
+	"email_smtp_host":                    "CHATGPT2API_EMAIL_SMTP_HOST",
+	"email_smtp_port":                    "CHATGPT2API_EMAIL_SMTP_PORT",
+	"email_smtp_use_ssl":                 "CHATGPT2API_EMAIL_SMTP_USE_SSL",
+	"email_smtp_username":                "CHATGPT2API_EMAIL_SMTP_USERNAME",
+	"email_smtp_auth_code":               "CHATGPT2API_EMAIL_SMTP_AUTH_CODE",
+	"email_smtp_from_email":              "CHATGPT2API_EMAIL_SMTP_FROM_EMAIL",
+	"email_smtp_from_name":               "CHATGPT2API_EMAIL_SMTP_FROM_NAME",
+	"image_price_cents":                  "CHATGPT2API_IMAGE_PRICE_CENTS",
+	"image_price_1k_cents":               "CHATGPT2API_IMAGE_PRICE_1K_CENTS",
+	"image_price_2k_cents":               "CHATGPT2API_IMAGE_PRICE_2K_CENTS",
+	"image_price_4k_cents":               "CHATGPT2API_IMAGE_PRICE_4K_CENTS",
+	"agency_tier_basic_cents":            "CHATGPT2API_AGENCY_TIER_BASIC_CENTS",
+	"agency_tier_pro_cents":              "CHATGPT2API_AGENCY_TIER_PRO_CENTS",
+	"agency_tier_premium_cents":          "CHATGPT2API_AGENCY_TIER_PREMIUM_CENTS",
+	"agency_tier_basic_commission_bp":    "CHATGPT2API_AGENCY_TIER_BASIC_COMMISSION_BP",
+	"agency_tier_pro_commission_bp":      "CHATGPT2API_AGENCY_TIER_PRO_COMMISSION_BP",
+	"agency_tier_premium_commission_bp":  "CHATGPT2API_AGENCY_TIER_PREMIUM_COMMISSION_BP",
+	"agency_tier_basic_discount_bp":      "CHATGPT2API_AGENCY_TIER_BASIC_DISCOUNT_BP",
+	"agency_tier_pro_discount_bp":        "CHATGPT2API_AGENCY_TIER_PRO_DISCOUNT_BP",
+	"agency_tier_premium_discount_bp":    "CHATGPT2API_AGENCY_TIER_PREMIUM_DISCOUNT_BP",
+	"yipay_enabled":                      "CHATGPT2API_YIPAY_ENABLED",
+	"yipay_pid":                          "CHATGPT2API_YIPAY_PID",
+	"yipay_key":                          "CHATGPT2API_YIPAY_KEY",
+	"yipay_submit_url":                   "CHATGPT2API_YIPAY_SUBMIT_URL",
+	"yipay_notify_url":                   "CHATGPT2API_YIPAY_NOTIFY_URL",
+	"yipay_return_url":                   "CHATGPT2API_YIPAY_RETURN_URL",
+	"yipay_site_name":                    "CHATGPT2API_YIPAY_SITE_NAME",
+	"paypal_enabled":                     "CHATGPT2API_PAYPAL_ENABLED",
+	"paypal_checkout_url":                "CHATGPT2API_PAYPAL_CHECKOUT_URL",
+	"usdt_enabled":                       "CHATGPT2API_USDT_ENABLED",
+	"usdt_network":                       "CHATGPT2API_USDT_NETWORK",
+	"usdt_address":                       "CHATGPT2API_USDT_ADDRESS",
+	"usdt_payment_url":                   "CHATGPT2API_USDT_PAYMENT_URL",
+	"login_page_image_url":               "CHATGPT2API_LOGIN_PAGE_IMAGE_URL",
+	"login_page_image_mode":              "CHATGPT2API_LOGIN_PAGE_IMAGE_MODE",
+	"login_page_image_zoom":              "CHATGPT2API_LOGIN_PAGE_IMAGE_ZOOM",
+	"login_page_image_position_x":        "CHATGPT2API_LOGIN_PAGE_IMAGE_POSITION_X",
+	"login_page_image_position_y":        "CHATGPT2API_LOGIN_PAGE_IMAGE_POSITION_Y",
 }
 
 var envKeyRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-const imageCleanupMinInterval = 10 * time.Minute
+const (
+	defaultImageTaskTimeoutSeconds = 300
+	minImageTaskTimeoutSeconds     = 30
+	maxImageTaskTimeoutSeconds     = 3600
+)
 
 type Store struct {
-	mu                 sync.RWMutex
-	RootDir            string
-	DataDir            string
-	EnvFile            string
-	data               map[string]any
-	externalEnvKeys    map[string]struct{}
-	storageBackend     storage.Backend
-	lastImageCleanupAt time.Time
+	mu              sync.RWMutex
+	RootDir         string
+	DataDir         string
+	EnvFile         string
+	data            map[string]any
+	externalEnvKeys map[string]struct{}
+	storageBackend  storage.Backend
 }
 
 type LinuxDoOAuthConfig struct {
@@ -98,6 +120,17 @@ type LinuxDoOAuthConfig struct {
 	UserInfoEmailPath    string
 	UserInfoIDPath       string
 	UserInfoUsernamePath string
+}
+
+type EmailSMTPConfig struct {
+	Enabled   bool
+	Host      string
+	Port      int
+	UseSSL    bool
+	Username  string
+	Password  string
+	FromEmail string
+	FromName  string
 }
 
 type YiPayConfig struct {
@@ -120,17 +153,6 @@ type USDTConfig struct {
 	Network    string
 	Address    string
 	PaymentURL string
-}
-
-type EmailSMTPConfig struct {
-	Enabled   bool
-	Host      string
-	Port      int
-	UseSSL    bool
-	Username  string
-	AuthCode  string
-	FromEmail string
-	FromName  string
 }
 
 func NewStore() (*Store, error) {
@@ -160,9 +182,6 @@ func NewStore() (*Store, error) {
 	}
 	s.loadEnvFile()
 	s.data = settingsFromEnvValues(envFileValues)
-	if s.AuthKey() == "" {
-		return nil, errors.New("auth-key 未设置，请设置 CHATGPT2API_AUTH_KEY 或在 .env 中填写 CHATGPT2API_AUTH_KEY")
-	}
 	return s, nil
 }
 
@@ -219,8 +238,183 @@ func findAncestorWithProjectGoMod(start string) string {
 	}
 }
 
-func (s *Store) AuthKey() string {
-	return strings.TrimSpace(fmt.Sprint(s.settingValue("auth-key", "")))
+func (s *Store) AdminUsername() string {
+	value := strings.TrimSpace(os.Getenv("CHATGPT2API_ADMIN_USERNAME"))
+	if value == "" {
+		return "admin"
+	}
+	return value
+}
+
+func (s *Store) AdminPassword() string {
+	return strings.TrimSpace(os.Getenv("CHATGPT2API_ADMIN_PASSWORD"))
+}
+
+func (s *Store) RegistrationEnabled() bool {
+	return util.ToBool(s.settingValue("registration_enabled", false))
+}
+
+func (s *Store) CFTurnstileSiteKey() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("cf_turnstile_site_key", "")))
+}
+
+func (s *Store) CFTurnstileSecretKey() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("cf_turnstile_secret_key", "")))
+}
+
+func (s *Store) CFTurnstileEnabled() bool {
+	return s.CFTurnstileSiteKey() != "" && s.CFTurnstileSecretKey() != ""
+}
+
+func (s *Store) RegistrationAllowedEmailDomains() []string {
+	raw := strings.TrimSpace(fmt.Sprint(s.settingValue("registration_allowed_email_domains", "")))
+	if raw == "" {
+		raw = "qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,icloud.com,yahoo.com,foxmail.com,sina.com"
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 16)
+	for _, part := range strings.Split(raw, ",") {
+		domain := strings.ToLower(strings.TrimSpace(part))
+		if domain == "" {
+			continue
+		}
+		if _, ok := seen[domain]; ok {
+			continue
+		}
+		seen[domain] = struct{}{}
+		out = append(out, domain)
+	}
+	return out
+}
+
+func (s *Store) EmailAllowedDomains() []string {
+	return s.RegistrationAllowedEmailDomains()
+}
+
+func (s *Store) ImagePriceCents() int {
+	return s.ImagePrice1KCents()
+}
+
+func (s *Store) ImagePrice1KCents() int {
+	value := intSetting(s.settingValue("image_price_1k_cents", s.settingValue("image_price_cents", 8)), 8)
+	if value < 1 {
+		return 1
+	}
+	return value
+}
+
+func (s *Store) ImagePrice2KCents() int {
+	base := s.ImagePrice1KCents()
+	value := intSetting(s.settingValue("image_price_2k_cents", base*2), base*2)
+	if value < 1 {
+		return 1
+	}
+	return value
+}
+
+func (s *Store) ImagePrice4KCents() int {
+	base := s.ImagePrice1KCents()
+	value := intSetting(s.settingValue("image_price_4k_cents", base*4), base*4)
+	if value < 1 {
+		return 1
+	}
+	return value
+}
+
+func (s *Store) AgencyTierBasicCents() int {
+	value := intSetting(s.settingValue("agency_tier_basic_cents", 19900), 19900)
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func (s *Store) AgencyTierProCents() int {
+	value := intSetting(s.settingValue("agency_tier_pro_cents", 49900), 49900)
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func (s *Store) AgencyTierPremiumCents() int {
+	value := intSetting(s.settingValue("agency_tier_premium_cents", 99900), 99900)
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func (s *Store) AgencyTierBasicCommissionBP() int {
+	return clampAgencyBasisPoint(intSetting(s.settingValue("agency_tier_basic_commission_bp", 3000), 3000))
+}
+
+func (s *Store) AgencyTierProCommissionBP() int {
+	return clampAgencyBasisPoint(intSetting(s.settingValue("agency_tier_pro_commission_bp", 4500), 4500))
+}
+
+func (s *Store) AgencyTierPremiumCommissionBP() int {
+	return clampAgencyBasisPoint(intSetting(s.settingValue("agency_tier_premium_commission_bp", 6000), 6000))
+}
+
+func (s *Store) AgencyTierBasicDiscountBP() int {
+	return clampAgencyBasisPoint(intSetting(s.settingValue("agency_tier_basic_discount_bp", 500), 500))
+}
+
+func (s *Store) AgencyTierProDiscountBP() int {
+	return clampAgencyBasisPoint(intSetting(s.settingValue("agency_tier_pro_discount_bp", 1000), 1000))
+}
+
+func (s *Store) AgencyTierPremiumDiscountBP() int {
+	return clampAgencyBasisPoint(intSetting(s.settingValue("agency_tier_premium_discount_bp", 1500), 1500))
+}
+
+func clampAgencyBasisPoint(value int) int {
+	if value < 0 {
+		return 0
+	}
+	if value > 10000 {
+		return 10000
+	}
+	return value
+}
+
+func (s *Store) EmailSMTP() EmailSMTPConfig {
+	port := intSetting(s.settingValue("email_smtp_port", 465), 465)
+	if port <= 0 {
+		port = 465
+	}
+	return EmailSMTPConfig{
+		Enabled:   util.ToBool(s.settingValue("email_smtp_enabled", false)),
+		Host:      strings.TrimSpace(fmt.Sprint(s.settingValue("email_smtp_host", ""))),
+		Port:      port,
+		UseSSL:    util.ToBool(s.settingValue("email_smtp_use_ssl", true)),
+		Username:  strings.TrimSpace(fmt.Sprint(s.settingValue("email_smtp_username", ""))),
+		Password:  strings.TrimSpace(fmt.Sprint(s.settingValue("email_smtp_auth_code", ""))),
+		FromEmail: strings.TrimSpace(fmt.Sprint(s.settingValue("email_smtp_from_email", ""))),
+		FromName:  strings.TrimSpace(fmt.Sprint(s.settingValue("email_smtp_from_name", "chatgpt2api"))),
+	}
+}
+
+func (s *Store) YiPay() YiPayConfig {
+	s.mu.RLock()
+	data := util.CopyMap(s.data)
+	s.mu.RUnlock()
+	return s.yiPayFromData(data)
+}
+
+func (s *Store) PayPal() PayPalConfig {
+	s.mu.RLock()
+	data := util.CopyMap(s.data)
+	s.mu.RUnlock()
+	return s.payPalFromData(data)
+}
+
+func (s *Store) USDT() USDTConfig {
+	s.mu.RLock()
+	data := util.CopyMap(s.data)
+	s.mu.RUnlock()
+	return s.usdtFromData(data)
 }
 
 func (s *Store) RefreshAccountIntervalMinute() int {
@@ -235,12 +429,38 @@ func (s *Store) ImageRetentionDays() int {
 	return value
 }
 
+func (s *Store) LogRetentionDays() int {
+	value := intSetting(s.settingValue("log_retention_days", 7), 7)
+	if value < 1 {
+		return 1
+	}
+	if value > 3650 {
+		return 3650
+	}
+	return value
+}
+
 func (s *Store) ImageConcurrentLimit() int {
 	value := intSetting(s.settingValue("image_concurrent_limit", 4), 4)
 	if value < 1 {
 		return 1
 	}
 	return value
+}
+
+func (s *Store) ImageSingleCountLimit() int {
+	value := intSetting(s.settingValue("image_single_count_limit", 10), 10)
+	if value < 1 {
+		return 1
+	}
+	if value > 10 {
+		return 10
+	}
+	return value
+}
+
+func (s *Store) ImageTaskTimeoutSeconds() int {
+	return normalizeImageTaskTimeoutSeconds(s.settingValue("image_task_timeout_seconds", defaultImageTaskTimeoutSeconds))
 }
 
 func (s *Store) UserDefaultConcurrentLimit() int {
@@ -259,61 +479,6 @@ func (s *Store) UserDefaultRPMLimit() int {
 	return value
 }
 
-func (s *Store) ImagePriceCents() int {
-	value := intSetting(s.settingValue("image_price_cents", 8), 8)
-	if value < 1 {
-		return 1
-	}
-	return value
-}
-
-func (s *Store) EmailAllowedDomains() []string {
-	defaults := []string{
-		"qq.com",
-		"163.com",
-		"126.com",
-		"gmail.com",
-		"outlook.com",
-		"hotmail.com",
-		"icloud.com",
-		"yahoo.com",
-		"foxmail.com",
-		"sina.com",
-	}
-	raw := s.settingValue("email_allowed_domains", strings.Join(defaults, ","))
-	rawText := ""
-	switch value := raw.(type) {
-	case []string:
-		rawText = strings.Join(value, ",")
-	case []any:
-		items := make([]string, 0, len(value))
-		for _, item := range value {
-			items = append(items, strings.TrimSpace(fmt.Sprint(item)))
-		}
-		rawText = strings.Join(items, ",")
-	default:
-		rawText = fmt.Sprint(raw)
-	}
-	parts := strings.Split(strings.ToLower(strings.TrimSpace(rawText)), ",")
-	out := make([]string, 0, len(parts))
-	seen := map[string]struct{}{}
-	for _, part := range parts {
-		item := strings.TrimSpace(part)
-		if item == "" {
-			continue
-		}
-		if _, ok := seen[item]; ok {
-			continue
-		}
-		seen[item] = struct{}{}
-		out = append(out, item)
-	}
-	if len(out) == 0 {
-		return defaults
-	}
-	return out
-}
-
 func (s *Store) AutoRemoveInvalidAccounts() bool {
 	return util.ToBool(s.settingValue("auto_remove_invalid_accounts", false))
 }
@@ -326,32 +491,55 @@ func (s *Store) BaseURL() string {
 	return strings.TrimRight(strings.TrimSpace(fmt.Sprint(s.settingValue("base_url", ""))), "/")
 }
 
-func (s *Store) AppTitle() string {
-	value := strings.TrimSpace(fmt.Sprint(s.settingValue("app_title", "chatgpt2api")))
+func (s *Store) BrandTopLeftName() string {
+	value := strings.TrimSpace(fmt.Sprint(s.settingValue("brand_top_left_name", "chatgpt2api")))
 	if value == "" {
 		return "chatgpt2api"
 	}
 	return value
 }
 
-func (s *Store) ProjectName() string {
-	value := strings.TrimSpace(fmt.Sprint(s.settingValue("project_name", "chatgpt2api")))
+func (s *Store) BrandSiteName() string {
+	value := strings.TrimSpace(fmt.Sprint(s.settingValue("brand_site_name", "chatgpt2api")))
 	if value == "" {
 		return "chatgpt2api"
 	}
 	return value
 }
 
-func (s *Store) AppLogoURL() string {
-	return strings.TrimSpace(fmt.Sprint(s.settingValue("app_logo_url", "/logo-mark.svg")))
+func (s *Store) BrandTopLeftLogoURL() string {
+	value := strings.TrimSpace(fmt.Sprint(s.settingValue("brand_top_left_logo_url", "/logo-mark.svg")))
+	if value == "" {
+		return "/logo-mark.svg"
+	}
+	return value
 }
 
-func (s *Store) SiteIconURL() string {
-	return strings.TrimSpace(fmt.Sprint(s.settingValue("site_icon_url", "/logo-mark.svg")))
+func (s *Store) BrandSiteLogoURL() string {
+	value := strings.TrimSpace(fmt.Sprint(s.settingValue("brand_site_logo_url", "/logo-mark.svg")))
+	if value == "" {
+		return "/logo-mark.svg"
+	}
+	return value
 }
 
 func (s *Store) Proxy() string {
 	return strings.TrimSpace(fmt.Sprint(s.settingValue("proxy", "")))
+}
+
+func (s *Store) UpdateProxyURL() string {
+	if value := strings.TrimSpace(os.Getenv("CHATGPT2API_UPDATE_PROXY_URL")); value != "" {
+		return value
+	}
+	return s.Proxy()
+}
+
+func (s *Store) UpdateRepo() string {
+	return normalizeUpdateRepo(s.settingValue("update_repo", "ZyphrZero/chatgpt2api"))
+}
+
+func (s *Store) UpdateGitHubToken() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("update_github_token", "")))
 }
 
 func (s *Store) LogLevels() []string {
@@ -383,34 +571,6 @@ func (s *Store) LinuxDoOAuth() LinuxDoOAuthConfig {
 	data := util.CopyMap(s.data)
 	s.mu.RUnlock()
 	return s.linuxDoOAuthFromData(data)
-}
-
-func (s *Store) YiPay() YiPayConfig {
-	s.mu.RLock()
-	data := util.CopyMap(s.data)
-	s.mu.RUnlock()
-	return s.yiPayFromData(data)
-}
-
-func (s *Store) EmailSMTP() EmailSMTPConfig {
-	s.mu.RLock()
-	data := util.CopyMap(s.data)
-	s.mu.RUnlock()
-	return s.emailSMTPFromData(data)
-}
-
-func (s *Store) PayPal() PayPalConfig {
-	s.mu.RLock()
-	data := util.CopyMap(s.data)
-	s.mu.RUnlock()
-	return s.payPalFromData(data)
-}
-
-func (s *Store) USDT() USDTConfig {
-	s.mu.RLock()
-	data := util.CopyMap(s.data)
-	s.mu.RUnlock()
-	return s.usdtFromData(data)
 }
 
 func (s *Store) linuxDoOAuthFromData(data map[string]any) LinuxDoOAuthConfig {
@@ -446,23 +606,6 @@ func (s *Store) yiPayFromData(data map[string]any) YiPayConfig {
 		NotifyURL: strings.TrimSpace(fmt.Sprint(s.settingValueFromData(data, "yipay_notify_url", ""))),
 		ReturnURL: strings.TrimSpace(fmt.Sprint(s.settingValueFromData(data, "yipay_return_url", ""))),
 		SiteName:  strings.TrimSpace(fmt.Sprint(s.settingValueFromData(data, "yipay_site_name", "chatgpt2api"))),
-	}
-}
-
-func (s *Store) emailSMTPFromData(data map[string]any) EmailSMTPConfig {
-	port := intSetting(s.settingValueFromData(data, "email_smtp_port", 465), 465)
-	if port < 1 || port > 65535 {
-		port = 465
-	}
-	return EmailSMTPConfig{
-		Enabled:   util.ToBool(s.settingValueFromData(data, "email_smtp_enabled", false)),
-		Host:      strings.TrimSpace(fmt.Sprint(s.settingValueFromData(data, "email_smtp_host", "smtp.qq.com"))),
-		Port:      port,
-		UseSSL:    util.ToBool(s.settingValueFromData(data, "email_smtp_use_ssl", true)),
-		Username:  strings.TrimSpace(fmt.Sprint(s.settingValueFromData(data, "email_smtp_username", ""))),
-		AuthCode:  strings.TrimSpace(fmt.Sprint(s.settingValueFromData(data, "email_smtp_auth_code", ""))),
-		FromEmail: strings.TrimSpace(fmt.Sprint(s.settingValueFromData(data, "email_smtp_from_email", ""))),
-		FromName:  strings.TrimSpace(fmt.Sprint(s.settingValueFromData(data, "email_smtp_from_name", "chatgpt2api"))),
 	}
 }
 
@@ -560,40 +703,47 @@ func (s *Store) Get() map[string]any {
 	s.mu.RUnlock()
 	data["refresh_account_interval_minute"] = s.RefreshAccountIntervalMinute()
 	data["image_concurrent_limit"] = s.ImageConcurrentLimit()
+	data["image_single_count_limit"] = s.ImageSingleCountLimit()
+	data["image_task_timeout_seconds"] = s.ImageTaskTimeoutSeconds()
 	data["user_default_concurrent_limit"] = s.UserDefaultConcurrentLimit()
 	data["user_default_rpm_limit"] = s.UserDefaultRPMLimit()
 	data["image_retention_days"] = s.ImageRetentionDays()
+	data["log_retention_days"] = s.LogRetentionDays()
 	data["auto_remove_invalid_accounts"] = s.AutoRemoveInvalidAccounts()
 	data["auto_remove_rate_limited_accounts"] = s.AutoRemoveRateLimitedAccounts()
 	data["log_levels"] = s.LogLevels()
-	data["app_title"] = s.AppTitle()
-	data["project_name"] = s.ProjectName()
-	data["app_logo_url"] = s.AppLogoURL()
-	data["site_icon_url"] = s.SiteIconURL()
 	data["proxy"] = s.Proxy()
 	data["base_url"] = s.BaseURL()
-	linuxdo := s.LinuxDoOAuth()
-	data["linuxdo_enabled"] = linuxdo.Enabled
-	data["linuxdo_client_id"] = linuxdo.ClientID
-	data["linuxdo_client_secret_configured"] = linuxdo.ClientSecret != ""
-	data["linuxdo_redirect_url"] = linuxdo.RedirectURL
-	data["linuxdo_frontend_redirect_url"] = linuxdo.FrontendRedirectURL
-	data["login_page_image_url"] = s.LoginPageImageURL()
-	data["login_page_image_mode"] = s.LoginPageImageMode()
-	data["login_page_image_zoom"] = s.LoginPageImageZoom()
-	data["login_page_image_position_x"] = s.LoginPageImagePositionX()
-	data["login_page_image_position_y"] = s.LoginPageImagePositionY()
-	data["email_allowed_domains"] = s.EmailAllowedDomains()
-	smtp := s.EmailSMTP()
-	data["email_smtp_enabled"] = smtp.Enabled
-	data["email_smtp_host"] = smtp.Host
-	data["email_smtp_port"] = smtp.Port
-	data["email_smtp_use_ssl"] = smtp.UseSSL
-	data["email_smtp_username"] = smtp.Username
-	data["email_smtp_from_email"] = smtp.FromEmail
-	data["email_smtp_from_name"] = smtp.FromName
-	data["email_smtp_auth_code_configured"] = smtp.AuthCode != ""
+	data["brand_top_left_name"] = s.BrandTopLeftName()
+	data["brand_site_name"] = s.BrandSiteName()
+	data["brand_top_left_logo_url"] = s.BrandTopLeftLogoURL()
+	data["brand_site_logo_url"] = s.BrandSiteLogoURL()
+	data["registration_enabled"] = s.RegistrationEnabled()
+	data["registration_allowed_email_domains"] = strings.Join(s.RegistrationAllowedEmailDomains(), ",")
+	data["cf_turnstile_site_key"] = s.CFTurnstileSiteKey()
+	data["cf_turnstile_secret_key_configured"] = s.CFTurnstileSecretKey() != ""
+	emailSMTP := s.EmailSMTP()
+	data["email_smtp_enabled"] = emailSMTP.Enabled
+	data["email_smtp_host"] = emailSMTP.Host
+	data["email_smtp_port"] = emailSMTP.Port
+	data["email_smtp_use_ssl"] = emailSMTP.UseSSL
+	data["email_smtp_username"] = emailSMTP.Username
+	data["email_smtp_from_email"] = emailSMTP.FromEmail
+	data["email_smtp_from_name"] = emailSMTP.FromName
+	data["email_smtp_auth_code_configured"] = strings.TrimSpace(emailSMTP.Password) != ""
 	data["image_price_cents"] = s.ImagePriceCents()
+	data["image_price_1k_cents"] = s.ImagePrice1KCents()
+	data["image_price_2k_cents"] = s.ImagePrice2KCents()
+	data["image_price_4k_cents"] = s.ImagePrice4KCents()
+	data["agency_tier_basic_cents"] = s.AgencyTierBasicCents()
+	data["agency_tier_pro_cents"] = s.AgencyTierProCents()
+	data["agency_tier_premium_cents"] = s.AgencyTierPremiumCents()
+	data["agency_tier_basic_commission_bp"] = s.AgencyTierBasicCommissionBP()
+	data["agency_tier_pro_commission_bp"] = s.AgencyTierProCommissionBP()
+	data["agency_tier_premium_commission_bp"] = s.AgencyTierPremiumCommissionBP()
+	data["agency_tier_basic_discount_bp"] = s.AgencyTierBasicDiscountBP()
+	data["agency_tier_pro_discount_bp"] = s.AgencyTierProDiscountBP()
+	data["agency_tier_premium_discount_bp"] = s.AgencyTierPremiumDiscountBP()
 	yipay := s.YiPay()
 	data["yipay_enabled"] = yipay.Enabled
 	data["yipay_pid"] = yipay.PID
@@ -610,8 +760,22 @@ func (s *Store) Get() map[string]any {
 	data["usdt_network"] = usdt.Network
 	data["usdt_address"] = usdt.Address
 	data["usdt_payment_url"] = usdt.PaymentURL
-	delete(data, "auth-key")
+	linuxdo := s.LinuxDoOAuth()
+	data["linuxdo_enabled"] = linuxdo.Enabled
+	data["linuxdo_client_id"] = linuxdo.ClientID
+	data["linuxdo_client_secret_configured"] = linuxdo.ClientSecret != ""
+	data["linuxdo_redirect_url"] = linuxdo.RedirectURL
+	data["linuxdo_frontend_redirect_url"] = linuxdo.FrontendRedirectURL
+	data["update_repo"] = s.UpdateRepo()
+	data["update_github_token_configured"] = s.UpdateGitHubToken() != ""
+	data["login_page_image_url"] = s.LoginPageImageURL()
+	data["login_page_image_mode"] = s.LoginPageImageMode()
+	data["login_page_image_zoom"] = s.LoginPageImageZoom()
+	data["login_page_image_position_x"] = s.LoginPageImagePositionX()
+	data["login_page_image_position_y"] = s.LoginPageImagePositionY()
 	delete(data, "linuxdo_client_secret")
+	delete(data, "update_github_token")
+	delete(data, "cf_turnstile_secret_key")
 	delete(data, "email_smtp_auth_code")
 	delete(data, "yipay_key")
 	return data
@@ -621,10 +785,28 @@ func (s *Store) Update(data map[string]any) (map[string]any, error) {
 	s.mu.Lock()
 	next := util.CopyMap(s.data)
 	for key, value := range data {
-		if key == "linuxdo_client_secret_configured" || key == "email_smtp_auth_code_configured" || key == "yipay_key_configured" {
+		if key == "linuxdo_client_secret_configured" {
+			continue
+		}
+		if key == "update_github_token_configured" {
+			continue
+		}
+		if key == "cf_turnstile_secret_key_configured" {
+			continue
+		}
+		if key == "email_smtp_auth_code_configured" {
+			continue
+		}
+		if key == "yipay_key_configured" {
 			continue
 		}
 		if key == "linuxdo_client_secret" && strings.TrimSpace(fmt.Sprint(value)) == "" {
+			continue
+		}
+		if key == "update_github_token" && strings.TrimSpace(fmt.Sprint(value)) == "" {
+			continue
+		}
+		if key == "cf_turnstile_secret_key" && strings.TrimSpace(fmt.Sprint(value)) == "" {
 			continue
 		}
 		if key == "email_smtp_auth_code" && strings.TrimSpace(fmt.Sprint(value)) == "" {
@@ -638,6 +820,10 @@ func (s *Store) Update(data map[string]any) (map[string]any, error) {
 	if value, ok := next["login_page_image_mode"]; ok {
 		next["login_page_image_mode"] = normalizeLoginPageImageMode(value)
 	}
+	if value, ok := next["image_task_timeout_seconds"]; ok {
+		next["image_task_timeout_seconds"] = normalizeImageTaskTimeoutSeconds(value)
+	}
+	next["update_repo"] = normalizeUpdateRepo(util.ValueOr(next["update_repo"], "ZyphrZero/chatgpt2api"))
 	if err := s.validateSettingsUpdateLocked(next); err != nil {
 		s.mu.Unlock()
 		return nil, err
@@ -652,15 +838,6 @@ func (s *Store) Update(data map[string]any) (map[string]any, error) {
 }
 
 func (s *Store) CleanupOldImages() int {
-	now := time.Now()
-	s.mu.Lock()
-	if !s.lastImageCleanupAt.IsZero() && now.Sub(s.lastImageCleanupAt) < imageCleanupMinInterval {
-		s.mu.Unlock()
-		return 0
-	}
-	s.lastImageCleanupAt = now
-	s.mu.Unlock()
-
 	cutoff := time.Now().Add(-time.Duration(s.ImageRetentionDays()) * 24 * time.Hour)
 	removed := 0
 	for _, dir := range []string{s.ImagesDir(), s.ImageThumbnailsDir(), s.ImageMetadataDir()} {
@@ -731,141 +908,125 @@ func (s *Store) settingValueFromData(data map[string]any, key string, fallback a
 }
 
 func (s *Store) validateSettingsUpdateLocked(data map[string]any) error {
-	appLogoURL := strings.TrimSpace(util.Clean(data["app_logo_url"]))
-	if err := validateBrandingAssetURL(appLogoURL); err != nil {
-		return errors.New("app_logo_url must be an absolute http(s) URL, an absolute path, or data:image")
+	if err := validateUpdateRepo(util.Clean(util.ValueOr(data["update_repo"], "ZyphrZero/chatgpt2api"))); err != nil {
+		return err
 	}
-	siteIconURL := strings.TrimSpace(util.Clean(data["site_icon_url"]))
-	if err := validateBrandingAssetURL(siteIconURL); err != nil {
-		return errors.New("site_icon_url must be an absolute http(s) URL, an absolute path, or data:image")
-	}
-
-	linuxdo := s.linuxDoOAuthFromData(data)
-	if linuxdo.Enabled {
-		if linuxdo.ClientID == "" {
-			return errors.New("Linuxdo Client ID is required when enabled")
-		}
-		if linuxdo.RedirectURL == "" {
-			return errors.New("Linuxdo Redirect URL is required when enabled")
-		}
-		if linuxdo.FrontendRedirectURL == "" {
-			return errors.New("Linuxdo Frontend Redirect URL is required when enabled")
-		}
-		if err := validateAbsoluteHTTPURL(linuxdo.RedirectURL); err != nil {
-			return errors.New("Linuxdo Redirect URL must be an absolute http(s) URL")
-		}
-		if err := validateFrontendRedirectURL(linuxdo.FrontendRedirectURL); err != nil {
-			return errors.New("Linuxdo Frontend Redirect URL must be an absolute http(s) URL or a relative path")
-		}
-		switch linuxdo.TokenAuthMethod {
-		case "", "client_secret_post", "client_secret_basic":
-			if linuxdo.ClientSecret == "" {
-				return errors.New("Linuxdo Client Secret is required when enabled")
-			}
-		case "none":
-			if !linuxdo.UsePKCE {
-				return errors.New("Linuxdo PKCE must be enabled when token auth method is none")
-			}
-		default:
-			return errors.New("Linuxdo token auth method must be one of client_secret_post, client_secret_basic, none")
+	for key, value := range map[string]int{
+		"image_price_cents":    intSetting(util.ValueOr(data["image_price_cents"], 8), 8),
+		"image_price_1k_cents": intSetting(util.ValueOr(data["image_price_1k_cents"], util.ValueOr(data["image_price_cents"], 8)), 8),
+		"image_price_2k_cents": intSetting(util.ValueOr(data["image_price_2k_cents"], 16), 16),
+		"image_price_4k_cents": intSetting(util.ValueOr(data["image_price_4k_cents"], 32), 32),
+	} {
+		if value < 1 {
+			return fmt.Errorf("%s must be >= 1", key)
 		}
 	}
-
+	for key, value := range map[string]int{
+		"agency_tier_basic_cents":           intSetting(util.ValueOr(data["agency_tier_basic_cents"], 19900), 19900),
+		"agency_tier_pro_cents":             intSetting(util.ValueOr(data["agency_tier_pro_cents"], 49900), 49900),
+		"agency_tier_premium_cents":         intSetting(util.ValueOr(data["agency_tier_premium_cents"], 99900), 99900),
+		"agency_tier_basic_commission_bp":   clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_basic_commission_bp"], 3000), 3000)),
+		"agency_tier_pro_commission_bp":     clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_pro_commission_bp"], 4500), 4500)),
+		"agency_tier_premium_commission_bp": clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_premium_commission_bp"], 6000), 6000)),
+		"agency_tier_basic_discount_bp":     clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_basic_discount_bp"], 500), 500)),
+		"agency_tier_pro_discount_bp":       clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_pro_discount_bp"], 1000), 1000)),
+		"agency_tier_premium_discount_bp":   clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_premium_discount_bp"], 1500), 1500)),
+	} {
+		if value < 0 {
+			return fmt.Errorf("%s must be >= 0", key)
+		}
+	}
 	yipay := s.yiPayFromData(data)
 	if yipay.Enabled {
 		if yipay.PID == "" {
 			return errors.New("YiPay PID is required when enabled")
 		}
 		if yipay.Key == "" {
-			return errors.New("YiPay key is required when enabled")
+			return errors.New("YiPay KEY is required when enabled")
 		}
 		if yipay.SubmitURL == "" {
-			return errors.New("YiPay submit URL is required when enabled")
+			return errors.New("YiPay Submit URL is required when enabled")
 		}
 		if err := validateAbsoluteHTTPURL(yipay.SubmitURL); err != nil {
-			return errors.New("YiPay submit URL must be an absolute http(s) URL")
+			return errors.New("YiPay Submit URL must be an absolute http(s) URL")
 		}
-		if yipay.NotifyURL != "" {
+		if strings.TrimSpace(yipay.NotifyURL) != "" {
 			if err := validateAbsoluteHTTPURL(yipay.NotifyURL); err != nil {
-				return errors.New("YiPay notify URL must be an absolute http(s) URL")
+				return errors.New("YiPay Notify URL must be an absolute http(s) URL")
 			}
 		}
-		if yipay.ReturnURL != "" {
+		if strings.TrimSpace(yipay.ReturnURL) != "" {
 			if err := validateAbsoluteHTTPURL(yipay.ReturnURL); err != nil {
-				return errors.New("YiPay return URL must be an absolute http(s) URL")
+				return errors.New("YiPay Return URL must be an absolute http(s) URL")
 			}
 		}
 	}
 	paypal := s.payPalFromData(data)
 	if paypal.Enabled {
-		if paypal.CheckoutURL == "" {
-			return errors.New("PayPal checkout URL is required when enabled")
+		if strings.TrimSpace(paypal.CheckoutURL) == "" {
+			return errors.New("PayPal Checkout URL is required when enabled")
 		}
 		if err := validateAbsoluteHTTPURL(paypal.CheckoutURL); err != nil {
-			return errors.New("PayPal checkout URL must be an absolute http(s) URL")
+			return errors.New("PayPal Checkout URL must be an absolute http(s) URL")
 		}
 	}
 	usdt := s.usdtFromData(data)
 	if usdt.Enabled {
-		if usdt.Address == "" {
-			return errors.New("USDT address is required when enabled")
+		if strings.TrimSpace(usdt.Address) == "" {
+			return errors.New("USDT Address is required when enabled")
 		}
-		if usdt.PaymentURL != "" {
+		if strings.TrimSpace(usdt.PaymentURL) != "" {
 			if err := validateAbsoluteHTTPURL(usdt.PaymentURL); err != nil {
-				return errors.New("USDT payment URL must be an absolute http(s) URL")
+				return errors.New("USDT Payment URL must be an absolute http(s) URL")
 			}
 		}
 	}
 
-	price := intSetting(data["image_price_cents"], 8)
-	if price < 1 {
-		return errors.New("image_price_cents must be greater than 0")
+	linuxdo := s.linuxDoOAuthFromData(data)
+	if !linuxdo.Enabled {
+		return nil
 	}
-	if _, exists := data["email_allowed_domains"]; exists {
-		domainsText := ""
-		switch value := data["email_allowed_domains"].(type) {
-		case []string:
-			domainsText = strings.Join(value, ",")
-		case []any:
-			parts := make([]string, 0, len(value))
-			for _, item := range value {
-				parts = append(parts, strings.TrimSpace(fmt.Sprint(item)))
-			}
-			domainsText = strings.Join(parts, ",")
-		default:
-			domainsText = strings.TrimSpace(fmt.Sprint(data["email_allowed_domains"]))
-		}
-		domains := strings.Split(strings.ToLower(strings.TrimSpace(domainsText)), ",")
-		for _, item := range domains {
-			domain := strings.TrimSpace(item)
-			if domain == "" {
-				continue
-			}
-			if strings.Contains(domain, "@") || strings.Contains(domain, "/") || strings.Contains(domain, "\\") {
-				return errors.New("email_allowed_domains contains invalid domain")
-			}
-		}
+	if linuxdo.ClientID == "" {
+		return errors.New("Linuxdo Client ID is required when enabled")
 	}
-	smtp := s.emailSMTPFromData(data)
-	if smtp.Enabled {
-		if smtp.Host == "" {
-			return errors.New("email SMTP host is required when enabled")
+	if linuxdo.RedirectURL == "" {
+		return errors.New("Linuxdo Redirect URL is required when enabled")
+	}
+	if linuxdo.FrontendRedirectURL == "" {
+		return errors.New("Linuxdo Frontend Redirect URL is required when enabled")
+	}
+	if err := validateAbsoluteHTTPURL(linuxdo.RedirectURL); err != nil {
+		return errors.New("Linuxdo Redirect URL must be an absolute http(s) URL")
+	}
+	if err := validateFrontendRedirectURL(linuxdo.FrontendRedirectURL); err != nil {
+		return errors.New("Linuxdo Frontend Redirect URL must be an absolute http(s) URL or a relative path")
+	}
+	switch linuxdo.TokenAuthMethod {
+	case "", "client_secret_post", "client_secret_basic":
+		if linuxdo.ClientSecret == "" {
+			return errors.New("Linuxdo Client Secret is required when enabled")
 		}
-		if smtp.Port < 1 || smtp.Port > 65535 {
-			return errors.New("email SMTP port must be between 1 and 65535")
+	case "none":
+		if !linuxdo.UsePKCE {
+			return errors.New("Linuxdo PKCE must be enabled when token auth method is none")
 		}
-		if smtp.Username == "" {
-			return errors.New("email SMTP username is required when enabled")
-		}
-		if smtp.AuthCode == "" {
-			return errors.New("email SMTP auth code is required when enabled")
-		}
-		if smtp.FromEmail == "" {
-			return errors.New("email SMTP from email is required when enabled")
-		}
-		if !strings.Contains(smtp.FromEmail, "@") {
-			return errors.New("email SMTP from email is invalid")
-		}
+	default:
+		return errors.New("Linuxdo token auth method must be one of client_secret_post, client_secret_basic, none")
+	}
+	return nil
+}
+
+func normalizeUpdateRepo(value any) string {
+	repo := strings.Trim(strings.TrimSpace(fmt.Sprint(value)), "/")
+	if repo == "" {
+		return "ZyphrZero/chatgpt2api"
+	}
+	return repo
+}
+
+func validateUpdateRepo(value string) error {
+	if !regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`).MatchString(value) {
+		return errors.New("Update repository must use owner/repo format")
 	}
 	return nil
 }
@@ -882,20 +1043,6 @@ func validateAbsoluteHTTPURL(value string) error {
 		return errors.New("host is required")
 	}
 	return nil
-}
-
-func validateBrandingAssetURL(value string) error {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	if strings.HasPrefix(value, "data:image/") {
-		return nil
-	}
-	if strings.HasPrefix(value, "/") && !strings.HasPrefix(value, "//") {
-		return nil
-	}
-	return validateAbsoluteHTTPURL(value)
 }
 
 func validateFrontendRedirectURL(value string) error {
@@ -926,9 +1073,7 @@ func (s *Store) saveLocked() error {
 	updates := map[string]string{}
 	keys := make([]string, 0, len(settingEnvKeys))
 	for key := range settingEnvKeys {
-		if key != "auth-key" {
-			keys = append(keys, key)
-		}
+		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
@@ -1005,6 +1150,17 @@ func normalizeLoginPageImageMode(value any) string {
 	default:
 		return "contain"
 	}
+}
+
+func normalizeImageTaskTimeoutSeconds(value any) int {
+	seconds := intSetting(value, defaultImageTaskTimeoutSeconds)
+	if seconds < minImageTaskTimeoutSeconds {
+		return minImageTaskTimeoutSeconds
+	}
+	if seconds > maxImageTaskTimeoutSeconds {
+		return maxImageTaskTimeoutSeconds
+	}
+	return seconds
 }
 
 func clampFloat(value, min, max float64) float64 {

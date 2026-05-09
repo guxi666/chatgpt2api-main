@@ -14,8 +14,9 @@ export const DEFAULT_LOGIN_PAGE_IMAGE = "/login-panel-illustration.svg";
 export type AppMeta = {
   app_title: string;
   project_name: string;
-  app_logo_url: string;
-  site_icon_url: string;
+  top_left_logo_url: string;
+  site_logo_url: string;
+  image_single_count_limit: number;
   login_page_image_url: string;
   login_page_image_mode: LoginPageImageMode;
   login_page_image_zoom: number;
@@ -26,8 +27,9 @@ export type AppMeta = {
 export const defaultAppMeta: AppMeta = {
   app_title: "chatgpt2api",
   project_name: "chatgpt2api",
-  app_logo_url: "/logo-mark.svg",
-  site_icon_url: "/logo-mark.svg",
+  top_left_logo_url: "/logo-mark.svg",
+  site_logo_url: "/logo-mark.svg",
+  image_single_count_limit: 10,
   login_page_image_url: "",
   login_page_image_mode: "contain",
   login_page_image_zoom: LOGIN_PAGE_IMAGE_DEFAULT_TRANSFORM.zoom,
@@ -54,8 +56,15 @@ export function normalizeAppMeta(data: Partial<AppMeta> = {}): AppMeta {
     app_title: typeof data.app_title === "string" && data.app_title.trim() ? data.app_title.trim() : defaultAppMeta.app_title,
     project_name:
       typeof data.project_name === "string" && data.project_name.trim() ? data.project_name.trim() : defaultAppMeta.project_name,
-    app_logo_url: typeof data.app_logo_url === "string" && data.app_logo_url.trim() ? data.app_logo_url.trim() : defaultAppMeta.app_logo_url,
-    site_icon_url: typeof data.site_icon_url === "string" && data.site_icon_url.trim() ? data.site_icon_url.trim() : defaultAppMeta.site_icon_url,
+    top_left_logo_url:
+      typeof data.top_left_logo_url === "string" && data.top_left_logo_url.trim()
+        ? data.top_left_logo_url.trim()
+        : defaultAppMeta.top_left_logo_url,
+    site_logo_url:
+      typeof data.site_logo_url === "string" && data.site_logo_url.trim()
+        ? data.site_logo_url.trim()
+        : defaultAppMeta.site_logo_url,
+    image_single_count_limit: Math.max(1, Math.min(10, Number(data.image_single_count_limit) || 10)),
     login_page_image_url: typeof data.login_page_image_url === "string" ? data.login_page_image_url : "",
     login_page_image_mode: normalizeLoginPageImageMode(data.login_page_image_mode),
     login_page_image_zoom: transform.zoom,
@@ -64,10 +73,10 @@ export function normalizeAppMeta(data: Partial<AppMeta> = {}): AppMeta {
   };
 }
 
-export function resolveAppAssetSrc(src?: string) {
+export function resolveBrandAssetURL(src?: string) {
   const value = String(src || "").trim();
   if (!value) {
-    return "/logo-mark.svg";
+    return "";
   }
   if (
     value.startsWith("blob:") ||
@@ -77,7 +86,7 @@ export function resolveAppAssetSrc(src?: string) {
   ) {
     return value;
   }
-  if (value.startsWith("/login-page-images/")) {
+  if (value.startsWith("/")) {
     const base = webConfig.apiUrl.replace(/\/$/, "");
     return `${base}${value}`;
   }

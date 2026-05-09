@@ -2,20 +2,19 @@
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
-import { Navigate } from "react-router-dom";
 
 import { useAuthGuard } from "@/lib/use-auth-guard";
 
 import { AnnouncementsCard } from "./components/announcements-card";
-import { BillingAdminCard } from "./components/billing-admin-card";
 import { ConfigCard } from "./components/config-card";
 import { CPAPoolDialog } from "./components/cpa-pool-dialog";
 import { CPAPoolsCard } from "./components/cpa-pools-card";
-import { EmailSMTPCard } from "./components/email-smtp-card";
+import { BillingAdminCard } from "./components/billing-admin-card";
 import { ImportBrowserDialog } from "./components/import-browser-dialog";
-import { LinuxDoLoginCard } from "./components/linuxdo-login-card";
+import { LogGovernanceCard } from "./components/log-governance-card";
 import { LoginPageImageCard } from "./components/login-page-image-card";
 import { PaymentSettingsCard } from "./components/payment-settings-card";
+import { SiteBrandCard } from "./components/site-brand-card";
 import { SettingsHeader } from "./components/settings-header";
 import { Sub2APIConnections } from "./components/sub2api-connections";
 import { useSettingsStore } from "./store";
@@ -66,22 +65,22 @@ function AdminSettingsPageContent() {
           <ConfigCard />
         </SettingsMasonryItem>
         <SettingsMasonryItem>
-          <EmailSMTPCard />
+          <SiteBrandCard />
         </SettingsMasonryItem>
         <SettingsMasonryItem>
           <PaymentSettingsCard />
         </SettingsMasonryItem>
         <SettingsMasonryItem>
-          <LinuxDoLoginCard />
+          <BillingAdminCard />
+        </SettingsMasonryItem>
+        <SettingsMasonryItem>
+          <LogGovernanceCard />
         </SettingsMasonryItem>
         <SettingsMasonryItem>
           <LoginPageImageCard />
         </SettingsMasonryItem>
         <SettingsMasonryItem>
           <AnnouncementsCard />
-        </SettingsMasonryItem>
-        <SettingsMasonryItem>
-          <BillingAdminCard />
         </SettingsMasonryItem>
         <SettingsMasonryItem>
           <CPAPoolsCard />
@@ -97,7 +96,7 @@ function AdminSettingsPageContent() {
 }
 
 export default function SettingsPage() {
-  const { isCheckingAuth, session } = useAuthGuard(["admin", "user"]);
+  const { isCheckingAuth, session } = useAuthGuard(undefined, "/settings");
 
   if (isCheckingAuth || !session) {
     return (
@@ -107,8 +106,5 @@ export default function SettingsPage() {
     );
   }
 
-  if (session.role === "admin") {
-    return <AdminSettingsPageContent />;
-  }
-  return <Navigate to="/image" replace />;
+  return <AdminSettingsPageContent />;
 }

@@ -21,7 +21,6 @@ import { cn } from "@/lib/utils";
 import { useSettingsStore } from "../store";
 import { SettingsCard, settingsInputClassName } from "./settings-ui";
 
-const LOG_LEVEL_OPTIONS = ["debug", "info", "warning", "error"];
 const configSectionClassName = "flex flex-col gap-3";
 const configFieldClassName = "min-w-0 gap-1.5";
 
@@ -107,12 +106,14 @@ export function ConfigCard() {
   const setRefreshAccountIntervalMinute = useSettingsStore(
     (state) => state.setRefreshAccountIntervalMinute,
   );
-  const setAppTitle = useSettingsStore((state) => state.setAppTitle);
-  const setProjectName = useSettingsStore((state) => state.setProjectName);
-  const setAppLogoUrl = useSettingsStore((state) => state.setAppLogoUrl);
-  const setSiteIconUrl = useSettingsStore((state) => state.setSiteIconUrl);
   const setImageConcurrentLimit = useSettingsStore(
     (state) => state.setImageConcurrentLimit,
+  );
+  const setImageSingleCountLimit = useSettingsStore(
+    (state) => state.setImageSingleCountLimit,
+  );
+  const setImageTaskTimeoutSeconds = useSettingsStore(
+    (state) => state.setImageTaskTimeoutSeconds,
   );
   const setUserDefaultConcurrentLimit = useSettingsStore(
     (state) => state.setUserDefaultConcurrentLimit,
@@ -129,9 +130,47 @@ export function ConfigCard() {
   const setAutoRemoveRateLimitedAccounts = useSettingsStore(
     (state) => state.setAutoRemoveRateLimitedAccounts,
   );
-  const setLogLevel = useSettingsStore((state) => state.setLogLevel);
   const setProxy = useSettingsStore((state) => state.setProxy);
   const setBaseUrl = useSettingsStore((state) => state.setBaseUrl);
+  const setRegistrationEnabled = useSettingsStore(
+    (state) => state.setRegistrationEnabled,
+  );
+  const setRegistrationAllowedEmailDomains = useSettingsStore(
+    (state) => state.setRegistrationAllowedEmailDomains,
+  );
+  const setCFTurnstileSiteKey = useSettingsStore(
+    (state) => state.setCFTurnstileSiteKey,
+  );
+  const setCFTurnstileSecretKey = useSettingsStore(
+    (state) => state.setCFTurnstileSecretKey,
+  );
+  const setEmailSMTPEnabled = useSettingsStore(
+    (state) => state.setEmailSMTPEnabled,
+  );
+  const setEmailSMTPHost = useSettingsStore(
+    (state) => state.setEmailSMTPHost,
+  );
+  const setEmailSMTPPort = useSettingsStore(
+    (state) => state.setEmailSMTPPort,
+  );
+  const setEmailSMTPUseSSL = useSettingsStore(
+    (state) => state.setEmailSMTPUseSSL,
+  );
+  const setEmailSMTPUsername = useSettingsStore(
+    (state) => state.setEmailSMTPUsername,
+  );
+  const setEmailSMTPAuthCode = useSettingsStore(
+    (state) => state.setEmailSMTPAuthCode,
+  );
+  const setEmailSMTPFromEmail = useSettingsStore(
+    (state) => state.setEmailSMTPFromEmail,
+  );
+  const setEmailSMTPFromName = useSettingsStore(
+    (state) => state.setEmailSMTPFromName,
+  );
+  const setImagePrice1K = useSettingsStore((state) => state.setImagePrice1K);
+  const setImagePrice2K = useSettingsStore((state) => state.setImagePrice2K);
+  const setImagePrice4K = useSettingsStore((state) => state.setImagePrice4K);
   const saveConfig = useSettingsStore((state) => state.saveConfig);
 
   const handleTestProxy = async () => {
@@ -164,7 +203,7 @@ export function ConfigCard() {
       <SettingsCard
         icon={Settings2}
         title="系统配置"
-        description="调整账号刷新、代理、图片任务和运行日志。"
+        description="调整账号刷新、代理和图片任务。"
       >
         <div className="flex items-center justify-center py-10">
           <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
@@ -177,7 +216,7 @@ export function ConfigCard() {
     <SettingsCard
       icon={Settings2}
       title="系统配置"
-      description="调整账号刷新、代理、图片任务和运行日志。"
+      description="调整账号刷新、代理和图片任务。"
       action={
         <Button
           size="lg"
@@ -196,65 +235,8 @@ export function ConfigCard() {
       <div className="flex flex-col gap-5">
         <section className={configSectionClassName}>
           <SectionHeading
-            title="站点品牌"
-            tip="可自定义左上角名称/图标，以及浏览器标签页标题和图标。"
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field className={configFieldClassName}>
-              <ConfigFieldLabel htmlFor="settings-app-title">
-                左上角名称
-              </ConfigFieldLabel>
-              <Input
-                id="settings-app-title"
-                value={String(config?.app_title || "")}
-                onChange={(event) => setAppTitle(event.target.value)}
-                placeholder="chatgpt2api"
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className={configFieldClassName}>
-              <ConfigFieldLabel htmlFor="settings-project-name">
-                站点名称
-              </ConfigFieldLabel>
-              <Input
-                id="settings-project-name"
-                value={String(config?.project_name || "")}
-                onChange={(event) => setProjectName(event.target.value)}
-                placeholder="chatgpt2api"
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className={configFieldClassName}>
-              <ConfigFieldLabel htmlFor="settings-app-logo-url">
-                左上角图标 URL
-              </ConfigFieldLabel>
-              <Input
-                id="settings-app-logo-url"
-                value={String(config?.app_logo_url || "")}
-                onChange={(event) => setAppLogoUrl(event.target.value)}
-                placeholder="/logo-mark.svg 或 https://example.com/logo.png"
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className={configFieldClassName}>
-              <ConfigFieldLabel htmlFor="settings-site-icon-url">
-                站点图标 URL
-              </ConfigFieldLabel>
-              <Input
-                id="settings-site-icon-url"
-                value={String(config?.site_icon_url || "")}
-                onChange={(event) => setSiteIconUrl(event.target.value)}
-                placeholder="/logo-mark.svg 或 https://example.com/favicon.ico"
-                className={settingsInputClassName}
-              />
-            </Field>
-          </div>
-        </section>
-
-        <section className={configSectionClassName}>
-          <SectionHeading
             title="基础参数"
-            tip="账号刷新间隔单位分钟；图片访问地址是图片结果访问前缀；同时生成张数控制后台生成槽位；图片自动清理会删除指定天数前的本地图片。"
+            tip="账号刷新间隔单位分钟；图片访问地址是图片结果访问前缀；同时生成张数控制后台生成槽位；任务超时时间单位秒；图片自动清理会删除指定天数前的本地图片。"
           />
           <div className="grid gap-3 sm:grid-cols-2">
             <Field className={configFieldClassName}>
@@ -298,6 +280,20 @@ export function ConfigCard() {
               />
             </Field>
             <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-image-single-count-limit">
+                单次出图数量限制
+              </ConfigFieldLabel>
+              <Input
+                id="settings-image-single-count-limit"
+                value={String(config?.image_single_count_limit || "")}
+                onChange={(event) =>
+                  setImageSingleCountLimit(event.target.value)
+                }
+                placeholder="10"
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
               <ConfigFieldLabel htmlFor="settings-image-retention-days">
                 图片自动清理
               </ConfigFieldLabel>
@@ -306,6 +302,20 @@ export function ConfigCard() {
                 value={String(config?.image_retention_days || "")}
                 onChange={(event) => setImageRetentionDays(event.target.value)}
                 placeholder="30"
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-image-task-timeout-seconds">
+                任务超时时间
+              </ConfigFieldLabel>
+              <Input
+                id="settings-image-task-timeout-seconds"
+                value={String(config?.image_task_timeout_seconds || "")}
+                onChange={(event) =>
+                  setImageTaskTimeoutSeconds(event.target.value)
+                }
+                placeholder="300"
                 className={settingsInputClassName}
               />
             </Field>
@@ -407,6 +417,208 @@ export function ConfigCard() {
 
         <section className={configSectionClassName}>
           <SectionHeading
+            title="账号入口"
+            tip="开启后登录页会显示账号注册入口，新账号默认绑定普通用户角色。"
+          />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <ConfigOption
+              checked={Boolean(config?.registration_enabled)}
+              onCheckedChange={setRegistrationEnabled}
+              label="开放账号注册"
+            />
+          </div>
+        </section>
+
+        <section className={configSectionClassName}>
+          <SectionHeading
+            title="邮箱注册与 CF 验证"
+            tip="配置注册邮箱白名单和 Cloudflare Turnstile。保存后会应用到登录/注册。"
+          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-registration-email-domains">
+                邮箱白名单域名
+              </ConfigFieldLabel>
+              <Input
+                id="settings-registration-email-domains"
+                value={String(config?.registration_allowed_email_domains || "")}
+                onChange={(event) =>
+                  setRegistrationAllowedEmailDomains(event.target.value)
+                }
+                placeholder="qq.com,163.com,gmail.com,outlook.com"
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-cf-turnstile-site-key">
+                Turnstile Site Key
+              </ConfigFieldLabel>
+              <Input
+                id="settings-cf-turnstile-site-key"
+                value={String(config?.cf_turnstile_site_key || "")}
+                onChange={(event) => setCFTurnstileSiteKey(event.target.value)}
+                placeholder="0x4AAAAA..."
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-cf-turnstile-secret-key">
+                Turnstile Secret Key
+              </ConfigFieldLabel>
+              <Input
+                id="settings-cf-turnstile-secret-key"
+                type="password"
+                value={String(config?.cf_turnstile_secret_key || "")}
+                onChange={(event) =>
+                  setCFTurnstileSecretKey(event.target.value)
+                }
+                placeholder={
+                  config?.cf_turnstile_secret_key_configured
+                    ? "已配置，留空表示不修改"
+                    : "0x4AAAAA..."
+                }
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-image-price-1k">
+                1K 单价（元）
+              </ConfigFieldLabel>
+              <Input
+                id="settings-image-price-1k"
+                value={String(config?.image_price_1k_cents || "")}
+                onChange={(event) => setImagePrice1K(event.target.value)}
+                placeholder="0.08"
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-image-price-2k">
+                2K 单价（元）
+              </ConfigFieldLabel>
+              <Input
+                id="settings-image-price-2k"
+                value={String(config?.image_price_2k_cents || "")}
+                onChange={(event) => setImagePrice2K(event.target.value)}
+                placeholder="0.16"
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-image-price-4k">
+                4K 单价（元）
+              </ConfigFieldLabel>
+              <Input
+                id="settings-image-price-4k"
+                value={String(config?.image_price_4k_cents || "")}
+                onChange={(event) => setImagePrice4K(event.target.value)}
+                placeholder="0.32"
+                className={settingsInputClassName}
+              />
+            </Field>
+          </div>
+        </section>
+
+        <section className={configSectionClassName}>
+          <SectionHeading
+            title="邮件发信配置"
+            tip="用于注册时的邮箱验证码发送，支持 QQ SMTP。修改后立即生效。"
+          />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <ConfigOption
+              checked={Boolean(config?.email_smtp_enabled)}
+              onCheckedChange={setEmailSMTPEnabled}
+              label="启用 SMTP 发信"
+            />
+            <ConfigOption
+              checked={Boolean(config?.email_smtp_use_ssl)}
+              onCheckedChange={setEmailSMTPUseSSL}
+              label="使用 SSL（QQ 邮箱建议开启）"
+            />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-email-smtp-host">
+                SMTP 主机
+              </ConfigFieldLabel>
+              <Input
+                id="settings-email-smtp-host"
+                value={String(config?.email_smtp_host || "")}
+                onChange={(event) => setEmailSMTPHost(event.target.value)}
+                placeholder="smtp.qq.com"
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-email-smtp-port">
+                SMTP 端口
+              </ConfigFieldLabel>
+              <Input
+                id="settings-email-smtp-port"
+                value={String(config?.email_smtp_port || "")}
+                onChange={(event) => setEmailSMTPPort(event.target.value)}
+                placeholder="465"
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-email-smtp-username">
+                发信账号
+              </ConfigFieldLabel>
+              <Input
+                id="settings-email-smtp-username"
+                value={String(config?.email_smtp_username || "")}
+                onChange={(event) => setEmailSMTPUsername(event.target.value)}
+                placeholder="your_account@qq.com"
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-email-smtp-auth-code">
+                授权码
+              </ConfigFieldLabel>
+              <Input
+                id="settings-email-smtp-auth-code"
+                type="password"
+                value={String(config?.email_smtp_auth_code || "")}
+                onChange={(event) => setEmailSMTPAuthCode(event.target.value)}
+                placeholder={
+                  config?.email_smtp_auth_code_configured
+                    ? "已配置，不修改请留空"
+                    : "your_qq_smtp_auth_code"
+                }
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-email-smtp-from-email">
+                发件邮箱
+              </ConfigFieldLabel>
+              <Input
+                id="settings-email-smtp-from-email"
+                value={String(config?.email_smtp_from_email || "")}
+                onChange={(event) => setEmailSMTPFromEmail(event.target.value)}
+                placeholder="your_account@qq.com"
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-email-smtp-from-name">
+                发件名称
+              </ConfigFieldLabel>
+              <Input
+                id="settings-email-smtp-from-name"
+                value={String(config?.email_smtp_from_name || "")}
+                onChange={(event) => setEmailSMTPFromName(event.target.value)}
+                placeholder="chatgpt2api"
+                className={settingsInputClassName}
+              />
+            </Field>
+          </div>
+        </section>
+
+        <section className={configSectionClassName}>
+          <SectionHeading
             title="自动维护"
             tip="账号异常或限流时自动从号池移除。"
           />
@@ -424,22 +636,6 @@ export function ConfigCard() {
           </div>
         </section>
 
-        <section className={configSectionClassName}>
-          <SectionHeading
-            title="控制台日志级别"
-            tip="不选择时使用默认 info / warning / error。"
-          />
-          <div className="grid grid-cols-2 gap-2">
-            {LOG_LEVEL_OPTIONS.map((level) => (
-              <ConfigOption
-                key={level}
-                checked={Boolean(config?.log_levels?.includes(level))}
-                onCheckedChange={(checked) => setLogLevel(level, checked)}
-                label={level.charAt(0).toUpperCase() + level.slice(1)}
-              />
-            ))}
-          </div>
-        </section>
       </div>
     </SettingsCard>
   );

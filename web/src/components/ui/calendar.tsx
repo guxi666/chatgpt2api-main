@@ -15,23 +15,28 @@ function Calendar({
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
-      className={cn("p-1 text-sm", className)}
+      className={cn("relative p-1 text-sm", className)}
       classNames={{
-        months: "flex flex-col gap-4 sm:flex-row",
-        month: "relative",
-        month_caption: "flex h-9 items-center justify-center font-medium",
-        nav: "absolute inset-x-2 top-2 flex items-center justify-between",
-        button_previous: "inline-flex size-8 items-center justify-center rounded-lg hover:bg-stone-100",
-        button_next: "inline-flex size-8 items-center justify-center rounded-lg hover:bg-stone-100",
-        weekdays: "mt-2 grid grid-cols-7 text-xs text-stone-400",
+        months: "relative flex flex-col gap-4 sm:flex-row",
+        month: "min-w-0",
+        month_caption: "flex h-10 items-center justify-center px-10 font-medium",
+        caption_label: "truncate text-sm font-semibold",
+        nav: "pointer-events-none absolute inset-x-1 top-1 z-10 flex items-center justify-between",
+        button_previous: "pointer-events-auto inline-flex size-8 items-center justify-center rounded-full bg-background/95 text-foreground shadow-sm ring-1 ring-border transition hover:bg-accent disabled:opacity-40 dark:bg-background/80 dark:text-foreground dark:ring-border dark:hover:bg-accent/70",
+        button_next: "pointer-events-auto inline-flex size-8 items-center justify-center rounded-full bg-background/95 text-foreground shadow-sm ring-1 ring-border transition hover:bg-accent disabled:opacity-40 dark:bg-background/80 dark:text-foreground dark:ring-border dark:hover:bg-accent/70",
+        month_grid: "w-full border-separate border-spacing-y-1",
+        weekdays: "mt-2 grid grid-cols-7 gap-x-1 text-xs text-muted-foreground",
         weekday: "flex h-8 items-center justify-center font-normal",
-        week: "grid grid-cols-7",
-        day: "size-9 p-0 text-center",
-        day_button: "size-9 rounded-lg text-sm transition hover:bg-stone-100",
-        today: "font-semibold text-stone-950",
-        selected: "[&_button]:bg-stone-950 [&_button]:text-white [&_button]:hover:bg-stone-800",
-        outside: "text-stone-300",
-        disabled: "text-stone-300 opacity-50",
+        week: "grid grid-cols-7 gap-x-1",
+        day: "h-9 p-0 text-center align-middle text-sm",
+        day_button: "mx-auto inline-flex size-8 items-center justify-center rounded-lg text-sm font-medium text-foreground transition hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/70 dark:hover:text-foreground",
+        today: "font-semibold text-foreground",
+        selected: "font-semibold [&_button]:bg-primary [&_button]:text-primary-foreground [&_button]:hover:bg-primary/90 dark:[&_button]:bg-sky-400 dark:[&_button]:text-sky-950 dark:[&_button]:hover:bg-sky-300",
+        range_start: "rdp-range_start",
+        range_middle: "rdp-range_middle",
+        range_end: "rdp-range_end",
+        outside: "text-muted-foreground/45 dark:text-muted-foreground/35",
+        disabled: "text-muted-foreground/35 opacity-50 dark:text-muted-foreground/30",
         ...classNames,
       }}
       components={{

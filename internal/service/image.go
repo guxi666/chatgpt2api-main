@@ -7,26 +7,29 @@ import (
 	"image/color"
 	"image/draw"
 	_ "image/gif"
-	_ "image/jpeg"
+	"image/jpeg"
 	_ "image/png"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"chatgpt2api/internal/storage"
-
-	"github.com/HugoSmits86/nativewebp"
 )
 
 const (
-	ThumbnailSize         = 720
-	thumbnailCacheVersion = 2
-	thumbnailExtension    = ".webp"
+	ThumbnailSize         = 480
+	thumbnailQuality      = 72
+	thumbnailCacheVersion = 3
+	thumbnailExtension    = ".jpg"
+
+	ImageVisibilityPrivate = "private"
+	ImageVisibilityPublic  = "public"
 )
 
 type ImageConfig interface {
@@ -39,6 +42,31 @@ type ImageConfig interface {
 type ImageAccessScope struct {
 	OwnerID string
 	All     bool
+	Public  bool
+}
+
+type imageMetadata struct {
+	OwnerID          string
+	OwnerName        string
+	Visibility       string
+	PublishedAt      string
+	ResolutionPreset string
+	RequestedSize    string
+	OutputFormat     string
+}
+
+type GeneratedImageMetadata struct {
+	ResolutionPreset string
+	RequestedSize    string
+	OutputFormat     string
+}
+
+type ImageFileAccess struct {
+	Rel        string
+	Path       string
+	Info       os.FileInfo
+	Visibility string
+	OwnerID    string
 }
 
 type ImageService struct {
@@ -46,8 +74,6 @@ type ImageService struct {
 	store         storage.JSONDocumentBackend
 	thumbnailMu   sync.Mutex
 	thumbnailJobs map[string]*thumbnailJob
-	ownerCacheMu  sync.RWMutex
-	ownerCache    map[string]*string
 }
 
 type imageFileRef struct {
@@ -93,8 +119,13 @@ func (s *ImageService) ListImages(baseURL, startDate, endDate string, scope Imag
 		if endDate != "" && day > endDate {
 			return nil
 		}
-		ownerID := s.imageOwner(rel)
-		if !scope.All && (scope.OwnerID == "" || ownerID != scope.OwnerID) {
+		meta := s.imageMetadata(rel)
+		ownerID := meta.OwnerID
+		if scope.Public {
+			if meta.Visibility != ImageVisibilityPublic {
+				return nil
+			}
+		} else if !scope.All && (scope.OwnerID == "" || ownerID != scope.OwnerID) {
 			return nil
 		}
 		thumb := s.thumbnailInfo(rel, info)
@@ -105,22 +136,47 @@ func (s *ImageService) ListImages(baseURL, startDate, endDate string, scope Imag
 			"size":       info.Size(),
 			"url":        publicAssetURL(baseURL, "images", rel),
 			"created_at": info.ModTime().Format("2006-01-02 15:04:05"),
+			"visibility": meta.Visibility,
 		}
 		if ownerID != "" {
 			item["owner_id"] = ownerID
 		}
+		if meta.OwnerName != "" {
+			item["owner_name"] = meta.OwnerName
+		}
+		if meta.PublishedAt != "" {
+			item["published_at"] = meta.PublishedAt
+		}
+		if meta.ResolutionPreset != "" {
+			item["resolution_preset"] = meta.ResolutionPreset
+		}
+		if meta.RequestedSize != "" {
+			item["requested_size"] = meta.RequestedSize
+		}
+		if meta.OutputFormat != "" {
+			item["output_format"] = meta.OutputFormat
+		}
 		if thumbRel, ok := thumb["thumbnail_rel"].(string); ok && thumbRel != "" {
-			item["thumbnail_url"] = publicAssetURL(baseURL, "image-thumbnails", thumbRel)
+			item["thumbnail_url"] = thumbnailURL(baseURL, thumbRel, info.ModTime())
 		} else {
 			item["thumbnail_url"] = ""
 		}
-		item["width"] = thumb["width"]
-		item["height"] = thumb["height"]
+		if !setImageItemDimensions(item, thumb["width"], thumb["height"]) {
+			if width, height, ok := imageFileDimensions(path); ok {
+				setImageItemDimensions(item, width, height)
+			}
+		}
 		items = append(items, item)
 		return nil
 	})
 	sort.Slice(items, func(i, j int) bool {
-		return strings.Compare(toString(items[i]["created_at"]), toString(items[j]["created_at"])) > 0
+		left := toString(items[i]["created_at"])
+		right := toString(items[j]["created_at"])
+		if scope.Public {
+			left = firstNonEmptyString(toString(items[i]["published_at"]), left)
+			right = firstNonEmptyString(toString(items[j]["published_at"]), right)
+		}
+		return strings.Compare(left, right) > 0
 	})
 	groupMap := map[string][]map[string]any{}
 	var order []string
@@ -136,6 +192,92 @@ func (s *ImageService) ListImages(baseURL, startDate, endDate string, scope Imag
 		groups = append(groups, map[string]any{"date": day, "items": groupMap[day]})
 	}
 	return map[string]any{"items": items, "groups": groups}
+}
+
+func (s *ImageService) UpdateImageVisibility(value, visibility string, scope ImageAccessScope) (map[string]any, error) {
+	visibility, err := NormalizeImageVisibility(visibility)
+	if err != nil {
+		return nil, err
+	}
+	rel, err := imageRelativePathFromValue(value)
+	if err != nil {
+		return nil, err
+	}
+	imageRoot, err := filepath.Abs(s.config.ImagesDir())
+	if err != nil {
+		return nil, err
+	}
+	ref, err := s.imageFileRef(imageRoot, rel)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, errors.New("image not found")
+		}
+		return nil, err
+	}
+	meta := s.imageMetadata(ref.rel)
+	if !scope.All && (scope.OwnerID == "" || meta.OwnerID != scope.OwnerID) {
+		return nil, errors.New("image not found")
+	}
+	if err := s.writeImageMetadataForRef(ref, "", "", visibility); err != nil {
+		return nil, err
+	}
+	nextMeta := s.imageMetadata(ref.rel)
+	item := map[string]any{
+		"name":       filepath.Base(ref.path),
+		"path":       ref.rel,
+		"date":       imageDay(ref.rel, ref.info.ModTime()),
+		"size":       ref.info.Size(),
+		"visibility": nextMeta.Visibility,
+		"created_at": ref.info.ModTime().Format("2006-01-02 15:04:05"),
+	}
+	if nextMeta.OwnerID != "" {
+		item["owner_id"] = nextMeta.OwnerID
+	}
+	if nextMeta.OwnerName != "" {
+		item["owner_name"] = nextMeta.OwnerName
+	}
+	if nextMeta.PublishedAt != "" {
+		item["published_at"] = nextMeta.PublishedAt
+	}
+	if nextMeta.ResolutionPreset != "" {
+		item["resolution_preset"] = nextMeta.ResolutionPreset
+	}
+	if nextMeta.RequestedSize != "" {
+		item["requested_size"] = nextMeta.RequestedSize
+	}
+	if width, height, ok := imageFileDimensions(ref.path); ok {
+		setImageItemDimensions(item, width, height)
+	}
+	return item, nil
+}
+
+func (s *ImageService) ImageFileAccess(value string, scope ImageAccessScope) (ImageFileAccess, error) {
+	rel, err := imageRelativePathFromValue(value)
+	if err != nil {
+		return ImageFileAccess{}, err
+	}
+	imageRoot, err := filepath.Abs(s.config.ImagesDir())
+	if err != nil {
+		return ImageFileAccess{}, err
+	}
+	ref, err := s.imageFileRef(imageRoot, rel)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ImageFileAccess{}, errors.New("image not found")
+		}
+		return ImageFileAccess{}, err
+	}
+	meta := s.imageMetadata(ref.rel)
+	if !imageMetadataAllowsAccess(meta, scope) {
+		return ImageFileAccess{}, errors.New("image not found")
+	}
+	return ImageFileAccess{
+		Rel:        ref.rel,
+		Path:       ref.path,
+		Info:       ref.info,
+		Visibility: meta.Visibility,
+		OwnerID:    meta.OwnerID,
+	}, nil
 }
 
 func (s *ImageService) DeleteImages(paths []string, scope ImageAccessScope) (map[string]any, error) {
@@ -208,16 +350,25 @@ func (s *ImageService) RecordImageOwners(values []string, ownerID string) {
 		return
 	}
 	for _, ref := range s.imageFileRefs(values) {
-		_ = s.writeImageOwner(ref.rel, ownerID)
+		_ = s.writeImageMetadataForRef(ref, ownerID, "", "")
 	}
 }
 
-func (s *ImageService) RecordGeneratedImages(values []string, ownerID string) {
+func (s *ImageService) RecordGeneratedImages(values []string, ownerID, ownerName, visibility string, metadataValues ...GeneratedImageMetadata) {
 	ownerID = strings.TrimSpace(ownerID)
+	ownerName = strings.TrimSpace(ownerName)
+	metadata := GeneratedImageMetadata{}
+	if len(metadataValues) > 0 {
+		metadata = metadataValues[0]
+	}
+	visibility, err := NormalizeImageVisibility(visibility)
+	if err != nil {
+		visibility = ImageVisibilityPrivate
+	}
 	for _, ref := range s.imageFileRefs(values) {
 		s.ensureThumbnailForRef(ref)
 		if ownerID != "" && ownerID != "anonymous" {
-			_ = s.writeImageOwner(ref.rel, ownerID)
+			_ = s.writeImageMetadataForRef(ref, ownerID, ownerName, visibility, metadata)
 		}
 	}
 }
@@ -325,12 +476,14 @@ func (s *ImageService) generateThumbnail(ref imageFileRef) map[string]any {
 	bounds := img.Bounds()
 	width, height := bounds.Dx(), bounds.Dy()
 	thumb := resizeToFit(flattenImage(img), ThumbnailSize, ThumbnailSize)
-	if err := writeWebPThumbnail(thumbPath, thumb); err != nil {
+	if err := writeJPEGThumbnail(thumbPath, thumb); err != nil {
 		return map[string]any{}
 	}
 	_ = s.writeThumbnailMetadata(ref.rel, thumbPath+".json", map[string]any{
 		"width":             width,
 		"height":            height,
+		"thumbnail_format":  "jpeg",
+		"thumbnail_quality": thumbnailQuality,
 		"thumbnail_size":    ThumbnailSize,
 		"thumbnail_version": thumbnailCacheVersion,
 	})
@@ -391,63 +544,135 @@ func (s *ImageService) thumbnailPath(rel string) string {
 }
 
 func (s *ImageService) imageOwner(rel string) string {
-	if owner, ok := s.cachedImageOwner(rel); ok {
-		return owner
+	return s.imageMetadata(rel).OwnerID
+}
+
+func imageMetadataAllowsAccess(meta imageMetadata, scope ImageAccessScope) bool {
+	if meta.Visibility == ImageVisibilityPublic {
+		return true
 	}
+	if scope.All {
+		return true
+	}
+	return scope.OwnerID != "" && meta.OwnerID == scope.OwnerID
+}
+
+func (s *ImageService) imageMetadata(rel string) imageMetadata {
 	metaPath, err := s.imageOwnerMetadataPath(rel)
 	if err != nil {
-		s.cacheImageOwner(rel, "")
-		return ""
+		return imageMetadata{Visibility: ImageVisibilityPrivate}
 	}
+	var raw map[string]any
 	if s.store != nil {
-		raw, err := s.store.LoadJSONDocument(imageOwnerDocumentName(rel))
+		value, err := s.store.LoadJSONDocument(imageOwnerDocumentName(rel))
 		if err == nil {
-			if meta, ok := raw.(map[string]any); ok {
-				owner := strings.TrimSpace(toString(meta["owner_id"]))
-				s.cacheImageOwner(rel, owner)
-				return owner
+			if meta, ok := value.(map[string]any); ok {
+				raw = meta
 			}
 		}
 	}
-	data, err := os.ReadFile(metaPath)
-	if err != nil {
-		s.cacheImageOwner(rel, "")
-		return ""
+	if raw == nil {
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			return imageMetadata{Visibility: ImageVisibilityPrivate}
+		}
+		if json.Unmarshal(data, &raw) != nil {
+			return imageMetadata{Visibility: ImageVisibilityPrivate}
+		}
 	}
-	var meta map[string]any
-	if json.Unmarshal(data, &meta) != nil {
-		s.cacheImageOwner(rel, "")
-		return ""
-	}
-	owner := strings.TrimSpace(toString(meta["owner_id"]))
-	s.cacheImageOwner(rel, owner)
-	return owner
+	return normalizeImageMetadata(raw)
 }
 
-func (s *ImageService) writeImageOwner(rel, ownerID string) error {
+func normalizeImageMetadata(raw map[string]any) imageMetadata {
+	visibility := strings.TrimSpace(toString(raw["visibility"]))
+	if visibility != ImageVisibilityPublic {
+		visibility = ImageVisibilityPrivate
+	}
+	return imageMetadata{
+		OwnerID:          strings.TrimSpace(toString(raw["owner_id"])),
+		OwnerName:        strings.TrimSpace(toString(raw["owner_name"])),
+		Visibility:       visibility,
+		PublishedAt:      strings.TrimSpace(toString(raw["published_at"])),
+		ResolutionPreset: NormalizeImageResolutionPreset(toString(raw["resolution_preset"])),
+		RequestedSize:    strings.TrimSpace(toString(raw["requested_size"])),
+		OutputFormat:     NormalizeImageOutputFormat(strings.TrimSpace(toString(raw["output_format"]))),
+	}
+}
+
+func (s *ImageService) writeImageMetadataForRef(ref imageFileRef, ownerID, ownerName, visibility string, metadataValues ...GeneratedImageMetadata) error {
+	meta := s.imageMetadata(ref.rel)
+	if ownerID = strings.TrimSpace(ownerID); ownerID != "" {
+		meta.OwnerID = ownerID
+	}
+	if ownerName = strings.TrimSpace(ownerName); ownerName != "" {
+		meta.OwnerName = ownerName
+	}
+	if visibility = strings.TrimSpace(visibility); visibility != "" {
+		normalized, err := NormalizeImageVisibility(visibility)
+		if err != nil {
+			return err
+		}
+		if normalized == ImageVisibilityPublic {
+			if meta.PublishedAt == "" || meta.Visibility != ImageVisibilityPublic {
+				meta.PublishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			}
+		} else {
+			meta.PublishedAt = ""
+		}
+		meta.Visibility = normalized
+	}
+	if len(metadataValues) > 0 {
+		metadata := metadataValues[0]
+		if preset := NormalizeImageResolutionPreset(metadata.ResolutionPreset); preset != "" {
+			meta.ResolutionPreset = preset
+		}
+		if requestedSize := strings.TrimSpace(metadata.RequestedSize); requestedSize != "" {
+			meta.RequestedSize = requestedSize
+		}
+		if outputFormat := NormalizeImageOutputFormat(metadata.OutputFormat); outputFormat != "" {
+			meta.OutputFormat = outputFormat
+		}
+	}
+	if meta.Visibility == "" {
+		meta.Visibility = ImageVisibilityPrivate
+	}
+	return s.writeImageMetadata(ref.rel, meta)
+}
+
+func (s *ImageService) writeImageMetadata(rel string, meta imageMetadata) error {
 	metaPath, err := s.imageOwnerMetadataPath(rel)
 	if err != nil {
 		return err
 	}
 	value := map[string]any{
-		"owner_id":   ownerID,
+		"visibility": meta.Visibility,
 		"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
 	}
+	if meta.OwnerID != "" {
+		value["owner_id"] = meta.OwnerID
+	}
+	if meta.OwnerName != "" {
+		value["owner_name"] = meta.OwnerName
+	}
+	if meta.PublishedAt != "" {
+		value["published_at"] = meta.PublishedAt
+	}
+	if meta.ResolutionPreset != "" {
+		value["resolution_preset"] = meta.ResolutionPreset
+	}
+	if meta.RequestedSize != "" {
+		value["requested_size"] = meta.RequestedSize
+	}
+	if meta.OutputFormat != "" {
+		value["output_format"] = meta.OutputFormat
+	}
 	if s.store != nil {
-		if err := s.store.SaveJSONDocument(imageOwnerDocumentName(rel), value); err != nil {
-			return err
-		}
-		s.cacheImageOwner(rel, ownerID)
-		return nil
+		return s.store.SaveJSONDocument(imageOwnerDocumentName(rel), value)
 	}
 	if err := os.MkdirAll(filepath.Dir(metaPath), 0o755); err != nil {
 		return err
 	}
-	if err := writeJSONFile(metaPath, value); err != nil {
-		return err
-	}
-	s.cacheImageOwner(rel, ownerID)
-	return nil
+	return writeJSONFile(metaPath, value)
 }
 
 func (s *ImageService) removeImageOwner(rel string) error {
@@ -456,53 +681,14 @@ func (s *ImageService) removeImageOwner(rel string) error {
 		return err
 	}
 	if s.store != nil {
-		if err := s.store.DeleteJSONDocument(imageOwnerDocumentName(rel)); err != nil {
-			return err
-		}
-		s.clearCachedImageOwner(rel)
-		return nil
+		return s.store.DeleteJSONDocument(imageOwnerDocumentName(rel))
 	}
 	removeErr := os.Remove(metaPath)
 	if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 		return removeErr
 	}
 	removeEmptyParentDirs(s.config.ImageMetadataDir(), filepath.Dir(metaPath))
-	s.clearCachedImageOwner(rel)
 	return nil
-}
-
-func (s *ImageService) cachedImageOwner(rel string) (string, bool) {
-	s.ownerCacheMu.RLock()
-	cached, ok := s.ownerCache[rel]
-	s.ownerCacheMu.RUnlock()
-	if !ok {
-		return "", false
-	}
-	if cached == nil {
-		return "", true
-	}
-	return *cached, true
-}
-
-func (s *ImageService) cacheImageOwner(rel, owner string) {
-	s.ownerCacheMu.Lock()
-	if s.ownerCache == nil {
-		s.ownerCache = map[string]*string{}
-	}
-	if owner == "" {
-		s.ownerCache[rel] = nil
-		s.ownerCacheMu.Unlock()
-		return
-	}
-	value := owner
-	s.ownerCache[rel] = &value
-	s.ownerCacheMu.Unlock()
-}
-
-func (s *ImageService) clearCachedImageOwner(rel string) {
-	s.ownerCacheMu.Lock()
-	delete(s.ownerCache, rel)
-	s.ownerCacheMu.Unlock()
 }
 
 func (s *ImageService) imageOwnerMetadataPath(rel string) (string, error) {
@@ -553,8 +739,40 @@ func imageOwnerDocumentName(rel string) string {
 	return "image_metadata/" + filepath.ToSlash(rel) + ".json"
 }
 
+func NormalizeImageVisibility(value string) (string, error) {
+	switch strings.TrimSpace(value) {
+	case "", ImageVisibilityPrivate:
+		return ImageVisibilityPrivate, nil
+	case ImageVisibilityPublic:
+		return ImageVisibilityPublic, nil
+	default:
+		return "", errors.New("visibility must be private or public")
+	}
+}
+
+func NormalizeImageResolutionPreset(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1k", "1080p":
+		return "1k"
+	case "2k":
+		return "2k"
+	case "4k":
+		return "4k"
+	default:
+		return ""
+	}
+}
+
+func imageDay(rel string, modTime time.Time) string {
+	parts := strings.Split(rel, "/")
+	if len(parts) >= 4 {
+		return strings.Join(parts[:3], "-")
+	}
+	return modTime.Format("2006-01-02")
+}
+
 func thumbnailMetadataDocumentName(rel string) string {
-	return "image_thumbnails/" + filepath.ToSlash(rel) + ".webp.json"
+	return "image_thumbnails/" + filepath.ToSlash(rel) + thumbnailExtension + ".json"
 }
 
 func sourceImageRelativePathFromThumbnail(value string) (string, error) {
@@ -566,6 +784,73 @@ func sourceImageRelativePathFromThumbnail(value string) (string, error) {
 		return "", errors.New("invalid thumbnail path")
 	}
 	return cleanImageRelativePath(strings.TrimSuffix(thumbnailRel, thumbnailExtension))
+}
+
+func setImageItemDimensions(item map[string]any, widthValue, heightValue any) bool {
+	width, height, ok := imageDimensionsFromValues(widthValue, heightValue)
+	if !ok {
+		return false
+	}
+	item["width"] = width
+	item["height"] = height
+	item["resolution"] = strconv.Itoa(width) + "x" + strconv.Itoa(height)
+	item["aspect_ratio"] = simplifiedAspectRatio(width, height)
+	item["orientation"] = imageOrientation(width, height)
+	item["megapixels"] = float64(width) * float64(height) / 1_000_000
+	return true
+}
+
+func imageDimensionsFromValues(widthValue, heightValue any) (int, int, bool) {
+	width := numericMetaValue(widthValue)
+	height := numericMetaValue(heightValue)
+	if width <= 0 || height <= 0 {
+		return 0, 0, false
+	}
+	return width, height, true
+}
+
+func imageFileDimensions(path string) (int, int, bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, 0, false
+	}
+	defer file.Close()
+	config, _, err := image.DecodeConfig(file)
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return 0, 0, false
+	}
+	return config.Width, config.Height, true
+}
+
+func simplifiedAspectRatio(width, height int) string {
+	divisor := greatestCommonDivisor(width, height)
+	if divisor <= 0 {
+		return ""
+	}
+	return strconv.Itoa(width/divisor) + ":" + strconv.Itoa(height/divisor)
+}
+
+func imageOrientation(width, height int) string {
+	if width == height {
+		return "square"
+	}
+	if width > height {
+		return "landscape"
+	}
+	return "portrait"
+}
+
+func greatestCommonDivisor(a, b int) int {
+	if a < 0 {
+		a = -a
+	}
+	if b < 0 {
+		b = -b
+	}
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
 }
 
 func thumbnailRelativePath(root, thumbPath string) string {
@@ -582,6 +867,11 @@ func publicAssetURL(baseURL, prefix, rel string) string {
 		parts[i] = url.PathEscape(part)
 	}
 	return strings.TrimRight(baseURL, "/") + "/" + strings.Trim(prefix, "/") + "/" + strings.Join(parts, "/")
+}
+
+func thumbnailURL(baseURL, thumbRel string, sourceModTime time.Time) string {
+	return publicAssetURL(baseURL, "image-thumbnails", thumbRel) +
+		"?v=" + strconv.Itoa(thumbnailCacheVersion) + "-" + strconv.FormatInt(sourceModTime.UnixNano(), 10)
 }
 
 func cleanImageRelativePath(value string) (string, error) {
@@ -627,7 +917,7 @@ func imageRelativePathFromValue(value string) (string, error) {
 }
 
 func removeImageThumbnail(root, rel string) error {
-	thumbPath := filepath.Join(root, filepath.FromSlash(rel)+".webp")
+	thumbPath := filepath.Join(root, filepath.FromSlash(rel)+thumbnailExtension)
 	if !pathInsideRoot(root, thumbPath) {
 		return errors.New("invalid image path")
 	}
@@ -643,7 +933,7 @@ func removeImageThumbnail(root, rel string) error {
 	return nil
 }
 
-func writeWebPThumbnail(path string, img image.Image) error {
+func writeJPEGThumbnail(path string, img image.Image) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -653,7 +943,7 @@ func writeWebPThumbnail(path string, img image.Image) error {
 		return err
 	}
 	tmpPath := tmp.Name()
-	encodeErr := nativewebp.Encode(tmp, img, nil)
+	encodeErr := jpeg.Encode(tmp, img, &jpeg.Options{Quality: thumbnailQuality})
 	closeErr := tmp.Close()
 	if encodeErr != nil || closeErr != nil {
 		_ = os.Remove(tmpPath)
@@ -722,7 +1012,8 @@ func readImageMetadata(path string, sourceMtime time.Time) map[string]any {
 
 func isCurrentThumbnailMetadata(meta map[string]any) bool {
 	return numericMetaValue(meta["thumbnail_version"]) == thumbnailCacheVersion &&
-		numericMetaValue(meta["thumbnail_size"]) == ThumbnailSize
+		numericMetaValue(meta["thumbnail_size"]) == ThumbnailSize &&
+		numericMetaValue(meta["thumbnail_quality"]) == thumbnailQuality
 }
 
 func numericMetaValue(value any) int {
@@ -834,6 +1125,15 @@ func writeJSONFile(path string, value any) error {
 func toString(v any) string {
 	if s, ok := v.(string); ok {
 		return s
+	}
+	return ""
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
 	}
 	return ""
 }

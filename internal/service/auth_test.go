@@ -36,6 +36,9 @@ func TestAuthServiceCreateAuthenticateDisableAndDelete(t *testing.T) {
 	if identity.Role != "user" || identity.Name != "绘图用户" {
 		t.Fatalf("identity = %#v", identity)
 	}
+	if !HasAPIPermission(PermissionSet{APIPermissions: identity.APIPermissions}, "POST", "/v1/images/generations") {
+		t.Fatalf("default user permissions missing image generation: %#v", identity.APIPermissions)
+	}
 
 	keyID, _ := public["id"].(string)
 	revealed, found := auth.RevealKey(keyID, filter)
@@ -56,6 +59,152 @@ func TestAuthServiceCreateAuthenticateDisableAndDelete(t *testing.T) {
 	}
 	if len(auth.ListKeys(filter)) != 0 {
 		t.Fatalf("ListKeys(user) after delete = %#v", auth.ListKeys(filter))
+	}
+}
+
+func TestAuthServiceAssignsManagedRolesToUsers(t *testing.T) {
+	backend := storage.NewJSONBackend(
+		filepath.Join(t.TempDir(), "accounts.json"),
+		filepath.Join(t.TempDir(), "auth_keys.json"),
+	)
+	auth := NewAuthService(backend)
+
+	user, raw, err := auth.CreateAPIKey(AuthRoleUser, "operator", AuthOwner{})
+	if err != nil {
+		t.Fatalf("CreateAPIKey() error = %v", err)
+	}
+	role, err := auth.CreateRole(map[string]any{
+		"name":            "accounts viewer",
+		"menu_paths":      []string{"/accounts", "/missing"},
+		"api_permissions": []string{APIPermissionKey("GET", "/api/accounts"), "get/missing"},
+	})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	if _, err := auth.CreateRole(map[string]any{"name": "accounts viewer"}); err == nil {
+		t.Fatal("duplicate role name creation succeeded")
+	}
+	roleID := role["id"].(string)
+	userID := user["id"].(string)
+	updated := auth.UpdateUser(userID, map[string]any{"role_id": roleID})
+	if updated == nil {
+		t.Fatal("UpdateUser() returned nil")
+	}
+	if updated["role_id"] != roleID || updated["role_name"] != "accounts viewer" {
+		t.Fatalf("updated role fields = %#v", updated)
+	}
+	identity := auth.Authenticate(raw)
+	if identity == nil {
+		t.Fatal("Authenticate(raw) returned nil")
+	}
+	if identity.RoleID != roleID || identity.RoleName != "accounts viewer" {
+		t.Fatalf("identity role fields = %#v", identity)
+	}
+	if !HasAPIPermission(PermissionSet{APIPermissions: identity.APIPermissions}, "GET", "/api/accounts") {
+		t.Fatalf("updated API permissions missing accounts read: %#v", identity.APIPermissions)
+	}
+	if HasAPIPermission(PermissionSet{APIPermissions: identity.APIPermissions}, "POST", "/api/accounts") {
+		t.Fatalf("unexpected accounts write permission: %#v", identity.APIPermissions)
+	}
+
+	if _, err := auth.UpdateRole(roleID, map[string]any{
+		"api_permissions": []string{APIPermissionKey("POST", "/api/accounts")},
+	}); err != nil {
+		t.Fatalf("UpdateRole() error = %v", err)
+	}
+	identity = auth.Authenticate(raw)
+	if identity == nil || !HasAPIPermission(PermissionSet{APIPermissions: identity.APIPermissions}, "POST", "/api/accounts") {
+		t.Fatalf("role update did not affect user identity: %#v", identity)
+	}
+
+	if deleted, err := auth.DeleteRole(roleID); err == nil || deleted {
+		t.Fatalf("DeleteRole(in use) = %v, %v; want false and error", deleted, err)
+	}
+}
+
+func TestAuthServicePasswordAccountLoginAndRoleUpdates(t *testing.T) {
+	backend := storage.NewJSONBackend(
+		filepath.Join(t.TempDir(), "accounts.json"),
+		filepath.Join(t.TempDir(), "auth_keys.json"),
+	)
+	auth := NewAuthService(backend)
+
+	bootstrap, err := auth.EnsureBootstrapAdmin("admin", "AdminPass123!")
+	if err != nil {
+		t.Fatalf("EnsureBootstrapAdmin() error = %v", err)
+	}
+	if !bootstrap.Created || bootstrap.Generated {
+		t.Fatalf("bootstrap result = %#v", bootstrap)
+	}
+	admin, adminRaw, err := auth.LoginPassword("admin", "AdminPass123!")
+	if err != nil {
+		t.Fatalf("LoginPassword(admin) error = %v", err)
+	}
+	if admin == nil || admin.Role != AuthRoleAdmin || adminRaw == "" {
+		t.Fatalf("admin identity=%#v raw=%q", admin, adminRaw)
+	}
+
+	user, raw, err := auth.RegisterPasswordUser("alice", "Password123", "Alice")
+	if err != nil {
+		t.Fatalf("RegisterPasswordUser() error = %v", err)
+	}
+	if user == nil || user.Role != AuthRoleUser || user.RoleID != DefaultManagedRoleID || raw == "" {
+		t.Fatalf("registered identity=%#v raw=%q", user, raw)
+	}
+	if authenticated := auth.Authenticate(raw); authenticated == nil || authenticated.ID != user.ID || authenticated.Name != "Alice" {
+		t.Fatalf("Authenticate(registered) = %#v", authenticated)
+	}
+	if _, _, err := auth.RegisterPasswordUser("alice", "Password123", "Alice again"); err == nil {
+		t.Fatal("duplicate username registration succeeded")
+	}
+
+	created, err := auth.CreatePasswordUser("bob", "Password123", "Bob", DefaultManagedRoleID, false)
+	if err != nil {
+		t.Fatalf("CreatePasswordUser() error = %v", err)
+	}
+	if created == nil || created["username"] != "bob" || created["enabled"] != false || created["has_session"] != false {
+		t.Fatalf("created password user = %#v", created)
+	}
+	if _, _, err := auth.LoginPassword("bob", "Password123"); err == nil {
+		t.Fatal("disabled admin-created password account logged in")
+	}
+	if _, err := auth.CreatePasswordUser("bob", "Password123", "Bob", DefaultManagedRoleID, true); err == nil {
+		t.Fatal("duplicate admin-created username succeeded")
+	}
+
+	role, err := auth.CreateRole(map[string]any{
+		"name":            "logs viewer",
+		"menu_paths":      []string{"/logs"},
+		"api_permissions": []string{APIPermissionKey("GET", "/api/logs")},
+	})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	updated := auth.UpdateUser(user.ID, map[string]any{"role_id": role["id"]})
+	if updated == nil || updated["role_id"] != role["id"] {
+		t.Fatalf("UpdateUser(role) = %#v", updated)
+	}
+	assignedRole := findManagedRole(auth.ListRoles(), role["id"].(string))
+	if assignedRole == nil || assignedRole["user_count"] != 1 {
+		t.Fatalf("assigned role count = %#v", assignedRole)
+	}
+	if deleted, err := auth.DeleteRole(role["id"].(string)); err == nil || deleted {
+		t.Fatalf("DeleteRole(password account in use) = %v, %v; want false and error", deleted, err)
+	}
+	identity := auth.Authenticate(raw)
+	if identity == nil || identity.RoleID != role["id"] || !HasAPIPermission(PermissionSet{APIPermissions: identity.APIPermissions}, "GET", "/api/logs") {
+		t.Fatalf("role-updated identity = %#v", identity)
+	}
+
+	disabled := auth.UpdateUser(user.ID, map[string]any{"enabled": false})
+	if disabled == nil || disabled["enabled"] != false {
+		t.Fatalf("UpdateUser(disable) = %#v", disabled)
+	}
+	if auth.Authenticate(raw) != nil {
+		t.Fatal("disabled password account session still authenticated")
+	}
+	if _, _, err := auth.LoginPassword("alice", "Password123"); err == nil {
+		t.Fatal("disabled password account logged in")
 	}
 }
 
@@ -300,6 +449,15 @@ func findAuthUser(users []map[string]any, id string) map[string]any {
 	for _, user := range users {
 		if user["id"] == id {
 			return user
+		}
+	}
+	return nil
+}
+
+func findManagedRole(roles []map[string]any, id string) map[string]any {
+	for _, role := range roles {
+		if role["id"] == id {
+			return role
 		}
 	}
 	return nil

@@ -7,9 +7,9 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { login } from "@/lib/api";
+import { verifySession } from "@/lib/api";
 import { clearVerifiedAuthSession, setVerifiedAuthSession } from "@/lib/session";
-import { getDefaultRouteForRole } from "@/store/auth";
+import { getDefaultRouteForSession } from "@/store/auth";
 
 function fragmentParams() {
   const hash = typeof window === "undefined" ? "" : window.location.hash.replace(/^#/, "");
@@ -65,16 +65,22 @@ export default function LinuxDoCallbackPage() {
       }
 
       try {
-        const data = await login(key);
-        await setVerifiedAuthSession({
+        const data = await verifySession(key);
+        const session = {
           key,
           role: data.role,
+          roleId: data.role_id,
+          roleName: data.role_name,
           subjectId: data.subject_id,
           name: data.name,
           provider: data.provider,
-        });
+          menuPaths: data.menu_paths || [],
+          apiPermissions: data.api_permissions || [],
+          menus: data.menus || [],
+        };
+        await setVerifiedAuthSession(session);
         toast.success("登录成功");
-        const redirect = sanitizeRedirectPath(params.get("redirect")) || getDefaultRouteForRole(data.role);
+        const redirect = sanitizeRedirectPath(params.get("redirect")) || getDefaultRouteForSession(session);
         navigate(redirect, { replace: true });
       } catch (error) {
         await clearVerifiedAuthSession();

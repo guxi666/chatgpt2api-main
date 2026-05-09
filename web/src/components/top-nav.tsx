@@ -1,18 +1,29 @@
 ﻿"use client";
 
 import { useEffect, useState } from "react";
-import { Moon, Sun } from "lucide-react";
+import { ChevronDown, ChevronUp, LogOut, MoonStar, Sun, UserCircle2 } from "lucide-react";
+import { motion, useReducedMotion, type Transition } from "motion/react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 
 import { AnnouncementNotifications } from "@/components/announcement-banner";
+import { ImageTaskQueue } from "@/components/image-task-queue";
 import webConfig from "@/constants/common-env";
-import { clearVerifiedAuthSession, getCachedAuthSession, getVerifiedAuthSession } from "@/lib/session";
-import type { StoredAuthSession } from "@/store/auth";
+import { resolveBrandAssetURL } from "@/lib/app-meta";
+import {
+  AUTH_SESSION_CHANGE_EVENT,
+  clearVerifiedAuthSession,
+  getCachedAuthSession,
+  getVerifiedAuthSession,
+} from "@/lib/session";
+import {
+  canAccessPath,
+  hasAPIPermission,
+  type StoredAuthSession,
+} from "@/store/auth";
 import { Button } from "@/components/ui/button";
-import { fetchAccounts, type Account } from "@/lib/api";
-import { resolveAppAssetSrc } from "@/lib/app-meta";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { fetchAccounts, logout, type Account } from "@/lib/api";
 import { useAppMeta } from "@/lib/use-app-meta";
-import { usePreferredLanguage } from "@/lib/language";
 import { cn } from "@/lib/utils";
 import {
   applyColorTheme,
@@ -21,75 +32,31 @@ import {
   type ColorTheme,
 } from "@/lib/theme";
 
-type Language = "zh" | "en";
-type NavItemKey = "create" | "accounts" | "register" | "images" | "users" | "logs" | "settings" | "wallet";
-
-const navLabels: Record<Language, Record<NavItemKey, string>> = {
-  zh: {
-    create: "创作台",
-    accounts: "账号池",
-    register: "注册机",
-    images: "图片库",
-    users: "用户管理",
-    logs: "日志",
-    settings: "设置",
-    wallet: "钱包充值",
-  },
-  en: {
-    create: "Create",
-    accounts: "Accounts",
-    register: "Register",
-    images: "Images",
-    users: "Users",
-    logs: "Logs",
-    settings: "Settings",
-    wallet: "Wallet",
-  },
-};
-
-const roleLabels: Record<Language, { admin: string; linuxdo: string; email: string; key: string; quota: string; logout: string }> = {
-  zh: {
-    admin: "管理员",
-    linuxdo: "Linuxdo 用户",
-    email: "邮箱用户",
-    key: "密钥用户",
-    quota: "剩余额度",
-    logout: "退出",
-  },
-  en: {
-    admin: "Admin",
-    linuxdo: "Linuxdo User",
-    email: "Email User",
-    key: "API User",
-    quota: "Remaining",
-    logout: "Logout",
-  },
-};
-
-function buildNavItems(
-  language: Language,
-  mode: "admin" | "linuxdo" | "email" | "user",
-) {
-  const labels = navLabels[language];
-  if (mode === "admin") {
-    return [
-      { href: "/image", label: labels.create },
-      { href: "/accounts", label: labels.accounts },
-      { href: "/register", label: labels.register },
-      { href: "/image-manager", label: labels.images },
-      { href: "/users", label: labels.users },
-      { href: "/logs", label: labels.logs },
-      { href: "/settings", label: labels.settings },
-    ];
-  }
-  return [
-    { href: "/image", label: labels.create },
-    { href: "/wallet", label: labels.wallet },
-    { href: "/image-manager", label: labels.images },
-  ];
-}
-
+const navItems = [
+  { href: "/image", label: "创作台" },
+  { href: "/wallet", label: "钱包充值" },
+  { href: "/agency", label: "代理加盟" },
+  { href: "/accounts", label: "账号池管理" },
+  { href: "/register", label: "注册机" },
+  { href: "/image-manager", label: "图片库" },
+  { href: "/users", label: "用户管理" },
+  { href: "/rbac", label: "角色权限" },
+  { href: "/logs", label: "日志管理" },
+  { href: "/settings", label: "设置" },
+];
+const profileNavItem = { href: "/profile", label: "个人中心" };
 const QUOTA_REFRESH_EVENT = "chatgpt2api:quota-refresh";
+const PRIMARY_NAV_ID = "primary-navigation";
+const NAV_ACTIVE_LAYOUT_ID = "top-nav-active-pill";
+const navActiveTransition: Transition = {
+  type: "spring",
+  stiffness: 520,
+  damping: 42,
+  mass: 0.7,
+};
+const reducedNavActiveTransition: Transition = {
+  duration: 0.01,
+};
 
 function formatAvailableQuota(accounts: Account[]) {
   const availableAccounts = accounts.filter((account) => account.status !== "禁用");
@@ -102,7 +69,7 @@ function ThemeToggleButton({
   className,
 }: {
   theme: ColorTheme;
-  onToggle: () => void;
+  onToggle: (button: HTMLButtonElement) => void;
   className?: string;
 }) {
   const dark = theme === "dark";
@@ -112,29 +79,171 @@ function ThemeToggleButton({
       type="button"
       variant="ghost"
       size="icon"
-      className={cn("size-8 rounded-full", className)}
-      onClick={onToggle}
+      className={cn("relative size-8 rounded-full", className)}
+      onClick={(event) => onToggle(event.currentTarget)}
       aria-label={dark ? "切换到浅色模式" : "切换到深色模式"}
       title={dark ? "浅色模式" : "深色模式"}
     >
-      {dark ? <Sun /> : <Moon />}
+      <Sun className="scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90" />
+      <MoonStar className="absolute scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0" />
+      <span className="sr-only">切换界面主题</span>
     </Button>
   );
 }
 
+type NavItem = {
+  href: string;
+  label: string;
+};
+
+function isActivePath(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function NavPill({ item, pathname }: { item: NavItem; pathname: string }) {
+  const active = isActivePath(pathname, item.href);
+  const prefersReducedMotion = useReducedMotion();
+
+  return (
+    <NavLink
+      to={item.href}
+      className={() =>
+        cn(
+          "relative isolate shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors sm:text-sm",
+          active
+            ? "text-[#18181b] dark:text-accent-foreground"
+            : "text-[#45515e] hover:bg-black/[0.05] hover:text-[#18181b] dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-accent-foreground",
+        )
+      }
+    >
+      {active ? (
+        <motion.span
+          layoutId={NAV_ACTIVE_LAYOUT_ID}
+          transition={prefersReducedMotion ? reducedNavActiveTransition : navActiveTransition}
+          className="absolute inset-0 -z-10 rounded-full bg-black/[0.06] shadow-[inset_0_0_0_1px_rgba(20,86,240,0.08)] dark:bg-accent"
+        />
+      ) : null}
+      <motion.span
+        animate={{ scale: active && !prefersReducedMotion ? 1.03 : 1 }}
+        transition={prefersReducedMotion ? reducedNavActiveTransition : { duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+        className="relative z-10 block"
+      >
+        {item.label}
+      </motion.span>
+    </NavLink>
+  );
+}
+
+function AccountMenu({
+  session,
+  roleLabel,
+  availableQuota,
+  pathname,
+  onLogout,
+}: {
+  session: StoredAuthSession;
+  roleLabel: string;
+  availableQuota: string;
+  pathname: string;
+  onLogout: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const displayName = session.name || roleLabel;
+  const initial = (displayName.trim() || "U").slice(0, 1).toUpperCase();
+  const profileActive = isActivePath(pathname, profileNavItem.href);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className={cn(
+            "h-9 rounded-full px-2.5 shadow-none",
+            profileActive ? "border-[#1456f0]/30 bg-[#edf4ff] text-[#1456f0] dark:bg-sky-950/30 dark:text-sky-300" : "",
+          )}
+          aria-label="账号菜单"
+        >
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+            {initial}
+          </span>
+          <span className="hidden max-w-[120px] truncate lg:inline">{displayName}</span>
+          <ChevronDown />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        sideOffset={8}
+        className="w-72 border-border bg-card p-2 text-card-foreground shadow-[0_20px_60px_-30px_rgba(15,23,42,0.45)] dark:border-border dark:bg-card"
+      >
+        <div className="flex flex-col gap-2">
+          <div className="rounded-xl bg-muted/50 p-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+                {initial}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-foreground">{displayName}</div>
+                <code className="block truncate font-mono text-xs text-muted-foreground">
+                  {session.subjectId || session.role}
+                </code>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="rounded-lg bg-muted/40 px-2 py-1.5">
+              <div className="text-muted-foreground">角色</div>
+              <div className="truncate font-medium text-foreground">{roleLabel}</div>
+            </div>
+            <div className="rounded-lg bg-muted/40 px-2 py-1.5">
+              <div className="text-muted-foreground">额度</div>
+              <div className="truncate font-medium text-foreground">{availableQuota}</div>
+            </div>
+            <div className="rounded-lg bg-muted/40 px-2 py-1.5">
+              <div className="text-muted-foreground">版本</div>
+              <div className="truncate font-medium text-foreground">v{webConfig.appVersion}</div>
+            </div>
+          </div>
+
+          <Link
+            to={profileNavItem.href}
+            className={cn(
+              "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition hover:bg-accent hover:text-accent-foreground",
+              profileActive ? "bg-[#edf4ff] text-[#1456f0] dark:bg-sky-950/30 dark:text-sky-300" : "text-foreground",
+            )}
+            onClick={() => setOpen(false)}
+          >
+            <UserCircle2 className="size-4" />
+            个人中心
+          </Link>
+
+          <button
+            type="button"
+            className="flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950/30"
+            onClick={() => {
+              setOpen(false);
+              void onLogout();
+            }}
+          >
+            <LogOut className="size-4" />
+            退出登录
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export function TopNav() {
+  const appMeta = useAppMeta();
   const location = useLocation();
   const navigate = useNavigate();
-  const appMeta = useAppMeta();
-  const { language, setLanguage } = usePreferredLanguage();
   const pathname = location.pathname.replace(/\/+$/, "") || "/";
   const [session, setSession] = useState<StoredAuthSession | null | undefined>(() => getCachedAuthSession());
   const [theme, setTheme] = useState<ColorTheme>(() => getPreferredColorTheme());
   const [availableQuota, setAvailableQuota] = useState("--");
-
-  useEffect(() => {
-    applyColorTheme(theme);
-  }, [theme]);
+  const [navCollapsed, setNavCollapsed] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -162,7 +271,17 @@ export function TopNav() {
   }, [pathname]);
 
   useEffect(() => {
-    if (!session || session.role !== "admin") {
+    const handleSessionChange = () => {
+      setSession(getCachedAuthSession() ?? null);
+    };
+    window.addEventListener(AUTH_SESSION_CHANGE_EVENT, handleSessionChange);
+    return () => {
+      window.removeEventListener(AUTH_SESSION_CHANGE_EVENT, handleSessionChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasAPIPermission(session, "GET", "/api/accounts")) {
       setAvailableQuota("--");
       return;
     }
@@ -196,133 +315,108 @@ export function TopNav() {
   }, [session]);
 
   const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // Local logout should still complete if the server session cookie is already gone.
+    }
     await clearVerifiedAuthSession();
     navigate("/login", { replace: true });
   };
 
-  const handleThemeToggle = () => {
-    setTheme((currentTheme) => {
-      const nextTheme = currentTheme === "dark" ? "light" : "dark";
-      applyColorTheme(nextTheme);
-      saveColorTheme(nextTheme);
-      return nextTheme;
-    });
+  const handleThemeToggle = (button: HTMLButtonElement) => {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    const rect = button.getBoundingClientRect();
+    applyColorTheme(
+      nextTheme,
+      {
+        force: true,
+        origin: {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        },
+      },
+    );
+    saveColorTheme(nextTheme);
+    setTheme(nextTheme);
   };
 
   if (pathname === "/login" || pathname === "/auth/linuxdo/callback" || session === undefined || !session) {
     return null;
   }
 
-  const roleText = roleLabels[language];
-  const navItems = session.role === "admin"
-    ? buildNavItems(language, "admin")
-    : session.provider === "linuxdo"
-      ? buildNavItems(language, "linuxdo")
-      : session.provider === "email"
-        ? buildNavItems(language, "email")
-        : buildNavItems(language, "user");
-  const roleLabel = session.role === "admin"
-    ? roleText.admin
-    : session.provider === "linuxdo"
-      ? roleText.linuxdo
-      : session.provider === "email"
-        ? roleText.email
-        : roleText.key;
+  const visibleNavItems = navItems.filter((item) => canAccessPath(session, item.href));
+  const roleLabel = session.role === "admin" ? "管理员" : session.roleName || (session.provider === "linuxdo" ? "Linuxdo 用户" : "普通用户");
+  const canAccessImageTasks = canAccessPath(session, "/image");
+  const navToggleLabel = navCollapsed ? "展开导航栏" : "收起导航栏";
+  const brandTitle = (appMeta.app_title || "chatgpt2api").trim() || "chatgpt2api";
+  const brandLogoURL = resolveBrandAssetURL(appMeta.top_left_logo_url || "/logo-mark.svg") || "/logo-mark.svg";
 
   return (
     <header className="sticky top-3 z-40 rounded-[24px] border border-border bg-card/90 shadow-[0_0_22.576px_rgba(44,74,116,0.09)] backdrop-blur dark:border-border dark:bg-card/92">
-      <div className="flex min-h-14 flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-4">
-        <div className="flex items-center justify-between gap-3 sm:justify-start">
-          <Link
-            to="/image"
-            className="font-display inline-flex shrink-0 items-center gap-2 py-1 text-[15px] font-semibold text-[#18181b] transition hover:text-[#1456f0] dark:text-foreground dark:hover:text-sky-300"
+      <div className="flex min-h-14 flex-col gap-2 px-3 py-2 lg:flex-row lg:items-center lg:justify-between lg:gap-6 lg:px-5">
+        <div className="flex min-w-0 items-center justify-between gap-2 lg:shrink-0 lg:justify-start lg:pr-1">
+          <Button
+            type="button"
+            variant="ghost"
+            className={cn(
+              "font-display h-9 max-w-[190px] justify-start rounded-full px-1.5 pr-2 text-[15px] font-semibold text-[#18181b] shadow-none hover:bg-black/[0.04] hover:text-[#1456f0] sm:max-w-none dark:text-foreground dark:hover:text-sky-300",
+              navCollapsed ? "bg-black/[0.04] text-[#1456f0] dark:bg-accent dark:text-sky-300" : "",
+            )}
+            aria-controls={PRIMARY_NAV_ID}
+            aria-expanded={!navCollapsed}
+            aria-label={navToggleLabel}
+            title={navToggleLabel}
+            onClick={() => setNavCollapsed((collapsed) => !collapsed)}
           >
             <img
-              src={resolveAppAssetSrc(appMeta.app_logo_url)}
+              src={brandLogoURL}
               alt=""
               aria-hidden="true"
               className="size-7 rounded-[10px] shadow-[0_4px_10px_rgba(184,90,127,0.16)]"
             />
-            {appMeta.app_title || "chatgpt2api"}
-          </Link>
-          <div className="ml-auto flex shrink-0 items-center gap-1 sm:hidden">
+            <span className="truncate">{brandTitle}</span>
+            {navCollapsed ? <ChevronDown aria-hidden="true" /> : <ChevronUp aria-hidden="true" />}
+          </Button>
+          <div className="ml-auto flex shrink-0 items-center gap-1 lg:hidden">
+            {canAccessImageTasks ? <ImageTaskQueue className="size-8 px-0" /> : null}
             <AnnouncementNotifications target="image" className="size-8" />
             <ThemeToggleButton theme={theme} onToggle={handleThemeToggle} />
-            <button
-              type="button"
-              className="rounded-full px-3 py-1 text-xs font-medium text-[#45515e] transition hover:bg-black/[0.05] hover:text-[#18181b] dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-accent-foreground"
-              onClick={() => void handleLogout()}
-            >
-              {roleText.logout}
-            </button>
+            <AccountMenu
+              session={session}
+              roleLabel={roleLabel}
+              availableQuota={availableQuota}
+              pathname={pathname}
+              onLogout={handleLogout}
+            />
           </div>
         </div>
-        <nav className="hide-scrollbar -mx-1 flex min-w-0 flex-1 gap-1 overflow-x-auto px-1 sm:mx-0 sm:justify-center sm:gap-1.5 sm:overflow-visible sm:px-0">
-          {navItems.map((item) => {
-            const active = pathname === item.href;
-            return (
-              <NavLink
-                key={item.href}
-                to={item.href}
-                className={() =>
-                  cn(
-                    "relative shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-medium transition sm:text-sm",
-                    active
-                      ? "bg-black/[0.06] text-[#18181b] dark:bg-accent dark:text-accent-foreground"
-                      : "text-[#45515e] hover:bg-black/[0.05] hover:text-[#18181b] dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-accent-foreground",
-                  )
-                }
-              >
-                {item.label}
-              </NavLink>
-            );
-          })}
+        <nav
+          id={PRIMARY_NAV_ID}
+          aria-label="主导航"
+          className={cn(
+            "hide-scrollbar -mx-1 min-w-0 gap-1 overflow-x-auto overscroll-x-contain px-1 pb-0.5 scroll-px-1 touch-pan-x [-webkit-overflow-scrolling:touch] lg:mx-0 lg:flex-1 lg:justify-center lg:gap-2 lg:px-2 lg:pb-0",
+            navCollapsed ? "hidden" : "flex",
+          )}
+        >
+          {visibleNavItems.map((item) => (
+            <NavPill key={item.href} item={item} pathname={pathname} />
+          ))}
         </nav>
-        <div className="hidden items-center justify-end gap-2 sm:flex sm:gap-3">
-          <div className="inline-flex items-center rounded-full border border-border bg-white p-0.5 text-xs dark:bg-input/30">
-            <button
-              type="button"
-              className={cn(
-                "rounded-full px-2.5 py-1 font-medium transition",
-                language === "zh" ? "bg-[#181e25] text-white" : "text-muted-foreground hover:text-foreground",
-              )}
-              onClick={() => setLanguage("zh")}
-            >
-              中文
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "rounded-full px-2.5 py-1 font-medium transition",
-                language === "en" ? "bg-[#181e25] text-white" : "text-muted-foreground hover:text-foreground",
-              )}
-              onClick={() => setLanguage("en")}
-            >
-              EN
-            </button>
-          </div>
+        <div className="hidden shrink-0 items-center justify-end gap-1.5 lg:flex">
+          {canAccessImageTasks ? <ImageTaskQueue /> : null}
           <AnnouncementNotifications target="image" className="size-8" />
           <ThemeToggleButton theme={theme} onToggle={handleThemeToggle} />
-          <span className="hidden rounded-full bg-[#f0f0f0] px-2.5 py-1 text-[11px] font-medium text-[#45515e] sm:inline-block dark:bg-secondary dark:text-secondary-foreground">
-            {roleLabel}
-          </span>
-          {session.role === "admin" ? (
-            <span className="hidden rounded-full bg-[#f0f0f0] px-2.5 py-1 text-[11px] font-medium text-[#45515e] sm:inline-block dark:bg-secondary dark:text-secondary-foreground">
-              {roleText.quota} {availableQuota}
-            </span>
-          ) : null}
-          <span className="hidden rounded-full bg-[#f0f0f0] px-2.5 py-1 text-[11px] font-medium text-[#45515e] sm:inline-block dark:bg-secondary dark:text-secondary-foreground">
-            v{webConfig.appVersion}
-          </span>
-          <button
-            type="button"
-            className="rounded-full px-3 py-1 text-sm text-[#45515e] transition hover:bg-black/[0.05] hover:text-[#18181b] dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-accent-foreground"
-            onClick={() => void handleLogout()}
-          >
-            {roleText.logout}
-          </button>
+          <AccountMenu
+            session={session}
+            roleLabel={roleLabel}
+            availableQuota={availableQuota}
+            pathname={pathname}
+            onLogout={handleLogout}
+          />
         </div>
       </div>
     </header>
   );
 }
+

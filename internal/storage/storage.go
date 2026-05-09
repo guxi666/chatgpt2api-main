@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -37,8 +36,14 @@ type JSONDocumentBackend interface {
 
 type LogBackend interface {
 	AppendLog(item map[string]any) error
-	QueryLogs(logType, startDate, endDate string, limit int) ([]map[string]any, error)
+	QueryLogs(startDate, endDate string, limit int) ([]map[string]any, error)
 }
+
+type LogMaintenanceBackend interface {
+	DeleteLogsBefore(day string) (int, error)
+}
+
+const LogEventsDocumentName = "logs/events.jsonl"
 
 func NewBackendFromEnv(dataDir string) (Backend, error) {
 	backendType := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_BACKEND")))
@@ -54,30 +59,9 @@ func NewBackendFromEnv(dataDir string) (Backend, error) {
 			dsn = "sqlite:///" + filepath.ToSlash(filepath.Join(dataDir, "chatgpt2api.db"))
 		}
 		return NewDatabaseBackend(dsn)
-	case "git":
-		repoURL := strings.TrimSpace(os.Getenv("GIT_REPO_URL"))
-		if repoURL == "" {
-			return nil, fmt.Errorf("GIT_REPO_URL is required when using git storage backend")
-		}
-		return NewGitBackend(GitOptions{
-			RepoURL:          repoURL,
-			Token:            strings.TrimSpace(os.Getenv("GIT_TOKEN")),
-			Branch:           envDefault("GIT_BRANCH", "main"),
-			FilePath:         envDefault("GIT_FILE_PATH", "accounts.json"),
-			AuthKeysFilePath: envDefault("GIT_AUTH_KEYS_FILE_PATH", "auth_keys.json"),
-			CacheDir:         filepath.Join(dataDir, "git_cache"),
-		}), nil
 	default:
 		return nil, fmt.Errorf("unknown storage backend: %s", backendType)
 	}
-}
-
-func envDefault(key, fallback string) string {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
-		return fallback
-	}
-	return value
 }
 
 type JSONBackend struct {
@@ -174,7 +158,11 @@ func (b *JSONBackend) DeleteJSONDocument(name string) error {
 }
 
 func (b *JSONBackend) AppendLog(item map[string]any) error {
-	full, err := b.documentPath("logs.jsonl")
+	if item == nil {
+		item = map[string]any{}
+	}
+	item["type"] = "event"
+	full, err := b.documentPath(LogEventsDocumentName)
 	if err != nil {
 		return err
 	}
@@ -194,8 +182,8 @@ func (b *JSONBackend) AppendLog(item map[string]any) error {
 	return err
 }
 
-func (b *JSONBackend) QueryLogs(logType, startDate, endDate string, limit int) ([]map[string]any, error) {
-	full, err := b.documentPath("logs.jsonl")
+func (b *JSONBackend) QueryLogs(startDate, endDate string, limit int) ([]map[string]any, error) {
+	full, err := b.documentPath(LogEventsDocumentName)
 	if err != nil {
 		return nil, err
 	}
@@ -216,12 +204,58 @@ func (b *JSONBackend) QueryLogs(logType, startDate, endDate string, limit int) (
 			break
 		}
 		item, ok := decodeLogLine(lines[i])
-		if !ok || !matchLogFilter(item, logType, startDate, endDate) {
+		if !ok || !matchLogFilter(item, startDate, endDate) {
 			continue
 		}
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+func (b *JSONBackend) DeleteLogsBefore(day string) (int, error) {
+	day = strings.TrimSpace(day)
+	if day == "" {
+		return 0, nil
+	}
+	full, err := b.documentPath(LogEventsDocumentName)
+	if err != nil {
+		return 0, err
+	}
+	data, err := os.ReadFile(full)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\r\n"), "\n")
+	kept := make([]string, 0, len(lines))
+	removed := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		item, ok := decodeLogLine(line)
+		if ok {
+			itemDay := logDay(strings.TrimSpace(fmt.Sprint(item["time"])))
+			if itemDay != "" && itemDay < day {
+				removed++
+				continue
+			}
+		}
+		kept = append(kept, line)
+	}
+	if removed == 0 {
+		return 0, nil
+	}
+	next := []byte{}
+	if len(kept) > 0 {
+		next = []byte(strings.Join(kept, "\n") + "\n")
+	}
+	if err := os.WriteFile(full, next, 0o644); err != nil {
+		return 0, err
+	}
+	return removed, nil
 }
 
 func (b *JSONBackend) documentPath(name string) (string, error) {
@@ -311,7 +345,6 @@ func (b *DatabaseBackend) init() error {
 		`CREATE TABLE IF NOT EXISTS auth_keys (id INTEGER PRIMARY KEY AUTOINCREMENT, key_id TEXT UNIQUE NOT NULL, data TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS json_documents (name TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, type TEXT NOT NULL, day TEXT NOT NULL, data TEXT NOT NULL)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_type_day_id ON logs (type, day, id)`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_day_id ON logs (day, id)`,
 	}
 	if b.driver == "postgres" {
@@ -320,7 +353,6 @@ func (b *DatabaseBackend) init() error {
 			`CREATE TABLE IF NOT EXISTS auth_keys (id SERIAL PRIMARY KEY, key_id TEXT UNIQUE NOT NULL, data TEXT NOT NULL)`,
 			`CREATE TABLE IF NOT EXISTS json_documents (name TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 			`CREATE TABLE IF NOT EXISTS logs (id SERIAL PRIMARY KEY, created_at TEXT NOT NULL, type TEXT NOT NULL, day TEXT NOT NULL, data TEXT NOT NULL)`,
-			`CREATE INDEX IF NOT EXISTS idx_logs_type_day_id ON logs (type, day, id)`,
 			`CREATE INDEX IF NOT EXISTS idx_logs_day_id ON logs (day, id)`,
 		}
 	}
@@ -330,7 +362,6 @@ func (b *DatabaseBackend) init() error {
 			`CREATE TABLE IF NOT EXISTS auth_keys (id INTEGER PRIMARY KEY AUTO_INCREMENT, key_id TEXT UNIQUE NOT NULL, data TEXT NOT NULL)`,
 			`CREATE TABLE IF NOT EXISTS json_documents (name VARCHAR(512) PRIMARY KEY, data LONGTEXT NOT NULL, updated_at TEXT NOT NULL)`,
 			`CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTO_INCREMENT, created_at TEXT NOT NULL, type VARCHAR(64) NOT NULL, day VARCHAR(10) NOT NULL, data LONGTEXT NOT NULL)`,
-			`CREATE INDEX idx_logs_type_day_id ON logs (type, day, id)`,
 			`CREATE INDEX idx_logs_day_id ON logs (day, id)`,
 		}
 	}
@@ -502,6 +533,7 @@ func (b *DatabaseBackend) AppendLog(item map[string]any) error {
 	if item == nil {
 		item = map[string]any{}
 	}
+	item["type"] = "event"
 	data, err := json.Marshal(item)
 	if err != nil {
 		return err
@@ -510,7 +542,7 @@ func (b *DatabaseBackend) AppendLog(item map[string]any) error {
 	if createdAt == "" {
 		createdAt = time.Now().Format("2006-01-02 15:04:05")
 	}
-	logType := strings.TrimSpace(fmt.Sprint(item["type"]))
+	logType := "event"
 	day := logDay(createdAt)
 	if day == "" {
 		day = time.Now().Format("2006-01-02")
@@ -525,14 +557,10 @@ func (b *DatabaseBackend) AppendLog(item map[string]any) error {
 	return err
 }
 
-func (b *DatabaseBackend) QueryLogs(logType, startDate, endDate string, limit int) ([]map[string]any, error) {
+func (b *DatabaseBackend) QueryLogs(startDate, endDate string, limit int) ([]map[string]any, error) {
 	query := "SELECT data FROM logs"
 	var filters []string
 	var args []any
-	if strings.TrimSpace(logType) != "" {
-		args = append(args, strings.TrimSpace(logType))
-		filters = append(filters, "type = "+b.placeholder(len(args)))
-	}
 	if strings.TrimSpace(startDate) != "" {
 		args = append(args, strings.TrimSpace(startDate))
 		filters = append(filters, "day >= "+b.placeholder(len(args)))
@@ -571,156 +599,27 @@ func (b *DatabaseBackend) QueryLogs(logType, startDate, endDate string, limit in
 	return out, rows.Err()
 }
 
+func (b *DatabaseBackend) DeleteLogsBefore(day string) (int, error) {
+	day = strings.TrimSpace(day)
+	if day == "" {
+		return 0, nil
+	}
+	result, err := b.db.Exec("DELETE FROM logs WHERE day < "+b.placeholder(1), day)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	return int(rows), nil
+}
+
 func (b *DatabaseBackend) placeholder(index int) string {
 	if b.driver == "postgres" {
 		return fmt.Sprintf("$%d", index)
 	}
 	return "?"
-}
-
-type GitOptions struct {
-	RepoURL          string
-	Token            string
-	Branch           string
-	FilePath         string
-	AuthKeysFilePath string
-	CacheDir         string
-}
-
-type GitBackend struct {
-	options GitOptions
-}
-
-func NewGitBackend(options GitOptions) *GitBackend {
-	if options.Branch == "" {
-		options.Branch = "main"
-	}
-	if options.FilePath == "" {
-		options.FilePath = "accounts.json"
-	}
-	if options.AuthKeysFilePath == "" {
-		options.AuthKeysFilePath = "auth_keys.json"
-	}
-	_ = os.MkdirAll(options.CacheDir, 0o755)
-	return &GitBackend{options: options}
-}
-
-func (b *GitBackend) LoadAccounts() ([]map[string]any, error) {
-	data, err := b.loadValue(b.options.FilePath)
-	if err != nil {
-		return nil, err
-	}
-	return anyListToMaps(data), nil
-}
-
-func (b *GitBackend) SaveAccounts(accounts []map[string]any) error {
-	return b.saveValue(b.options.FilePath, accounts, "Update accounts data")
-}
-
-func (b *GitBackend) LoadAuthKeys() ([]map[string]any, error) {
-	data, err := b.loadValue(b.options.AuthKeysFilePath)
-	if err != nil {
-		return nil, err
-	}
-	if obj, ok := data.(map[string]any); ok {
-		data = obj["items"]
-	}
-	return anyListToMaps(data), nil
-}
-
-func (b *GitBackend) SaveAuthKeys(keys []map[string]any) error {
-	return b.saveValue(b.options.AuthKeysFilePath, map[string]any{"items": keys}, "Update auth keys data")
-}
-
-func (b *GitBackend) HealthCheck() map[string]any {
-	repo, err := b.cloneOrPull()
-	if err != nil {
-		return map[string]any{"status": "unhealthy", "backend": "git", "error": err.Error()}
-	}
-	commit, _ := gitOutput(repo, "rev-parse", "--short=8", "HEAD")
-	return map[string]any{"status": "healthy", "backend": "git", "repo_url": maskToken(b.options.RepoURL), "branch": b.options.Branch, "file_path": b.options.FilePath, "auth_keys_file_path": b.options.AuthKeysFilePath, "last_commit": strings.TrimSpace(commit)}
-}
-
-func (b *GitBackend) Info() map[string]any {
-	return map[string]any{"type": "git", "description": "Git 私有仓库存储", "repo_url": maskToken(b.options.RepoURL), "branch": b.options.Branch, "file_path": b.options.FilePath, "auth_keys_file_path": b.options.AuthKeysFilePath}
-}
-
-func (b *GitBackend) loadValue(filePath string) (any, error) {
-	repo, err := b.cloneOrPull()
-	if err != nil {
-		return nil, err
-	}
-	full := filepath.Join(repo, filepath.FromSlash(filePath))
-	data, err := os.ReadFile(full)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var out any
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (b *GitBackend) saveValue(filePath string, value any, message string) error {
-	repo, err := b.cloneOrPull()
-	if err != nil {
-		return err
-	}
-	full := filepath.Join(repo, filepath.FromSlash(filePath))
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		return err
-	}
-	if err := saveJSONValue(full, value); err != nil {
-		return err
-	}
-	if _, err := gitOutput(repo, "add", filePath); err != nil {
-		return err
-	}
-	status, err := gitOutput(repo, "status", "--porcelain")
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(status) == "" {
-		return nil
-	}
-	if _, err := gitOutput(repo, "commit", "-m", message); err != nil {
-		return err
-	}
-	_, err = gitOutput(repo, "push", "origin", b.options.Branch)
-	return err
-}
-
-func (b *GitBackend) cloneOrPull() (string, error) {
-	repoPath := filepath.Join(b.options.CacheDir, "repo")
-	if _, err := os.Stat(filepath.Join(repoPath, ".git")); err == nil {
-		if _, err := gitOutput(repoPath, "pull", "origin", b.options.Branch); err == nil {
-			return repoPath, nil
-		}
-		_ = os.RemoveAll(repoPath)
-	}
-	authURL := buildAuthURL(b.options.RepoURL, b.options.Token)
-	if _, err := gitOutput("", "clone", "--branch", b.options.Branch, authURL, repoPath); err != nil {
-		return "", err
-	}
-	return repoPath, nil
-}
-
-func gitOutput(dir string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(out), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return string(out), nil
 }
 
 func loadJSONList(path string) []map[string]any {
@@ -813,11 +712,8 @@ func decodeLogLine(line string) (map[string]any, bool) {
 	return item, ok
 }
 
-func matchLogFilter(item map[string]any, logType, startDate, endDate string) bool {
+func matchLogFilter(item map[string]any, startDate, endDate string) bool {
 	day := logDay(strings.TrimSpace(fmt.Sprint(item["time"])))
-	if strings.TrimSpace(logType) != "" && strings.TrimSpace(fmt.Sprint(item["type"])) != strings.TrimSpace(logType) {
-		return false
-	}
 	if strings.TrimSpace(startDate) != "" && day < strings.TrimSpace(startDate) {
 		return false
 	}
@@ -891,28 +787,4 @@ func maskPassword(raw string) string {
 		u.User = url.UserPassword(username, "****")
 	}
 	return u.String()
-}
-
-func maskToken(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.User == nil {
-		return raw
-	}
-	u.User = url.User("****")
-	return u.String()
-}
-
-func buildAuthURL(repoURL, token string) string {
-	if token == "" {
-		return repoURL
-	}
-	if strings.HasPrefix(repoURL, "https://") {
-		return strings.Replace(repoURL, "https://", "https://"+url.QueryEscape(token)+"@", 1)
-	}
-	if strings.HasPrefix(repoURL, "git@") {
-		converted := strings.Replace(repoURL, "git@", "https://", 1)
-		converted = strings.Replace(converted, ".com:", ".com/", 1)
-		return strings.Replace(converted, "https://", "https://"+url.QueryEscape(token)+"@", 1)
-	}
-	return repoURL
 }

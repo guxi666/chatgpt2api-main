@@ -4,7 +4,14 @@ import "testing"
 
 func TestGet(t *testing.T) {
 	original := Version
-	t.Cleanup(func() { Version = original })
+	originalBuildType := BuildType
+	originalDeployment := Deployment
+	t.Cleanup(func() {
+		Version = original
+		BuildType = originalBuildType
+		Deployment = originalDeployment
+	})
+	t.Setenv("CHATGPT2API_DEPLOYMENT", "")
 
 	tests := []struct {
 		name string
@@ -23,5 +30,27 @@ func TestGet(t *testing.T) {
 				t.Fatalf("Get() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+
+	BuildType = " release "
+	if got := GetBuildType(); got != "release" {
+		t.Fatalf("GetBuildType() = %q, want release", got)
+	}
+	BuildType = ""
+	if got := GetBuildType(); got != "source" {
+		t.Fatalf("GetBuildType() = %q, want source", got)
+	}
+
+	Deployment = " docker "
+	if got := GetDeployment(); got != "docker" {
+		t.Fatalf("GetDeployment() = %q, want docker", got)
+	}
+	Deployment = ""
+	if got := GetDeployment(); got != "binary" {
+		t.Fatalf("GetDeployment() = %q, want binary", got)
+	}
+	t.Setenv("CHATGPT2API_DEPLOYMENT", "compose")
+	if got := GetDeployment(); got != "compose" {
+		t.Fatalf("GetDeployment() = %q, want env override", got)
 	}
 }

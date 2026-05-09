@@ -26,7 +26,7 @@ export function PaymentSettingsCard() {
 
   if (isLoadingConfig) {
     return (
-      <SettingsCard icon={CreditCard} title="支付配置" description="易支付收款配置。">
+      <SettingsCard icon={CreditCard} title="支付配置">
         <div className="flex items-center justify-center py-10">
           <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
         </div>
@@ -40,7 +40,6 @@ export function PaymentSettingsCard() {
     <SettingsCard
       icon={CreditCard}
       title="支付配置"
-      description="保存后立即生效。充值页面会显示：支付宝、微信、PayPal、USDT。"
       action={(
         <Button size="lg" onClick={() => void saveConfig()} disabled={isSavingConfig}>
           {isSavingConfig ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
@@ -81,7 +80,6 @@ export function PaymentSettingsCard() {
             </Field>
           </div>
         </section>
-
       </div>
     </SettingsCard>
   );
