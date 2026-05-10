@@ -107,6 +107,33 @@ function userSearchText(user: ManagedUser) {
     .toLowerCase();
 }
 
+async function copyTextToClipboard(value: string) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  textarea.style.left = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  try {
+    if (!document.execCommand("copy")) {
+      throw new Error("copy command rejected");
+    }
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
 function UsersContent() {
   const [items, setItems] = useState<ManagedUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -318,8 +345,13 @@ function UsersContent() {
   };
 
   const handleCopy = async (value: string) => {
+    const text = value.trim();
+    if (!text) {
+      toast.error("没有可复制的内容");
+      return;
+    }
     try {
-      await navigator.clipboard.writeText(value);
+      await copyTextToClipboard(text);
       toast.success("已复制");
     } catch {
       toast.error("复制失败");
