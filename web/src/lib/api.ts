@@ -17,11 +17,11 @@ export const IMAGE_MODEL_OPTIONS = [
   { value: "gpt-5.5", label: "gpt-5.5" },
 ] as const;
 export type ImageModel = (typeof IMAGE_MODEL_OPTIONS)[number]["value"];
-export const DEFAULT_IMAGE_MODEL: ImageModel = "auto";
+export const DEFAULT_IMAGE_MODEL: ImageModel = "gpt-image-2";
 export const DEFAULT_CHAT_MODEL: ImageModel = "auto";
 export const CODEX_IMAGE_MODEL: ImageModel = "codex-gpt-image-2";
 const IMAGE_MODEL_VALUES = new Set<string>(IMAGE_MODEL_OPTIONS.map((option) => option.value));
-const IMAGE_TASK_MODEL_VALUES = new Set<ImageModel>(["auto", "gpt-image-2", "codex-gpt-image-2"]);
+const IMAGE_TASK_MODEL_VALUES = new Set<ImageModel>(["gpt-image-2", "codex-gpt-image-2"]);
 const RESPONSE_IMAGE_TOOL_MODEL_VALUES = new Set<ImageModel>([
   "auto",
   "gpt-image-2",
@@ -48,9 +48,7 @@ const CHAT_MODEL_VALUES = new Set<ImageModel>([
 ]);
 export const IMAGE_TASK_MODEL_OPTIONS = IMAGE_MODEL_OPTIONS.filter((option) => IMAGE_TASK_MODEL_VALUES.has(option.value));
 export const RESPONSE_IMAGE_TOOL_MODEL_OPTIONS = IMAGE_MODEL_OPTIONS.filter((option) => RESPONSE_IMAGE_TOOL_MODEL_VALUES.has(option.value));
-export const IMAGE_CREATION_MODEL_OPTIONS = IMAGE_MODEL_OPTIONS.filter(
-  (option) => IMAGE_TASK_MODEL_VALUES.has(option.value) || RESPONSE_IMAGE_TOOL_MODEL_VALUES.has(option.value),
-);
+export const IMAGE_CREATION_MODEL_OPTIONS = IMAGE_TASK_MODEL_OPTIONS;
 export const CHAT_MODEL_OPTIONS = IMAGE_MODEL_OPTIONS.filter((option) => CHAT_MODEL_VALUES.has(option.value));
 
 export function isImageModel(value: unknown): value is ImageModel {
@@ -66,7 +64,7 @@ export function isResponseImageToolModel(value: unknown): value is ImageModel {
 }
 
 export function isImageCreationModel(value: unknown): value is ImageModel {
-  return isImageTaskModel(value) || isResponseImageToolModel(value);
+  return isImageTaskModel(value);
 }
 
 export function isChatModel(value: unknown): value is ImageModel {
@@ -74,7 +72,8 @@ export function isChatModel(value: unknown): value is ImageModel {
 }
 
 export function supportsImageQuality(model: ImageModel) {
-  return model !== CODEX_IMAGE_MODEL;
+  void model;
+  return false;
 }
 
 export type ImageQuality = "low" | "medium" | "high";
@@ -938,6 +937,7 @@ export async function updateAccount(
 }
 
 export async function generateImage(prompt: string, model?: ImageModel, size?: string, quality?: ImageQuality) {
+  void quality;
   return httpRequest<ImageResponse>(
     "/v1/images/generations",
     {
@@ -946,7 +946,6 @@ export async function generateImage(prompt: string, model?: ImageModel, size?: s
         prompt,
         ...(model ? { model } : {}),
         ...(size ? { size } : {}),
-        ...(quality ? { quality } : {}),
         n: 1,
         response_format: "b64_json",
       },
@@ -955,6 +954,7 @@ export async function generateImage(prompt: string, model?: ImageModel, size?: s
 }
 
 export async function editImage(files: File | File[], prompt: string, model?: ImageModel, size?: string, quality?: ImageQuality) {
+  void quality;
   const formData = new FormData();
   const uploadFiles = Array.isArray(files) ? files : [files];
 
@@ -967,9 +967,6 @@ export async function editImage(files: File | File[], prompt: string, model?: Im
   }
   if (size) {
     formData.append("size", size);
-  }
-  if (quality) {
-    formData.append("quality", quality);
   }
   formData.append("n", "1");
 
@@ -995,6 +992,8 @@ export async function createImageGenerationTask(
   outputFormat?: ImageOutputFormat,
   outputCompression?: number,
 ) {
+  void quality;
+  void imageResolution;
   return httpRequest<CreationTask>("/api/creation-tasks/image-generations", {
     method: "POST",
     body: {
@@ -1002,8 +1001,6 @@ export async function createImageGenerationTask(
       prompt,
       ...(model ? { model } : {}),
       ...(size ? { size } : {}),
-      ...(imageResolution ? { resolution: imageResolution, image_resolution: imageResolution } : {}),
-      ...(quality ? { quality } : {}),
       ...(outputFormat ? { output_format: outputFormat } : {}),
       ...(typeof outputCompression === "number" ? { output_compression: outputCompression } : {}),
       ...(messages?.length ? { messages } : {}),
@@ -1027,6 +1024,8 @@ export async function createResponseImageGenerationTask(
   outputFormat?: ImageOutputFormat,
   outputCompression?: number,
 ) {
+  void quality;
+  void imageResolution;
   return httpRequest<CreationTask>("/api/creation-tasks/response-image-generations", {
     method: "POST",
     body: {
@@ -1034,8 +1033,6 @@ export async function createResponseImageGenerationTask(
       prompt,
       model,
       ...(size ? { size } : {}),
-      ...(imageResolution ? { resolution: imageResolution, image_resolution: imageResolution } : {}),
-      ...(quality ? { quality } : {}),
       ...(outputFormat ? { output_format: outputFormat } : {}),
       ...(typeof outputCompression === "number" ? { output_compression: outputCompression } : {}),
       ...(messages?.length ? { messages } : {}),
@@ -1060,6 +1057,8 @@ export async function createImageEditTask(
   outputFormat?: ImageOutputFormat,
   outputCompression?: number,
 ) {
+  void quality;
+  void imageResolution;
   const formData = new FormData();
   const uploadFiles = Array.isArray(files) ? files : [files];
 
@@ -1073,13 +1072,6 @@ export async function createImageEditTask(
   }
   if (size) {
     formData.append("size", size);
-  }
-  if (imageResolution) {
-    formData.append("resolution", imageResolution);
-    formData.append("image_resolution", imageResolution);
-  }
-  if (quality) {
-    formData.append("quality", quality);
   }
   if (outputFormat) {
     formData.append("output_format", outputFormat);

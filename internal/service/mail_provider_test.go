@@ -92,3 +92,66 @@ func TestRegisterMoEmailProviderCreatesAndReadsMailbox(t *testing.T) {
 		t.Fatalf("message metadata = %#v", message)
 	}
 }
+
+func TestRegisterResolveCloudflareTempDomain(t *testing.T) {
+	if got := registerResolveCloudflareTempDomain(" example.test ", false); got != "example.test" {
+		t.Fatalf("domain without random = %q, want example.test", got)
+	}
+	if got := registerResolveCloudflareTempDomain("example.test", true); got == "example.test" || !strings.HasSuffix(got, ".example.test") {
+		t.Fatalf("domain with random = %q, want random subdomain of example.test", got)
+	}
+	if got := registerResolveCloudflareTempDomain("*.example.test", false); got == "*.example.test" || !strings.HasSuffix(got, ".example.test") {
+		t.Fatalf("wildcard domain = %q, want random subdomain of example.test", got)
+	}
+}
+
+func TestRegisterCloudflareTempMailProviderResolvesRandomSubdomainLocally(t *testing.T) {
+	var newAddressPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/admin/new_address" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("x-admin-auth") != "admin-secret" {
+			t.Errorf("x-admin-auth = %q", r.Header.Get("x-admin-auth"))
+		}
+		if err := json.NewDecoder(r.Body).Decode(&newAddressPayload); err != nil {
+			t.Errorf("decode new address payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"address":"user@example.test","jwt":"mail-token"}`))
+	}))
+	defer server.Close()
+
+	provider, err := createRegisterMailProvider(map[string]any{
+		"request_timeout": 1,
+		"providers": []map[string]any{{
+			"type":             "cloudflare_temp_email",
+			"enable":           true,
+			"api_base":         server.URL,
+			"admin_password":   "admin-secret",
+			"domain":           []string{"example.test"},
+			"random_subdomain": true,
+		}},
+	}, "", "")
+	if err != nil {
+		t.Fatalf("createRegisterMailProvider() error = %v", err)
+	}
+	defer provider.Close()
+
+	mailbox, err := provider.CreateMailbox("user")
+	if err != nil {
+		t.Fatalf("CreateMailbox() error = %v", err)
+	}
+	if mailbox["provider"] != "cloudflare_temp_email" || mailbox["address"] != "user@example.test" || mailbox["token"] != "mail-token" {
+		t.Fatalf("mailbox = %#v", mailbox)
+	}
+	domain := newAddressPayload["domain"].(string)
+	if domain == "example.test" || !strings.HasSuffix(domain, ".example.test") {
+		t.Fatalf("payload domain = %q, want random subdomain of example.test", domain)
+	}
+	if _, ok := newAddressPayload["enableRandomSubdomain"]; ok {
+		t.Fatalf("payload should not include enableRandomSubdomain: %#v", newAddressPayload)
+	}
+}

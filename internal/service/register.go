@@ -322,6 +322,20 @@ func (w *registerWorker) close() {
 	}
 }
 
+func (w *registerWorker) resetHTTPClient() error {
+	if w.client != nil {
+		w.client.CloseIdleConnections()
+	}
+	deviceID := util.NewUUID()
+	client, err := registerHTTPClient(util.Clean(w.config["proxy"]), 60*time.Second, deviceID)
+	if err != nil {
+		return err
+	}
+	w.deviceID = deviceID
+	w.client = client
+	return nil
+}
+
 func (w *registerWorker) run(ctx context.Context) (map[string]any, error) {
 	w.step("开始创建邮箱")
 	mailbox, err := createRegisterMailbox(w.mail, "")
@@ -335,7 +349,8 @@ func (w *registerWorker) run(ctx context.Context) (map[string]any, error) {
 	w.step("邮箱创建完成: " + email)
 	password := registerRandomPassword(16)
 	firstName, lastName := registerRandomName()
-	if err := w.platformAuthorize(ctx, email); err != nil {
+	codeVerifier, codeChallenge := generateRegisterPKCE()
+	if err := w.platformAuthorizeWithPKCE(ctx, email, codeChallenge); err != nil {
 		return nil, err
 	}
 	if err := w.registerUser(ctx, email, password); err != nil {
@@ -356,10 +371,15 @@ func (w *registerWorker) run(ctx context.Context) (map[string]any, error) {
 	if err := w.validateOTP(ctx, code); err != nil {
 		return nil, err
 	}
-	if err := w.createAccount(ctx, firstName+" "+lastName, registerRandomBirthdate()); err != nil {
+	accountPayload, err := w.createAccount(ctx, firstName+" "+lastName, registerRandomBirthdate())
+	if err != nil {
 		return nil, err
 	}
-	tokens, err := w.loginAndExchangeTokens(ctx, email, password, mailbox)
+	tokens, err := w.exchangeCreatedAccountTokens(ctx, util.Clean(accountPayload["continue_url"]), codeVerifier)
+	if err != nil {
+		w.step("创建会话换取 token 失败，改用独立登录重试: " + err.Error())
+		tokens, err = w.loginAndExchangeTokens(ctx, email, password, mailbox)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -391,6 +411,9 @@ func registerResponseDetail(payload map[string]any) string {
 	if len(payload) == 0 {
 		return ""
 	}
+	if registerLooksLikeCloudflareChallenge(payload) {
+		return ": target_cloudflare_challenge"
+	}
 	data, err := json.Marshal(payload)
 	if err != nil || len(data) == 0 {
 		return ""
@@ -402,14 +425,34 @@ func registerFailedToCreateAccount(payload map[string]any) bool {
 	return util.Clean(payload["message"]) == "Failed to create account. Please try again."
 }
 
+func registerLooksLikeCloudflareChallenge(payload map[string]any) bool {
+	body := strings.ToLower(util.Clean(payload["body"]))
+	return strings.Contains(body, "just a moment") && strings.Contains(body, "challenges.cloudflare.com")
+}
+
+func registerIsInvalidStateError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "password_verify_http_409") && strings.Contains(text, `"invalid_state"`)
+}
+
 func (w *registerWorker) platformAuthorize(ctx context.Context, email string) error {
+	return w.platformAuthorizeWithPKCE(ctx, email, registerPKCEChallenge())
+}
+
+func (w *registerWorker) platformAuthorizeWithPKCE(ctx context.Context, email, codeChallenge string) error {
 	w.step("开始 platform authorize")
-	values := registerAuthorizeParams(email, w.deviceID, registerRandomToken(), registerRandomToken(), registerPKCEChallenge())
+	values := registerAuthorizeParams(email, w.deviceID, registerRandomToken(), registerRandomToken(), codeChallenge)
 	status, payload, err := w.request(ctx, http.MethodGet, registerAuthBase+"/api/accounts/authorize?"+values.Encode(), nil, w.navigateHeaders(registerPlatformBase+"/"), true)
 	if err != nil {
 		return err
 	}
 	if status != http.StatusOK {
+		if registerLooksLikeCloudflareChallenge(payload) {
+			w.step("目标站返回 Cloudflare 人机挑战，请降低注册并发、拉长间隔或更换干净代理出口")
+		}
 		return fmt.Errorf("platform_authorize_http_%d%s", status, registerAuthorizeErrorDetail(payload))
 	}
 	w.step("platform authorize 完成")
@@ -463,12 +506,12 @@ func (w *registerWorker) validateOTP(ctx context.Context, code string) error {
 	return nil
 }
 
-func (w *registerWorker) createAccount(ctx context.Context, name, birthdate string) error {
+func (w *registerWorker) createAccount(ctx context.Context, name, birthdate string) (map[string]any, error) {
 	w.step("开始创建账号资料")
 	headers := w.jsonHeaders(registerAuthBase + "/about-you")
 	token, err := w.buildSentinelToken(ctx, "oauth_create_account")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	headers["openai-sentinel-token"] = token
 	status, payload, err := w.request(ctx, http.MethodPost, registerAuthBase+"/api/accounts/create_account", map[string]any{
@@ -476,28 +519,67 @@ func (w *registerWorker) createAccount(ctx context.Context, name, birthdate stri
 		"birthdate": birthdate,
 	}, headers, true)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if status != http.StatusOK && status != http.StatusFound {
 		if registerFailedToCreateAccount(payload) {
 			w.step("创建账号失败提示: 邮箱域名很可能因滥用被封禁，请更换邮箱域名")
 		}
-		return fmt.Errorf("create_account_http_%d%s", status, registerResponseDetail(payload))
+		return nil, fmt.Errorf("create_account_http_%d%s", status, registerResponseDetail(payload))
 	}
 	w.step("创建账号资料完成")
-	return nil
+	return payload, nil
+}
+
+func (w *registerWorker) exchangeCreatedAccountTokens(ctx context.Context, continueURL, codeVerifier string) (map[string]any, error) {
+	if continueURL == "" {
+		return nil, fmt.Errorf("create_account response missing continue_url")
+	}
+	code, err := w.followConsentForCode(ctx, continueURL)
+	if err != nil {
+		return nil, err
+	}
+	if code == "" {
+		return nil, fmt.Errorf("created account callback code not found")
+	}
+	return w.exchangeRegisterCodeForTokens(ctx, code, codeVerifier)
 }
 
 func (w *registerWorker) loginAndExchangeTokens(ctx context.Context, email, password string, mailbox map[string]any) (map[string]any, error) {
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			w.step("登录会话失效，正在重建会话后重试")
+			if err := w.resetHTTPClient(); err != nil {
+				return nil, err
+			}
+			time.Sleep(time.Duration(2+mathrand.Intn(3)) * time.Second)
+		}
+		tokens, err := w.loginAndExchangeTokensOnce(ctx, email, password, mailbox)
+		if err == nil {
+			return tokens, nil
+		}
+		lastErr = err
+		if !registerIsInvalidStateError(err) {
+			break
+		}
+	}
+	return nil, lastErr
+}
+
+func (w *registerWorker) loginAndExchangeTokensOnce(ctx context.Context, email, password string, mailbox map[string]any) (map[string]any, error) {
 	w.step("开始独立登录换 token")
 	codeVerifier, codeChallenge := generateRegisterPKCE()
 	values := registerAuthorizeParams(email, w.deviceID, registerRandomToken(), registerRandomToken(), codeChallenge)
-	status, _, err := w.request(ctx, http.MethodGet, registerAuthBase+"/api/accounts/authorize?"+values.Encode(), nil, w.navigateHeaders(registerPlatformBase+"/"), true)
+	status, payload, err := w.request(ctx, http.MethodGet, registerAuthBase+"/api/accounts/authorize?"+values.Encode(), nil, w.navigateHeaders(registerPlatformBase+"/"), true)
 	if err != nil {
 		return nil, err
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("platform_login_authorize_http_%d", status)
+		if registerLooksLikeCloudflareChallenge(payload) {
+			w.step("目标站返回 Cloudflare 人机挑战，请降低注册并发、拉长间隔或更换干净代理出口")
+		}
+		return nil, fmt.Errorf("platform_login_authorize_http_%d%s", status, registerResponseDetail(payload))
 	}
 	w.step("登录 authorize 完成")
 	headers := w.jsonHeaders(registerAuthBase + "/log-in/password")
@@ -506,14 +588,14 @@ func (w *registerWorker) loginAndExchangeTokens(ctx context.Context, email, pass
 		return nil, err
 	}
 	headers["openai-sentinel-token"] = token
-	status, payload, err := w.request(ctx, http.MethodPost, registerAuthBase+"/api/accounts/password/verify", map[string]any{
+	status, payload, err = w.request(ctx, http.MethodPost, registerAuthBase+"/api/accounts/password/verify", map[string]any{
 		"password": password,
 	}, headers, false)
 	if err != nil {
 		return nil, err
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("password_verify_http_%d", status)
+		return nil, fmt.Errorf("password_verify_http_%d%s", status, registerResponseDetail(payload))
 	}
 	w.step("密码校验完成")
 	continueURL := util.Clean(payload["continue_url"])
@@ -546,6 +628,10 @@ func (w *registerWorker) loginAndExchangeTokens(ctx context.Context, email, pass
 	if code == "" {
 		return nil, fmt.Errorf("token exchange callback code not found")
 	}
+	return w.exchangeRegisterCodeForTokens(ctx, code, codeVerifier)
+}
+
+func (w *registerWorker) exchangeRegisterCodeForTokens(ctx context.Context, code, codeVerifier string) (map[string]any, error) {
 	status, tokenPayload, err := w.requestForm(ctx, registerAuthBase+"/oauth/token", url.Values{
 		"grant_type":    []string{"authorization_code"},
 		"code":          []string{code},

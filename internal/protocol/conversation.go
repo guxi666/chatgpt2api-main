@@ -83,7 +83,7 @@ func (r ConversationRequest) Normalized() ConversationRequest {
 		}
 		r.OutputCompression = &compression
 	}
-	r.RequirePaidAccount = r.RequirePaidAccount || RequiresPaidImageSize(r.Size)
+	r.RequirePaidAccount = false
 	return r
 }
 
@@ -1214,9 +1214,7 @@ func ResolveImageSizeWithResolution(size, resolution string) string {
 }
 
 func RequiresPaidImageSize(size string) bool {
-	size = NormalizeImageGenerationSize(size)
-	width, height, ok := imageSizeDimensions(size)
-	return ok && width*height > maxFreeGeneratePixels
+	return false
 }
 
 func imageSizeDimensions(size string) (int, int, bool) {

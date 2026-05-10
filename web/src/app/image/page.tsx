@@ -637,7 +637,8 @@ function usesReferenceImages(mode: ImageConversationMode) {
 }
 
 function usesResponseImageTaskModel(model: ImageModel) {
-  return isResponseImageToolModel(model);
+  void model;
+  return false;
 }
 
 function isMissingBatchImageDataError(error?: string) {
@@ -659,7 +660,9 @@ function getComposerConversationMode(composerMode: ComposerMode, referenceImages
 }
 
 function imageQualityForModel(model: ImageModel, quality: ImageQuality) {
-  return supportsImageQuality(model) ? quality : undefined;
+  void model;
+  void quality;
+  return undefined;
 }
 
 function buildCreationTaskMessages(conversation: ImageConversation, activeTurnId: string): CreationTaskMessage[] {

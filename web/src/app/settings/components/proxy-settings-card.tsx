@@ -1,41 +1,63 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link2, LoaderCircle, PlugZap, Save } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { testProxy, type ProxyTestResult } from "@/lib/api";
+import { testProxy, updateProxy, type ProxyTestResult } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 import { useSettingsStore } from "../store";
+import {
+  SettingsCard,
+  SettingsNotice,
+  settingsInlineCodeClassName,
+  settingsInputClassName,
+} from "./settings-ui";
+
+const SOCKS5_EXAMPLES = [
+  "socks5h://127.0.0.1:10808",
+  "socks5://127.0.0.1:10808",
+  "socks5h://user:pass@127.0.0.1:10808",
+] as const;
+
+function isSocksProxy(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return normalized.startsWith("socks5://") || normalized.startsWith("socks5h://");
+}
 
 export function ProxySettingsCard() {
   const [isTesting, setIsTesting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [testResult, setTestResult] = useState<ProxyTestResult | null>(null);
   const config = useSettingsStore((state) => state.config);
   const isLoadingConfig = useSettingsStore((state) => state.isLoadingConfig);
-  const isSavingConfig = useSettingsStore((state) => state.isSavingConfig);
   const setProxy = useSettingsStore((state) => state.setProxy);
-  const saveConfig = useSettingsStore((state) => state.saveConfig);
 
-  const proxy = config?.proxy ?? "";
+  const proxy = String(config?.proxy ?? "");
+  const trimmedProxy = proxy.trim();
+  const proxyStatus = useMemo(() => {
+    if (!trimmedProxy) return "未配置";
+    if (isSocksProxy(trimmedProxy)) return "SOCKS5 已配置";
+    return "HTTP 代理已配置";
+  }, [trimmedProxy]);
 
   const handleTest = async () => {
-    const candidate = proxy.trim();
-    if (!candidate) {
+    if (!trimmedProxy) {
       toast.error("请先填写代理地址");
       return;
     }
     setIsTesting(true);
     setTestResult(null);
     try {
-      const data = await testProxy(candidate);
+      const data = await testProxy(trimmedProxy);
       setTestResult(data.result);
       if (data.result.ok) {
-        toast.success(`代理可用（${data.result.latency_ms} ms，HTTP ${data.result.status}）`);
+        toast.success(`代理可用：${data.result.latency_ms} ms，HTTP ${data.result.status}`);
       } else {
         toast.error(`代理不可用：${data.result.error ?? "未知错误"}`);
       }
@@ -46,82 +68,117 @@ export function ProxySettingsCard() {
     }
   };
 
-  return (
-    <Card>
-      <CardContent className="space-y-6 p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-xl bg-stone-100">
-              <Link2 className="size-5 text-stone-600" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold tracking-tight">全局代理</h2>
-              <p className="text-sm text-stone-500">为系统中的出站请求配置统一代理，保存后会立即生效。</p>
-            </div>
-          </div>
-          <Badge variant={proxy.trim() ? "success" : "secondary"} className="w-fit rounded-md px-2.5 py-1">
-            {proxy.trim() ? "已配置" : "未配置"}
-          </Badge>
-        </div>
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const data = await updateProxy({ url: trimmedProxy });
+      setProxy(data.proxy.url || "");
+      toast.success(trimmedProxy ? "代理配置已保存" : "已清空代理配置");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存代理失败");
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
-        {isLoadingConfig ? (
-          <div className="flex items-center justify-center py-10">
-            <LoaderCircle className="size-5 animate-spin text-stone-400" />
-          </div>
-        ) : (
-          <>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-stone-700">代理地址</label>
-              <Input
-                value={proxy}
-                onChange={(event) => {
-                  setProxy(event.target.value);
+  return (
+    <SettingsCard
+      icon={Link2}
+      title="SOCKS5 出站代理"
+      tone="slate"
+      meta={
+        <Badge variant={trimmedProxy ? "success" : "secondary"} className="rounded-md px-2.5 py-1">
+          {proxyStatus}
+        </Badge>
+      }
+      action={
+        <Button size="lg" onClick={() => void handleSave()} disabled={isSaving || isLoadingConfig}>
+          {isSaving ? (
+            <LoaderCircle data-icon="inline-start" className="animate-spin" />
+          ) : (
+            <Save data-icon="inline-start" />
+          )}
+          保存代理
+        </Button>
+      }
+    >
+      {isLoadingConfig ? (
+        <div className="flex items-center justify-center py-10">
+          <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="settings-socks5-proxy">代理地址</FieldLabel>
+            <Input
+              id="settings-socks5-proxy"
+              value={proxy}
+              onChange={(event) => {
+                setProxy(event.target.value);
+                setTestResult(null);
+              }}
+              placeholder="socks5h://127.0.0.1:10808"
+              className={settingsInputClassName}
+            />
+          </Field>
+
+          <div className="grid gap-2 sm:grid-cols-3">
+            {SOCKS5_EXAMPLES.map((example) => (
+              <Button
+                key={example}
+                type="button"
+                variant="outline"
+                className="h-auto justify-start whitespace-normal rounded-[13px] px-3 py-2 text-left font-mono text-xs"
+                onClick={() => {
+                  setProxy(example);
                   setTestResult(null);
                 }}
-                placeholder="http://user:pass@127.0.0.1:7890"
-                className="h-11 rounded-xl border-stone-200 bg-white"
-              />
-              <p className="text-sm text-stone-500">
-                留空表示不使用代理。请按完整地址填写，例如 `http://127.0.0.1:7890`、`http://用户名:密码@127.0.0.1:7890` 或 `socks5://127.0.0.1:7890`。
-              </p>
-            </div>
-
-            {testResult ? (
-              <div
-                className={`rounded-xl border px-4 py-3 text-sm leading-6 ${
-                  testResult.ok
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                    : "border-rose-200 bg-rose-50 text-rose-800"
-                }`}
               >
-                {testResult.ok
-                  ? `代理可用：HTTP ${testResult.status}，用时 ${testResult.latency_ms} ms`
-                  : `代理不可用：${testResult.error ?? "未知错误"}（用时 ${testResult.latency_ms} ms）`}
-              </div>
-            ) : null}
-
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                className="h-10 rounded-xl border-stone-200 bg-white px-5 text-stone-700"
-                onClick={() => void handleTest()}
-                disabled={isTesting || isLoadingConfig}
-              >
-                {isTesting ? <LoaderCircle className="size-4 animate-spin" /> : <PlugZap className="size-4" />}
-                测试代理
+                {example}
               </Button>
-              <Button
-                className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800"
-                onClick={() => void saveConfig()}
-                disabled={isSavingConfig}
-              >
-                {isSavingConfig ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
-                保存配置
-              </Button>
+            ))}
+          </div>
+
+          <SettingsNotice>
+            支持 <span className={settingsInlineCodeClassName}>socks5://</span>、
+            <span className={settingsInlineCodeClassName}>socks5h://</span>、
+            <span className={settingsInlineCodeClassName}>http://</span> 和
+            <span className={settingsInlineCodeClassName}>https://</span>。推荐使用
+            <span className={settingsInlineCodeClassName}>socks5h://</span>，这样域名解析也会交给代理端处理。
+          </SettingsNotice>
+
+          {testResult ? (
+            <div
+              className={cn(
+                "rounded-[13px] border px-3 py-2 text-xs leading-5",
+                testResult.ok
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-rose-200 bg-rose-50 text-rose-800",
+              )}
+            >
+              {testResult.ok
+                ? `代理可用：HTTP ${testResult.status}，用时 ${testResult.latency_ms} ms`
+                : `代理不可用：${testResult.error ?? "未知错误"}，用时 ${testResult.latency_ms} ms`}
             </div>
-          </>
-        )}
-      </CardContent>
-    </Card>
+          ) : null}
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleTest()}
+              disabled={isTesting || isLoadingConfig || !trimmedProxy}
+            >
+              {isTesting ? (
+                <LoaderCircle data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <PlugZap data-icon="inline-start" />
+              )}
+              测试代理
+            </Button>
+          </div>
+        </div>
+      )}
+    </SettingsCard>
   );
 }

@@ -14,6 +14,7 @@ import { ImportBrowserDialog } from "./components/import-browser-dialog";
 import { LogGovernanceCard } from "./components/log-governance-card";
 import { LoginPageImageCard } from "./components/login-page-image-card";
 import { PaymentSettingsCard } from "./components/payment-settings-card";
+import { ProxySettingsCard } from "./components/proxy-settings-card";
 import { SiteBrandCard } from "./components/site-brand-card";
 import { SettingsHeader } from "./components/settings-header";
 import { Sub2APIConnections } from "./components/sub2api-connections";
@@ -63,6 +64,9 @@ function AdminSettingsPageContent() {
       <section className="columns-1 gap-5 md:columns-2">
         <SettingsMasonryItem>
           <ConfigCard />
+        </SettingsMasonryItem>
+        <SettingsMasonryItem>
+          <ProxySettingsCard />
         </SettingsMasonryItem>
         <SettingsMasonryItem>
           <SiteBrandCard />

@@ -46,7 +46,7 @@ func (e *Engine) HandleImageGenerations(ctx context.Context, body map[string]any
 	outputCompression, hasOutputCompression := normalizedImageOutputCompression(body["output_compression"])
 	responseFormat := firstNonEmpty(util.Clean(body["response_format"]), "b64_json")
 	baseURL := util.Clean(body["base_url"])
-	request := ConversationRequest{Prompt: prompt, Model: model, Messages: NormalizeMessages(util.AsMapSlice(body["messages"]), nil), N: n, Size: size, Quality: quality, OutputFormat: outputFormat, ResponseFormat: responseFormat, BaseURL: baseURL, OwnerID: util.Clean(body["owner_id"]), OwnerName: util.Clean(body["owner_name"]), MessageAsError: true, RequirePaidAccount: RequiresPaidImageSize(size)}
+	request := ConversationRequest{Prompt: prompt, Model: model, Messages: NormalizeMessages(util.AsMapSlice(body["messages"]), nil), N: n, Size: size, Quality: quality, OutputFormat: outputFormat, ResponseFormat: responseFormat, BaseURL: baseURL, OwnerID: util.Clean(body["owner_id"]), OwnerName: util.Clean(body["owner_name"]), MessageAsError: true}
 	if hasOutputCompression {
 		request.OutputCompression = &outputCompression
 	}
@@ -66,20 +66,19 @@ func (e *Engine) HandleImageEdits(ctx context.Context, body map[string]any, imag
 	}
 	size := bodyResolvedImageSize(body)
 	request := ConversationRequest{
-		Prompt:             util.Clean(body["prompt"]),
-		Model:              firstNonEmpty(util.Clean(body["model"]), util.ImageModelAuto),
-		N:                  util.ToInt(body["n"], 1),
-		Size:               size,
-		Quality:            util.Clean(body["quality"]),
-		OutputFormat:       NormalizeImageOutputFormat(util.Clean(body["output_format"])),
-		ResponseFormat:     firstNonEmpty(util.Clean(body["response_format"]), "b64_json"),
-		BaseURL:            util.Clean(body["base_url"]),
-		OwnerID:            util.Clean(body["owner_id"]),
-		OwnerName:          util.Clean(body["owner_name"]),
-		Messages:           NormalizeMessages(util.AsMapSlice(body["messages"]), nil),
-		Images:             encoded,
-		MessageAsError:     true,
-		RequirePaidAccount: RequiresPaidImageSize(size),
+		Prompt:         util.Clean(body["prompt"]),
+		Model:          firstNonEmpty(util.Clean(body["model"]), util.ImageModelAuto),
+		N:              util.ToInt(body["n"], 1),
+		Size:           size,
+		Quality:        util.Clean(body["quality"]),
+		OutputFormat:   NormalizeImageOutputFormat(util.Clean(body["output_format"])),
+		ResponseFormat: firstNonEmpty(util.Clean(body["response_format"]), "b64_json"),
+		BaseURL:        util.Clean(body["base_url"]),
+		OwnerID:        util.Clean(body["owner_id"]),
+		OwnerName:      util.Clean(body["owner_name"]),
+		Messages:       NormalizeMessages(util.AsMapSlice(body["messages"]), nil),
+		Images:         encoded,
+		MessageAsError: true,
 	}
 	if compression, ok := normalizedImageOutputCompression(body["output_compression"]); ok {
 		request.OutputCompression = &compression
@@ -227,7 +226,7 @@ func (e *Engine) ImageChatResponse(ctx context.Context, body map[string]any) (ma
 		return nil, nil, err
 	}
 	size := bodyResolvedImageSize(body)
-	request := ConversationRequest{Prompt: prompt, Model: model, Messages: messages, N: n, Size: size, Quality: util.Clean(body["quality"]), ResponseFormat: "b64_json", OwnerID: util.Clean(body["owner_id"]), OwnerName: util.Clean(body["owner_name"]), Images: EncodeImages(images), RequirePaidAccount: RequiresPaidImageSize(size)}
+	request := ConversationRequest{Prompt: prompt, Model: model, Messages: messages, N: n, Size: size, Quality: util.Clean(body["quality"]), ResponseFormat: "b64_json", OwnerID: util.Clean(body["owner_id"]), OwnerName: util.Clean(body["owner_name"]), Images: EncodeImages(images)}
 	applyImageOutputOptionsToRequest(&request, ImageOutputOptionsFromPayload(body))
 	outputs, errCh := e.StreamImageOutputsWithPool(ctx, request.Normalized())
 	result, err := e.CollectImageOutputs(outputs, errCh)
@@ -249,7 +248,7 @@ func (e *Engine) ImageChatEvents(ctx context.Context, body map[string]any) (<-ch
 			return
 		}
 		size := bodyResolvedImageSize(body)
-		request := ConversationRequest{Prompt: prompt, Model: model, Messages: messages, N: n, Size: size, Quality: util.Clean(body["quality"]), ResponseFormat: "b64_json", OwnerID: util.Clean(body["owner_id"]), OwnerName: util.Clean(body["owner_name"]), Images: EncodeImages(images), RequirePaidAccount: RequiresPaidImageSize(size)}
+		request := ConversationRequest{Prompt: prompt, Model: model, Messages: messages, N: n, Size: size, Quality: util.Clean(body["quality"]), ResponseFormat: "b64_json", OwnerID: util.Clean(body["owner_id"]), OwnerName: util.Clean(body["owner_name"]), Images: EncodeImages(images)}
 		applyImageOutputOptionsToRequest(&request, ImageOutputOptionsFromPayload(body))
 		outputs, errCh := e.StreamImageOutputsWithPool(ctx, request.Normalized())
 		id := "chatcmpl-" + util.NewHex(32)
@@ -566,7 +565,6 @@ func ResponseImageGenerationRequest(body map[string]any, scope string, previous 
 		OwnerID:            scope,
 		OwnerName:          util.Clean(body["owner_name"]),
 		Images:             images,
-		RequirePaidAccount: RequiresPaidImageSize(size),
 		ResponsesImageTool: true,
 	}
 	if outputFormat != "png" {

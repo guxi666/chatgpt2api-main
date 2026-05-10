@@ -213,7 +213,6 @@ export function isImageResolution(value: unknown): value is ImageResolution {
 export function buildImageSize({
   mode,
   aspectRatio,
-  resolution,
   customRatio,
   customWidth,
   customHeight,
@@ -228,13 +227,7 @@ export function buildImageSize({
   if (aspectRatio === CUSTOM_IMAGE_ASPECT_RATIO && !activeAspectRatio) {
     return "";
   }
-  if (resolution === "auto") {
-    return activeAspectRatio;
-  }
-  if (!activeAspectRatio) {
-    return calculateImageSize(resolution, "1:1");
-  }
-  return calculateImageSize(resolution, activeAspectRatio) || activeAspectRatio;
+  return activeAspectRatio;
 }
 
 export function getImageAspectRatioFromSize(size: string): ImageAspectRatio {

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import {
   ArrowUp,
   Bot,
@@ -33,7 +33,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   CUSTOM_IMAGE_ASPECT_RATIO,
   IMAGE_ASPECT_RATIO_OPTIONS,
-  IMAGE_RESOLUTION_OPTIONS,
   IMAGE_SIZE_MODE_OPTIONS,
   buildImageSize,
   formatImageSizeDisplay,
@@ -162,7 +161,6 @@ export function ImageComposer({
   onImageModelChange,
   onImageSizeModeChange,
   onImageAspectRatioChange,
-  onImageResolutionChange,
   onImageCustomRatioChange,
   onImageCustomWidthChange,
   onImageCustomHeightChange,
@@ -203,8 +201,6 @@ export function ImageComposer({
     imageAspectRatio === CUSTOM_IMAGE_ASPECT_RATIO
       ? imageCustomRatio.trim() || "自定义比例"
       : IMAGE_ASPECT_RATIO_OPTIONS.find((option) => option.value === imageAspectRatio)?.label || "Auto";
-  const imageResolutionLabel =
-    IMAGE_RESOLUTION_OPTIONS.find((option) => option.value === imageResolution)?.label || "Auto";
   const imageQualityLabel =
     imageQualityOptions.find((option) => option.value === imageQuality)?.label || imageQuality;
   const imageOutputFormatLabel =
@@ -872,7 +868,7 @@ export function ImageComposer({
                               ref={resolutionMenuRef}
                               className="relative flex h-9 min-w-0 items-center justify-between gap-1.5 rounded-full border border-[#e5e7eb] bg-white px-2.5 text-[11px] dark:border-border dark:bg-background/70"
                             >
-                              <span className="shrink-0 font-medium text-[#45515e] dark:text-muted-foreground">分辨率</span>
+                              <span className="shrink-0 font-medium text-[#45515e] dark:text-muted-foreground">模型</span>
                               <button
                                 type="button"
                                 className="flex h-7 min-w-0 flex-1 items-center justify-end gap-1 bg-transparent text-right text-xs font-semibold text-[#18181b] dark:text-foreground"
@@ -883,13 +879,13 @@ export function ImageComposer({
                                   setIsQualityMenuOpen(false);
                                 }}
                               >
-                                <span className="truncate">{imageResolutionLabel}</span>
+                                <span className="truncate">{imageModelLabel}</span>
                                 <ChevronDown className={cn("size-4 shrink-0 opacity-60 transition", isResolutionMenuOpen && "rotate-180")} />
                               </button>
                               {isResolutionMenuOpen ? (
                                 <div className="absolute bottom-[calc(100%+0.5rem)] left-0 z-[90] hidden max-h-[14rem] w-[min(12rem,calc(100vw-3rem))] overflow-y-auto rounded-[16px] border border-[#e5e7eb] bg-white p-1.5 shadow-[0_18px_46px_-26px_rgba(15,23,42,0.35)] dark:border-border dark:bg-card dark:shadow-[0_18px_46px_-24px_rgba(0,0,0,0.72)] sm:block">
-                                  {IMAGE_RESOLUTION_OPTIONS.map((option) => {
-                                    const active = option.value === imageResolution;
+                                  {imageModelOptions.map((option) => {
+                                    const active = option.value === imageModel;
                                     return (
                                       <button
                                         key={option.value}
@@ -899,7 +895,7 @@ export function ImageComposer({
                                           active && "bg-black/[0.05] font-medium text-[#18181b] dark:bg-accent dark:text-foreground",
                                         )}
                                         onClick={() => {
-                                          onImageResolutionChange(option.value);
+                                          onImageModelChange(option.value);
                                           setIsResolutionMenuOpen(false);
                                         }}
                                       >
@@ -916,8 +912,8 @@ export function ImageComposer({
                                 className="col-span-2 grid max-h-[13rem] overflow-y-auto rounded-[16px] border border-[#e5e7eb] bg-white p-1.5 dark:border-border dark:bg-background/70 sm:hidden"
                                 onMouseDown={(event) => event.stopPropagation()}
                               >
-                                {IMAGE_RESOLUTION_OPTIONS.map((option) => {
-                                  const active = option.value === imageResolution;
+                                {imageModelOptions.map((option) => {
+                                  const active = option.value === imageModel;
                                   return (
                                     <button
                                       key={option.value}
@@ -927,7 +923,7 @@ export function ImageComposer({
                                         active && "bg-black/[0.05] font-medium text-[#18181b] dark:bg-accent dark:text-foreground",
                                       )}
                                       onClick={() => {
-                                        onImageResolutionChange(option.value);
+                                        onImageModelChange(option.value);
                                         setIsResolutionMenuOpen(false);
                                       }}
                                     >

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useRef, useState } from "react";
 import { Check, CircleStop, Clock3, Download, Eye, Globe2, LoaderCircle, Lock, PencilLine, Plus, RotateCcw, Sparkles } from "lucide-react";
@@ -529,9 +529,6 @@ export function ImageResults({
                         <span className="rounded-full bg-[#f0f0f0] px-3 py-1">目标 {turn.count} 张</span>
                       ) : null}
                       {resultSizeLabel ? <span className="rounded-full bg-[#f0f0f0] px-3 py-1">{resultSizeLabel}</span> : null}
-                      {turn.quality ? (
-                        <span className="rounded-full bg-[#f0f0f0] px-3 py-1">Quality {turn.quality}</span>
-                      ) : null}
                       {turn.outputFormat ? (
                         <span className="rounded-full bg-[#f0f0f0] px-3 py-1">{turn.outputFormat.toUpperCase()}</span>
                       ) : null}
@@ -756,7 +753,7 @@ export function ImageResults({
                           className="mb-3 inline-flex h-[160px] w-full break-inside-avoid flex-col overflow-hidden rounded-[18px] border border-rose-200 bg-rose-50 sm:mb-4"
                         >
                           <div className="flex min-h-0 flex-1 items-center justify-center whitespace-pre-line px-4 py-3 text-center text-sm leading-6 text-rose-600 sm:px-5">
-                            {image.error || "生成失败"}
+                            {normalizeImageError(image.error) || "生成失败"}
                           </div>
                           <div className="flex justify-end border-t border-rose-100 bg-white/70 px-3 py-2.5">
                             <Button
@@ -883,6 +880,16 @@ function getTurnOutcomeLabel(successCount: number, failedCount: number, cancelle
     parts.push(`终止 ${cancelledCount}`);
   }
   return parts.join(" / ");
+}
+
+function normalizeImageError(error?: string) {
+  if (!error) {
+    return "";
+  }
+  if (error.includes("Paid") && (error.includes("1K/2K/4K") || error.includes("高分辨率"))) {
+    return "生成失败，请点击重试";
+  }
+  return error;
 }
 
 function getTurnModeLabel(turn: ImageTurn) {

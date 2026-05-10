@@ -30,13 +30,13 @@ assert.equal(calculateImageSize("4k", "10:1"), "1408x480");
 assert.equal(buildCustomImageSize("999", "777"), "992x784");
 assert.equal(
   buildImageSize(ratioSelection({ aspectRatio: CUSTOM_IMAGE_ASPECT_RATIO })),
-  "2048x864",
+  "2.39:1",
 );
 assert.equal(
   buildImageSize(ratioSelection({ aspectRatio: CUSTOM_IMAGE_ASPECT_RATIO, customRatio: "invalid" })),
   "",
 );
-assert.equal(buildImageSize(ratioSelection({ aspectRatio: "", resolution: "4k" })), "4096x4096");
+assert.equal(buildImageSize(ratioSelection({ aspectRatio: "", resolution: "4k" })), "");
 assert.deepEqual(getImageSizeSelectionFromSize("2.39:1"), {
   mode: "ratio",
   aspectRatio: CUSTOM_IMAGE_ASPECT_RATIO,

@@ -23,6 +23,15 @@ func registerErrorJSONResponse(req *http.Request, status int, body string) *http
 	}
 }
 
+func registerErrorHTMLResponse(req *http.Request, status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}
+}
+
 func testRegisterWorker(transport http.RoundTripper) (*registerWorker, *RegisterService) {
 	service := &RegisterService{subscribers: map[chan string]struct{}{}}
 	return &registerWorker{
@@ -46,6 +55,23 @@ func TestPlatformAuthorizeIncludesUpstreamErrorDetail(t *testing.T) {
 		t.Fatal("platformAuthorize() returned nil error")
 	}
 	if got := err.Error(); !strings.Contains(got, "platform_authorize_http_403: country_blocked - not allowed") {
+		t.Fatalf("platformAuthorize() error = %q", got)
+	}
+}
+
+func TestPlatformAuthorizeCloudflareChallengeUsesShortDetail(t *testing.T) {
+	worker, _ := testRegisterWorker(registerErrorRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/api/accounts/authorize" {
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+		}
+		return registerErrorHTMLResponse(req, http.StatusForbidden, `<!DOCTYPE html><title>Just a moment...</title><script src="https://challenges.cloudflare.com/test"></script>`), nil
+	}))
+
+	err := worker.platformAuthorize(context.Background(), "user@example.test")
+	if err == nil {
+		t.Fatal("platformAuthorize() returned nil error")
+	}
+	if got := err.Error(); got != "platform_authorize_http_403: target_cloudflare_challenge" {
 		t.Fatalf("platformAuthorize() error = %q", got)
 	}
 }
@@ -94,7 +120,7 @@ func TestCreateAccountIncludesResponseDetailAndDomainHint(t *testing.T) {
 		}
 	}))
 
-	err := worker.createAccount(context.Background(), "Test User", "1990-01-01")
+	_, err := worker.createAccount(context.Background(), "Test User", "1990-01-01")
 	if err == nil {
 		t.Fatal("createAccount() returned nil error")
 	}
