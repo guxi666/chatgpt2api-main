@@ -43,6 +43,7 @@ import {
   type PayType,
 } from "@/lib/api";
 import { resolveBrandAssetURL } from "@/lib/app-meta";
+import { formatBeijingDateTime } from "@/lib/datetime";
 import { useAppMeta } from "@/lib/use-app-meta";
 import { getCachedAuthSession } from "@/lib/session";
 import { getStoredSessionToken } from "@/store/auth";
@@ -128,11 +129,7 @@ function orderedTiers(tiers: AgencyTier[]) {
 }
 
 function formatDateTime(value?: string) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return formatBeijingDateTime(value);
 }
 
 function sumOrderAmountYuan(orders: AgencyCommissionOrder[]) {

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { deleteManagedImages, fetchManagedImages, type ManagedImage } from "@/lib/api";
+import { formatBeijingDateTime } from "@/lib/datetime";
 import { formatImageFileSize } from "@/lib/image-size";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 
@@ -423,7 +424,7 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
                     </div>
                     <figcaption className="space-y-1 px-3 py-2 text-xs">
                       <div className="truncate font-medium text-foreground">{item.name || item.path}</div>
-                      <div className="truncate text-muted-foreground">{item.created_at}</div>
+                      <div className="truncate text-muted-foreground">{formatBeijingDateTime(item.created_at)}</div>
                       <div className="truncate text-muted-foreground">{getManagedImageFormatLabel(item)} {imageMeta ? `| ${imageMeta}` : ""}</div>
                     </figcaption>
                   </figure>
