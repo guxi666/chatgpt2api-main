@@ -196,7 +196,14 @@ export function ImageComposer({
     () => referenceImages.map((image, index) => ({ id: `${image.name}-${index}`, src: image.dataUrl })),
     [referenceImages],
   );
-  const imageModelLabel = imageModelOptions.find((option) => option.value === imageModel)?.label || imageModel;
+  const visibleImageModelOptions = useMemo(
+    () =>
+      composerMode === "image"
+        ? imageModelOptions.filter((option) => option.value === "gpt-image-2" || option.value === "codex-gpt-image-2")
+        : imageModelOptions,
+    [composerMode, imageModelOptions],
+  );
+  const imageModelLabel = visibleImageModelOptions.find((option) => option.value === imageModel)?.label || imageModel;
   const imageAspectRatioLabel =
     imageAspectRatio === CUSTOM_IMAGE_ASPECT_RATIO
       ? imageCustomRatio.trim() || "自定义比例"
@@ -206,7 +213,7 @@ export function ImageComposer({
   const imageOutputFormatLabel =
     IMAGE_OUTPUT_FORMAT_OPTIONS.find((option) => option.value === imageOutputFormat)?.label || imageOutputFormat.toUpperCase();
   const compressionDisabled = imageOutputFormat === "png";
-  const supportsQuality = imageQualityOptions.length > 0;
+  const supportsQuality = false;
   const submitLabel = composerMode === "chat" ? "发送对话" : referenceImages.length > 0 ? "编辑图片" : "生成图片";
   const computedImageSize = useMemo(
     () =>
@@ -661,7 +668,7 @@ export function ImageComposer({
                   </button>
                   {isModelMenuOpen ? (
                     <div className="absolute bottom-[calc(100%+0.5rem)] left-0 z-[80] max-h-[45dvh] w-[min(14rem,calc(100vw-2rem))] overflow-y-auto rounded-[20px] border border-[#e5e7eb] bg-white p-1.5 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)] dark:border-border dark:bg-card dark:shadow-[0_24px_80px_-28px_rgba(0,0,0,0.72)] sm:bottom-[calc(100%+8px)] sm:w-[218px]">
-                      {imageModelOptions.map((option) => {
+                      {visibleImageModelOptions.map((option) => {
                         const active = option.value === imageModel;
                         return (
                           <button
@@ -884,7 +891,7 @@ export function ImageComposer({
                               </button>
                               {isResolutionMenuOpen ? (
                                 <div className="absolute bottom-[calc(100%+0.5rem)] left-0 z-[90] hidden max-h-[14rem] w-[min(12rem,calc(100vw-3rem))] overflow-y-auto rounded-[16px] border border-[#e5e7eb] bg-white p-1.5 shadow-[0_18px_46px_-26px_rgba(15,23,42,0.35)] dark:border-border dark:bg-card dark:shadow-[0_18px_46px_-24px_rgba(0,0,0,0.72)] sm:block">
-                                  {imageModelOptions.map((option) => {
+                                  {visibleImageModelOptions.map((option) => {
                                     const active = option.value === imageModel;
                                     return (
                                       <button
@@ -912,7 +919,7 @@ export function ImageComposer({
                                 className="col-span-2 grid max-h-[13rem] overflow-y-auto rounded-[16px] border border-[#e5e7eb] bg-white p-1.5 dark:border-border dark:bg-background/70 sm:hidden"
                                 onMouseDown={(event) => event.stopPropagation()}
                               >
-                                {imageModelOptions.map((option) => {
+                                {visibleImageModelOptions.map((option) => {
                                   const active = option.value === imageModel;
                                   return (
                                     <button

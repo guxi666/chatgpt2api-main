@@ -31,12 +31,9 @@ export type ImageSizeMode = (typeof IMAGE_SIZE_MODE_OPTIONS)[number]["value"];
 
 export const IMAGE_RESOLUTION_OPTIONS = [
   { value: "auto", label: "Auto" },
-  { value: "1k", label: "1K" },
-  { value: "2k", label: "2K" },
-  { value: "4k", label: "4K" },
 ] as const;
 
-export type ImageResolution = (typeof IMAGE_RESOLUTION_OPTIONS)[number]["value"];
+export type ImageResolution = "auto" | "1k" | "2k" | "4k";
 
 export type ImageSizeSelection = {
   mode: ImageSizeMode;
