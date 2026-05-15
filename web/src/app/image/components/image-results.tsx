@@ -41,6 +41,7 @@ type ImageResultsProps = {
   progressByTurnKey: Record<string, ImageTurnProgress>;
   progressNow: number;
   promptPresets: readonly ImagePromptPreset[];
+  canEditPromptTemplates: boolean;
   onUpdatePromptPreset: (preset: ImagePromptPreset) => void;
   onOpenLightbox: (images: ImageLightboxItem[], index: number) => void;
   onApplyPromptPreset: (preset: ImagePromptPreset) => void | Promise<void>;
@@ -213,6 +214,7 @@ export function ImageResults({
   progressByTurnKey,
   progressNow,
   promptPresets,
+  canEditPromptTemplates,
   onUpdatePromptPreset,
   onOpenLightbox,
   onApplyPromptPreset,
@@ -372,16 +374,18 @@ export function ImageResults({
                   <div className="line-clamp-2 text-sm leading-6 text-[#45515e]">{preset.hint}</div>
                   <div className="flex items-center justify-between border-t border-[#f2f3f5] pt-2">
                     <span className="text-xs font-medium text-[#1456f0]">套用这个预设</span>
-                    <button
-                      type="button"
-                      className="text-xs text-[#45515e] hover:text-[#1456f0]"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openPresetEditor(preset);
-                      }}
-                    >
-                      编辑后套用
-                    </button>
+                    {canEditPromptTemplates ? (
+                      <button
+                        type="button"
+                        className="text-xs text-[#45515e] hover:text-[#1456f0]"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openPresetEditor(preset);
+                        }}
+                      >
+                        编辑后套用
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </button>

@@ -912,7 +912,7 @@ async function recoverConversationHistory(items: ImageConversation[]) {
 }
 
 
-function ImagePageContent() {
+function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: boolean }) {
   const isSubmitDispatchingRef = useRef(false);
   const retryingImageIdsRef = useRef(new Set<string>());
   const cancelledTurnIdsRef = useRef(new Set<string>());
@@ -3021,6 +3021,7 @@ function ImagePageContent() {
               progressByTurnKey={progressByTurnKey}
               progressNow={progressNow}
               promptPresets={promptPresets}
+              canEditPromptTemplates={canEditPromptTemplates}
               onUpdatePromptPreset={handleUpdatePromptPreset}
               onOpenLightbox={openLightbox}
               onApplyPromptPreset={handleApplyPromptPreset}
@@ -3092,6 +3093,7 @@ function ImagePageContent() {
 
       <ImagePromptMarket
         open={isPromptMarketOpen}
+        canEditTemplates={canEditPromptTemplates}
         onOpenChange={setIsPromptMarketOpen}
         onApplyPrompt={handleApplyMarketPrompt}
       />
@@ -3139,5 +3141,5 @@ export default function ImagePage() {
     );
   }
 
-  return <ImagePageContent />;
+  return <ImagePageContent canEditPromptTemplates={session.role === "admin"} />;
 }

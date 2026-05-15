@@ -53,6 +53,7 @@ type PromptMarketFavoriteFilter = "all" | "favorites";
 
 type ImagePromptMarketProps = {
   open: boolean;
+  canEditTemplates: boolean;
   onOpenChange: (open: boolean) => void;
   onApplyPrompt: (prompt: BananaPrompt) => void | Promise<void>;
 };
@@ -190,7 +191,7 @@ function applyPromptMarketOverrides(prompts: BananaPrompt[]) {
   return prompts.map((prompt) => applyPromptMarketOverride(prompt, overrides.get(prompt.id)));
 }
 
-export function ImagePromptMarket({ open, onOpenChange, onApplyPrompt }: ImagePromptMarketProps) {
+export function ImagePromptMarket({ open, canEditTemplates, onOpenChange, onApplyPrompt }: ImagePromptMarketProps) {
   const [prompts, setPrompts] = useState<BananaPrompt[]>([]);
   const [favoriteItems, setFavoriteItems] = useState<PromptFavorite[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -460,6 +461,9 @@ export function ImagePromptMarket({ open, onOpenChange, onApplyPrompt }: ImagePr
   };
 
   const openEditPrompt = (prompt: BananaPrompt) => {
+    if (!canEditTemplates) {
+      return;
+    }
     setEditingPrompt(prompt);
     setEditingTitle(prompt.title);
     setEditingContent(prompt.prompt);
@@ -864,15 +868,17 @@ export function ImagePromptMarket({ open, onOpenChange, onApplyPrompt }: ImagePr
                         <p className="line-clamp-4 text-sm leading-6 text-[#45515e]">{localizedPrompt.prompt}</p>
                         <div className="mt-auto flex justify-end border-t border-[#f2f3f5] pt-3">
                           <div className="flex items-center gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-8 rounded-full px-3 text-xs"
-                              onClick={() => openEditPrompt(localizedPrompt)}
-                            >
-                              编辑后套用
-                            </Button>
+                            {canEditTemplates ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 rounded-full px-3 text-xs"
+                                onClick={() => openEditPrompt(localizedPrompt)}
+                              >
+                                编辑后套用
+                              </Button>
+                            ) : null}
                             <Button
                               type="button"
                               size="sm"
