@@ -24,6 +24,7 @@ import { parseDateTime } from "@/lib/datetime";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 
 const PAY_ORDER_PENDING_TIMEOUT_MS = 30 * 60 * 1000;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 
 function centsToYuan(cents: number) {
   return (Math.max(0, cents) / 100).toFixed(2);
@@ -117,6 +118,10 @@ function WalletPageContent() {
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
   const [imagePriceCents, setImagePriceCents] = useState(8);
   const [orders, setOrders] = useState<PayOrder[]>([]);
+  const [orderTypeFilter, setOrderTypeFilter] = useState<"all" | "recharge" | "consume">("all");
+  const [orderStatusFilter, setOrderStatusFilter] = useState<"all" | "pending" | "paid" | "failed">("all");
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [page, setPage] = useState(1);
   const [latestOrder, setLatestOrder] = useState<PayOrder | null>(null);
   const [amountYuan, setAmountYuan] = useState("10");
   const [payType, setPayType] = useState<PayType>("alipay");
@@ -129,7 +134,7 @@ function WalletPageContent() {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const reload = useCallback(async () => {
-    const [walletData, orderData] = await Promise.all([fetchWallet(), fetchPayOrders()]);
+    const [walletData, orderData] = await Promise.all([fetchWallet(), fetchPayOrders({ limit: 500 })]);
     setWallet(walletData.wallet);
     setImagePriceCents(walletData.image_price);
     const channels = Array.isArray(walletData.pay_channels) ? walletData.pay_channels : [];
@@ -229,6 +234,29 @@ function WalletPageContent() {
     () => orders.filter((order) => order.status === "pending" && !isPendingOrderTimeout(order, nowMs)).length,
     [nowMs, orders],
   );
+  const filteredOrders = useMemo(() => {
+    return orders.filter((order) => {
+      const kind = order.record_type === "transaction" ? String(order.type || "").toLowerCase() : "recharge";
+      if (orderTypeFilter !== "all") {
+        if (orderTypeFilter === "consume" && kind !== "consume") return false;
+        if (orderTypeFilter === "recharge" && kind === "consume") return false;
+      }
+      if (orderStatusFilter !== "all") {
+        const normalized = String(order.status || "").toLowerCase();
+        if (normalized !== orderStatusFilter) return false;
+      }
+      return true;
+    });
+  }, [orderStatusFilter, orderTypeFilter, orders]);
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  useEffect(() => {
+    setPage((prev) => Math.max(1, Math.min(prev, totalPages)));
+  }, [totalPages]);
+  const pagedOrders = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredOrders.slice(start, start + pageSize);
+  }, [currentPage, filteredOrders, pageSize]);
   const effectiveChannels = payChannels;
 
   return (
@@ -281,7 +309,7 @@ function WalletPageContent() {
         </CardHeader>
         <CardContent className="flex flex-col gap-2 text-sm">
           <div className="font-mono text-foreground">{wallet?.invite_code || "-"}</div>
-          <div className="text-muted-foreground">我的邀请人：{wallet?.invited_by || "无"}</div>
+          <div className="text-muted-foreground">我的邀请人：{wallet?.invited_by_email || wallet?.invited_by || "无"}</div>
           <button
             type="button"
             className="mt-1 inline-flex w-fit items-center gap-1 text-primary hover:underline"
@@ -389,11 +417,56 @@ function WalletPageContent() {
           <CardDescription>最近记录（待支付 {pendingCount} 条）</CardDescription>
         </CardHeader>
         <CardContent>
+          <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-4">
+            <Select value={orderTypeFilter} onValueChange={(value) => { setOrderTypeFilter(value as "all" | "recharge" | "consume"); setPage(1); }}>
+              <SelectTrigger className="h-10 rounded-lg">
+                <SelectValue placeholder="记录类型" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部记录</SelectItem>
+                <SelectItem value="recharge">充值记录</SelectItem>
+                <SelectItem value="consume">使用记录</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={orderStatusFilter} onValueChange={(value) => { setOrderStatusFilter(value as "all" | "pending" | "paid" | "failed"); setPage(1); }}>
+              <SelectTrigger className="h-10 rounded-lg">
+                <SelectValue placeholder="状态筛选" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部状态</SelectItem>
+                <SelectItem value="pending">待支付</SelectItem>
+                <SelectItem value="paid">已支付</SelectItem>
+                <SelectItem value="failed">失败</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={String(pageSize)} onValueChange={(value) => { setPageSize(Number(value)); setPage(1); }}>
+              <SelectTrigger className="h-10 rounded-lg">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    每页 {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input
+              value={String(currentPage)}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                if (Number.isFinite(next)) setPage(Math.max(1, Math.min(totalPages, Math.trunc(next))));
+              }}
+              inputMode="numeric"
+              placeholder={`跳转页码 1-${totalPages}`}
+              className="h-10 rounded-lg"
+            />
+          </div>
           {isLoading ? (
             <div className="flex min-h-[180px] items-center justify-center">
               <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
             </div>
-          ) : orders.length === 0 ? (
+          ) : filteredOrders.length === 0 ? (
             <div className="rounded-[14px] border border-dashed border-border p-8 text-center text-sm text-muted-foreground">暂无充值订单</div>
           ) : (
             <div className="overflow-x-auto">
@@ -409,7 +482,7 @@ function WalletPageContent() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {orders.map((order) => {
+                  {pagedOrders.map((order) => {
                     const status = orderStatusLabel(order, nowMs);
                     const source = order.record_type === "transaction"
                       ? providerLabel(order.provider)
@@ -431,6 +504,15 @@ function WalletPageContent() {
               </Table>
             </div>
           )}
+          {!isLoading && filteredOrders.length > 0 ? (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+              <span>第 {currentPage} / {totalPages} 页，共 {filteredOrders.length} 条</span>
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="outline" className="h-8 rounded-lg px-3" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>上一页</Button>
+                <Button type="button" variant="outline" className="h-8 rounded-lg px-3" disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>下一页</Button>
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
     </section>

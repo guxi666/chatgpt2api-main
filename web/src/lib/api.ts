@@ -177,6 +177,7 @@ export type SettingsConfig = {
   brand_site_logo_url?: string;
   registration_enabled?: boolean;
   registration_allowed_email_domains?: string;
+  registration_bonus_image_times?: number | string;
   cf_turnstile_site_key?: string;
   cf_turnstile_secret_key?: string;
   cf_turnstile_secret_key_configured?: boolean;
@@ -270,6 +271,7 @@ export type AgencyCommissionOrder = {
   amount_yuan?: string;
   commission_cents: number;
   commission_yuan?: string;
+  commission_bp?: number;
   status?: string;
   created_at?: string;
   out_trade_no?: string;
@@ -491,6 +493,7 @@ export type WalletInfo = {
   name: string;
   invite_code?: string;
   invited_by?: string;
+  invited_by_email?: string;
   invited_count?: number;
   invited_users?: WalletInvitedUser[];
   balance_cents: number;
@@ -539,6 +542,14 @@ export type PayOrder = {
   created_at: string;
   updated_at?: string;
   paid_at?: string;
+};
+
+export type PayOrderListResponse = {
+  items: PayOrder[];
+  total?: number;
+  page?: number;
+  page_size?: number;
+  total_page?: number;
 };
 
 export type RedeemCode = {
@@ -823,8 +834,22 @@ export async function createPayOrder(payload: { amount?: string; amount_cents?: 
   });
 }
 
-export async function fetchPayOrders() {
-  return httpRequest<{ items: PayOrder[] }>("/api/pay/orders");
+export async function fetchPayOrders(filters: {
+  limit?: number;
+  record_type?: "transaction" | "order" | "all";
+  type?: "recharge" | "consume" | "adjust" | "all";
+  status?: "pending" | "paid" | "failed" | "all";
+  page?: number;
+  page_size?: number;
+} = {}) {
+  const params = new URLSearchParams();
+  if (filters.limit && filters.limit > 0) params.set("limit", String(filters.limit));
+  if (filters.record_type && filters.record_type !== "all") params.set("record_type", filters.record_type);
+  if (filters.type && filters.type !== "all") params.set("type", filters.type);
+  if (filters.status && filters.status !== "all") params.set("status", filters.status);
+  if (filters.page && filters.page > 0) params.set("page", String(filters.page));
+  if (filters.page_size && filters.page_size > 0) params.set("page_size", String(filters.page_size));
+  return httpRequest<PayOrderListResponse>(`/api/pay/orders${params.toString() ? `?${params.toString()}` : ""}`);
 }
 
 export async function verifySession(token: string) {
@@ -1225,13 +1250,21 @@ export async function updateLoginPageImageSettings(
 }
 
 export async function fetchManagedImages(
-  filters: { start_date?: string; end_date?: string; scope?: "mine" | "public" | "all" },
+  filters: {
+    start_date?: string;
+    end_date?: string;
+    scope?: "mine" | "public" | "all";
+    page?: number;
+    page_size?: number;
+  },
   options: { signal?: AbortSignal } = {},
 ) {
   const params = new URLSearchParams();
   if (filters.scope) params.set("scope", filters.scope);
   if (filters.start_date) params.set("start_date", filters.start_date);
   if (filters.end_date) params.set("end_date", filters.end_date);
+  if (filters.page && filters.page > 0) params.set("page", String(filters.page));
+  if (filters.page_size && filters.page_size > 0) params.set("page_size", String(filters.page_size));
   const data = await httpRequest<{ items?: ManagedImage[] | null; groups?: Array<{ date: string; items: ManagedImage[] }> | null }>(
     `/api/images${params.toString() ? `?${params.toString()}` : ""}`,
     { signal: options.signal },
@@ -1239,6 +1272,10 @@ export async function fetchManagedImages(
   return {
     items: Array.isArray(data.items) ? data.items : [],
     groups: Array.isArray(data.groups) ? data.groups : [],
+    total: Number((data as { total?: unknown }).total || 0),
+    page: Number((data as { page?: unknown }).page || 1),
+    page_size: Number((data as { page_size?: unknown }).page_size || filters.page_size || 20),
+    total_page: Number((data as { total_page?: unknown }).total_page || 1),
   };
 }
 

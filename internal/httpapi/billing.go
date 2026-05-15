@@ -24,7 +24,17 @@ func (a *App) handleEmailRegister(w http.ResponseWriter, r *http.Request) {
 	name := util.Clean(body["name"])
 	verifyCode := firstNonEmpty(util.Clean(body["verification_code"]), util.Clean(body["code"]))
 	inviteCode := firstNonEmpty(util.Clean(body["invite_code"]), util.Clean(body["invitation_code"]), util.Clean(body["referral_code"]))
-	user, key, registerErr := a.billing.RegisterEmailUser(email, password, name, verifyCode, inviteCode, a.config.ImagePriceCents(), a.config.EmailAllowedDomains(), a.emailSMTPConfig())
+	user, key, registerErr := a.billing.RegisterEmailUser(
+		email,
+		password,
+		name,
+		verifyCode,
+		inviteCode,
+		a.config.ImagePriceCents(),
+		a.config.RegistrationBonusImageTimes(),
+		a.config.EmailAllowedDomains(),
+		a.emailSMTPConfig(),
+	)
 	if registerErr != nil {
 		util.WriteError(w, http.StatusBadRequest, registerErr.Error())
 		return
@@ -150,8 +160,67 @@ func (a *App) handlePayOrders(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		query := r.URL.Query()
+		limit := util.ToInt(query.Get("limit"), 300)
+		if limit < 1 {
+			limit = 300
+		}
+		records := a.billing.ListOrdersByIdentity(identity, limit)
+		recordTypeFilter := strings.ToLower(strings.TrimSpace(query.Get("record_type")))
+		typeFilter := strings.ToLower(strings.TrimSpace(query.Get("type")))
+		statusFilter := strings.ToLower(strings.TrimSpace(query.Get("status")))
+		filtered := make([]map[string]any, 0, len(records))
+		for _, item := range records {
+			recordType := strings.ToLower(strings.TrimSpace(util.Clean(item["record_type"])))
+			orderType := strings.ToLower(strings.TrimSpace(util.Clean(item["type"])))
+			status := strings.ToLower(strings.TrimSpace(util.Clean(item["status"])))
+			if recordTypeFilter != "" && recordTypeFilter != "all" && recordType != recordTypeFilter {
+				continue
+			}
+			if typeFilter != "" && typeFilter != "all" && orderType != typeFilter {
+				continue
+			}
+			if statusFilter != "" && statusFilter != "all" && status != statusFilter {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		pageSize := util.ToInt(query.Get("page_size"), 20)
+		if pageSize < 1 {
+			pageSize = 20
+		}
+		if pageSize > 500 {
+			pageSize = 500
+		}
+		page := util.ToInt(query.Get("page"), 1)
+		if page < 1 {
+			page = 1
+		}
+		total := len(filtered)
+		totalPages := 1
+		if total > 0 {
+			totalPages = (total + pageSize - 1) / pageSize
+		}
+		if page > totalPages {
+			page = totalPages
+		}
+		start := (page - 1) * pageSize
+		if start < 0 {
+			start = 0
+		}
+		if start > total {
+			start = total
+		}
+		end := start + pageSize
+		if end > total {
+			end = total
+		}
 		util.WriteJSON(w, http.StatusOK, map[string]any{
-			"items": a.billing.ListOrdersByIdentity(identity, 30),
+			"items":      filtered[start:end],
+			"total":      total,
+			"page":       page,
+			"page_size":  pageSize,
+			"total_page": totalPages,
 		})
 	case http.MethodPost:
 		body, err := readJSONMap(r)
@@ -451,6 +520,7 @@ func walletFromUser(user map[string]any) map[string]any {
 	return map[string]any{
 		"invite_code":          util.Clean(user["invite_code"]),
 		"invited_by":           util.Clean(user["invited_by"]),
+		"invited_by_email":     util.Clean(user["invited_by_email"]),
 		"balance_cents":        util.ToInt(user["balance_cents"], 0),
 		"total_recharge_cents": util.ToInt(user["total_recharge_cents"], 0),
 		"total_consume_cents":  util.ToInt(user["total_consume_cents"], 0),

@@ -54,6 +54,8 @@ function formatDateTime(value?: string | null) {
   return formatBeijingDateTime(value);
 }
 
+const ORDER_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
+
 export function BillingAdminCard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -61,6 +63,8 @@ export function BillingAdminCard() {
   const [codes, setCodes] = useState<RedeemCode[]>([]);
   const [orders, setOrders] = useState<PayOrder[]>([]);
   const [stats, setStats] = useState<AdminBillingStats | null>(null);
+  const [orderPageSize, setOrderPageSize] = useState<number>(20);
+  const [orderPage, setOrderPage] = useState(1);
 
   const [selectedUserId, setSelectedUserId] = useState("");
   const [adjustMode, setAdjustMode] = useState<"delta" | "set">("delta");
@@ -107,6 +111,16 @@ export function BillingAdminCard() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const totalOrderPages = Math.max(1, Math.ceil(orders.length / orderPageSize));
+  const currentOrderPage = Math.min(orderPage, totalOrderPages);
+  useEffect(() => {
+    setOrderPage((prev) => Math.max(1, Math.min(prev, totalOrderPages)));
+  }, [totalOrderPages]);
+  const pagedOrders = useMemo(() => {
+    const start = (currentOrderPage - 1) * orderPageSize;
+    return orders.slice(start, start + orderPageSize);
+  }, [currentOrderPage, orderPageSize, orders]);
 
   const handleAdjustBalance = async () => {
     if (!selectedUserId) {
@@ -365,7 +379,7 @@ export function BillingAdminCard() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    orders.map((order) => {
+                    pagedOrders.map((order) => {
                       const status = orderStatusLabel(String(order.status || "pending"));
                       return (
                         <TableRow key={order.id}>
@@ -385,6 +399,63 @@ export function BillingAdminCard() {
                 </TableBody>
               </Table>
             </div>
+            {orders.length > 0 ? (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    value={String(orderPageSize)}
+                    onValueChange={(value) => {
+                      setOrderPageSize(Number(value));
+                      setOrderPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-[110px] rounded-lg">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ORDER_PAGE_SIZE_OPTIONS.map((size) => (
+                        <SelectItem key={size} value={String(size)}>
+                          每页 {size}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    value={String(currentOrderPage)}
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      if (Number.isFinite(next)) {
+                        setOrderPage(Math.max(1, Math.min(totalOrderPages, Math.trunc(next))));
+                      }
+                    }}
+                    inputMode="numeric"
+                    placeholder={`页码 1-${totalOrderPages}`}
+                    className="h-8 w-[120px] rounded-lg"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span>第 {currentOrderPage} / {totalOrderPages} 页，共 {orders.length} 条</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 rounded-lg px-3"
+                    disabled={currentOrderPage <= 1}
+                    onClick={() => setOrderPage((prev) => Math.max(1, prev - 1))}
+                  >
+                    上一页
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 rounded-lg px-3"
+                    disabled={currentOrderPage >= totalOrderPages}
+                    onClick={() => setOrderPage((prev) => Math.min(totalOrderPages, prev + 1))}
+                  >
+                    下一页
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </section>
         </div>
       )}

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"chatgpt2api/internal/service"
@@ -162,6 +163,87 @@ func (a *App) handleAgencyCommission(w http.ResponseWriter, r *http.Request) {
 	util.WriteJSON(w, http.StatusOK, payload)
 }
 
+func (a *App) handleAgencyWithdrawals(w http.ResponseWriter, r *http.Request) {
+	identity, ok := a.requireIdentity(w, r, "")
+	if !ok {
+		return
+	}
+	if identity.Role == service.AuthRoleAdmin {
+		util.WriteError(w, http.StatusForbidden, "admin permission required")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		limit := util.ToInt(r.URL.Query().Get("limit"), 100)
+		if limit <= 0 {
+			limit = 100
+		}
+		items, err := a.billing.ListAgencyWithdrawalRequestsByIdentity(identity, limit)
+		if err != nil {
+			util.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	case http.MethodPost:
+		body, _ := readJSONMap(r)
+		amountYuan := strings.TrimSpace(firstNonEmpty(util.Clean(body["amount"]), util.Clean(body["amount_yuan"])))
+		amountCents := util.ToInt(body["amount_cents"], 0)
+		if amountCents <= 0 {
+			if amountYuan == "" {
+				util.WriteError(w, http.StatusBadRequest, "withdraw amount is required")
+				return
+			}
+			parsed, err := strconv.ParseFloat(amountYuan, 64)
+			if err != nil || parsed <= 0 {
+				util.WriteError(w, http.StatusBadRequest, "invalid withdraw amount")
+				return
+			}
+			amountCents = int(parsed * 100)
+			if amountCents <= 0 {
+				amountCents = 1
+			}
+		}
+		item, err := a.billing.CreateAgencyWithdrawalRequest(
+			identity,
+			amountCents,
+			util.Clean(body["alipay_qr_code"]),
+			firstNonEmpty(util.Clean(body["wechat_qr_code"]), util.Clean(body["wx_qr_code"])),
+			util.Clean(body["phone"]),
+			firstNonEmpty(util.Clean(body["wechat_id"]), util.Clean(body["wx_id"])),
+		)
+		if err != nil {
+			util.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "item": item})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *App) handleAgencyAdminWithdrawals(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	identity, ok := a.requireIdentity(w, r, "")
+	if !ok {
+		return
+	}
+	if identity.Role != service.AuthRoleAdmin {
+		util.WriteError(w, http.StatusForbidden, "admin permission required")
+		return
+	}
+	limit := util.ToInt(r.URL.Query().Get("limit"), 500)
+	if limit <= 0 {
+		limit = 500
+	}
+	items := a.billing.ListAgencyWithdrawalRequestsForAdmin(limit)
+	util.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
 func (a *App) handleAgencyAdminUsers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -319,6 +401,8 @@ func (a *App) ensureAgencyTierRoles() {
 			service.APIPermissionKey("POST", "/api/pay/orders"),
 			service.APIPermissionKey("GET", "/api/agency"),
 			service.APIPermissionKey("GET", "/api/agency/commission"),
+			service.APIPermissionKey("GET", "/api/agency/withdrawals"),
+			service.APIPermissionKey("POST", "/api/agency/withdrawals"),
 			service.APIPermissionKey("POST", "/api/agency/join"),
 			service.APIPermissionKey("POST", "/api/agency/upgrade"),
 		}

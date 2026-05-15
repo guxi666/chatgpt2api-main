@@ -30,10 +30,12 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -58,6 +60,9 @@ type ImagePromptMarketProps = {
 const ALL_CATEGORY_VALUE = "__all__";
 const INITIAL_VISIBLE_COUNT = 60;
 const VISIBLE_COUNT_STEP = 60;
+const PROMPT_MARKET_OVERRIDES_STORAGE_KEY = "chatgpt2api:image_prompt_market_overrides_v1";
+
+type PromptMarketOverride = Pick<BananaPrompt, "id" | "title" | "prompt" | "preview">;
 
 function includesKeyword(value: string | undefined, keyword: string) {
   return Boolean(value && value.toLowerCase().includes(keyword));
@@ -121,6 +126,70 @@ function PromptPreviewImage({ prompt }: { prompt: BananaPrompt }) {
   );
 }
 
+function loadPromptMarketOverrides() {
+  if (typeof window === "undefined") {
+    return new Map<string, PromptMarketOverride>();
+  }
+  try {
+    const raw = window.localStorage.getItem(PROMPT_MARKET_OVERRIDES_STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) {
+      return new Map<string, PromptMarketOverride>();
+    }
+    const overrides = new Map<string, PromptMarketOverride>();
+    parsed.forEach((item) => {
+      if (!item || typeof item !== "object") {
+        return;
+      }
+      const override = item as Partial<PromptMarketOverride>;
+      const id = typeof override.id === "string" ? override.id.trim() : "";
+      if (!id) {
+        return;
+      }
+      overrides.set(id, {
+        id,
+        title: typeof override.title === "string" ? override.title : "",
+        prompt: typeof override.prompt === "string" ? override.prompt : "",
+        preview: typeof override.preview === "string" ? override.preview : "",
+      });
+    });
+    return overrides;
+  } catch {
+    return new Map<string, PromptMarketOverride>();
+  }
+}
+
+function persistPromptMarketOverride(override: PromptMarketOverride) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const overrides = loadPromptMarketOverrides();
+  overrides.set(override.id, override);
+  window.localStorage.setItem(PROMPT_MARKET_OVERRIDES_STORAGE_KEY, JSON.stringify([...overrides.values()]));
+}
+
+function applyPromptMarketOverride(prompt: BananaPrompt, override?: PromptMarketOverride) {
+  if (!override) {
+    return prompt;
+  }
+  const preview = override.preview.trim() || prompt.preview;
+  return {
+    ...prompt,
+    title: override.title.trim() || prompt.title,
+    prompt: override.prompt.trim() || prompt.prompt,
+    preview,
+    referenceImageUrls: preview ? [preview] : prompt.referenceImageUrls,
+  };
+}
+
+function applyPromptMarketOverrides(prompts: BananaPrompt[]) {
+  const overrides = loadPromptMarketOverrides();
+  if (overrides.size === 0) {
+    return prompts;
+  }
+  return prompts.map((prompt) => applyPromptMarketOverride(prompt, overrides.get(prompt.id)));
+}
+
 export function ImagePromptMarket({ open, onOpenChange, onApplyPrompt }: ImagePromptMarketProps) {
   const [prompts, setPrompts] = useState<BananaPrompt[]>([]);
   const [favoriteItems, setFavoriteItems] = useState<PromptFavorite[]>([]);
@@ -138,6 +207,11 @@ export function ImagePromptMarket({ open, onOpenChange, onApplyPrompt }: ImagePr
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
   const [favoriteBusyIds, setFavoriteBusyIds] = useState<Set<string>>(() => new Set());
+  const [editingPrompt, setEditingPrompt] = useState<BananaPrompt | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [editingContent, setEditingContent] = useState("");
+  const [editingPreview, setEditingPreview] = useState("");
+  const [promptMarketOverrides, setPromptMarketOverrides] = useState(() => loadPromptMarketOverrides());
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   const updateFavoriteItems = (items: PromptFavorite[]) => {
@@ -150,7 +224,7 @@ export function ImagePromptMarket({ open, onOpenChange, onApplyPrompt }: ImagePr
 
     void fetchPromptMarketPrompts()
       .then((items) => {
-        setPrompts(items);
+        setPrompts(applyPromptMarketOverrides(items));
       })
       .catch((loadError: unknown) => {
         setError(loadError instanceof Error ? loadError.message : "读取提示词市场失败");
@@ -189,7 +263,7 @@ export function ImagePromptMarket({ open, onOpenChange, onApplyPrompt }: ImagePr
 
     void fetchPromptMarketPrompts(controller.signal)
       .then((items) => {
-        setPrompts(items);
+        setPrompts(applyPromptMarketOverrides(items));
       })
       .catch((loadError: unknown) => {
         if (controller.signal.aborted) {
@@ -250,7 +324,7 @@ export function ImagePromptMarket({ open, onOpenChange, onApplyPrompt }: ImagePr
   }, [open]);
 
   const favoritePrompts = useMemo(
-    () => favoriteItems.map((item) => promptFavoriteToBananaPrompt(item)),
+    () => applyPromptMarketOverrides(favoriteItems.map((item) => promptFavoriteToBananaPrompt(item))),
     [favoriteItems],
   );
 
@@ -383,6 +457,35 @@ export function ImagePromptMarket({ open, onOpenChange, onApplyPrompt }: ImagePr
     } finally {
       setFavoriteBusy(key, false);
     }
+  };
+
+  const openEditPrompt = (prompt: BananaPrompt) => {
+    setEditingPrompt(prompt);
+    setEditingTitle(prompt.title);
+    setEditingContent(prompt.prompt);
+    setEditingPreview(prompt.preview || "");
+  };
+
+  const applyEditedPrompt = async () => {
+    if (!editingPrompt) {
+      return;
+    }
+    const override: PromptMarketOverride = {
+      id: editingPrompt.id,
+      title: editingTitle.trim() || editingPrompt.title,
+      prompt: editingContent.trim() || editingPrompt.prompt,
+      preview: editingPreview.trim() || editingPrompt.preview,
+    };
+    persistPromptMarketOverride(override);
+    setPromptMarketOverrides((current) => {
+      const next = new Map(current);
+      next.set(override.id, override);
+      return next;
+    });
+    const nextPrompt = applyPromptMarketOverride(editingPrompt, override);
+    setPrompts((current) => current.map((prompt) => (prompt.id === nextPrompt.id ? nextPrompt : prompt)));
+    setEditingPrompt(null);
+    await onApplyPrompt(nextPrompt);
   };
 
   const renderFavoriteTabs = (className?: string) => (
@@ -665,7 +768,10 @@ export function ImagePromptMarket({ open, onOpenChange, onApplyPrompt }: ImagePr
             <div className="flex flex-col gap-4">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {visiblePrompts.map((prompt) => {
-                  const localizedPrompt = getLocalizedPrompt(prompt, promptLanguage);
+                  const localizedPrompt = applyPromptMarketOverride(
+                    getLocalizedPrompt(prompt, promptLanguage),
+                    promptMarketOverrides.get(prompt.id),
+                  );
                   const dateLabel = formatPromptDate(prompt.created);
                   const promptMetaLabels = [localizedPrompt.subCategory, dateLabel].filter(
                     (label): label is string => Boolean(label),
@@ -757,14 +863,25 @@ export function ImagePromptMarket({ open, onOpenChange, onApplyPrompt }: ImagePr
                         </div>
                         <p className="line-clamp-4 text-sm leading-6 text-[#45515e]">{localizedPrompt.prompt}</p>
                         <div className="mt-auto flex justify-end border-t border-[#f2f3f5] pt-3">
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="h-8 rounded-full bg-[#1456f0] px-4 text-xs text-white shadow-sm hover:bg-[#2563eb]"
-                            onClick={() => void onApplyPrompt(localizedPrompt)}
-                          >
-                            套用
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8 rounded-full px-3 text-xs"
+                              onClick={() => openEditPrompt(localizedPrompt)}
+                            >
+                              编辑后套用
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-8 rounded-full bg-[#1456f0] px-4 text-xs text-white shadow-sm hover:bg-[#2563eb]"
+                              onClick={() => void onApplyPrompt(localizedPrompt)}
+                            >
+                              直接套用
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     </article>
@@ -787,6 +904,51 @@ export function ImagePromptMarket({ open, onOpenChange, onApplyPrompt }: ImagePr
           )}
         </div>
       </DialogContent>
+      {editingPrompt ? (
+        <Dialog open onOpenChange={(next) => (!next ? setEditingPrompt(null) : null)}>
+          <DialogContent className="rounded-2xl p-6 sm:max-w-2xl">
+            <DialogHeader className="gap-2">
+              <DialogTitle>编辑模板后套用</DialogTitle>
+              <DialogDescription>可修改标题、提示词和预览图，然后一键套用。</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Input
+                value={editingTitle}
+                onChange={(event) => setEditingTitle(event.target.value)}
+                placeholder="模板标题"
+              />
+              <Input
+                value={editingPreview}
+                onChange={(event) => setEditingPreview(event.target.value)}
+                placeholder="预览图地址（支持 URL）"
+              />
+              {editingPreview.trim() ? (
+                <div className="overflow-hidden rounded-xl border border-[#e5e7eb] bg-[#f8f8f8]">
+                  <img
+                    src={editingPreview.trim()}
+                    alt={editingTitle || "模板预览图"}
+                    className="h-40 w-full object-cover"
+                  />
+                </div>
+              ) : null}
+              <Textarea
+                value={editingContent}
+                onChange={(event) => setEditingContent(event.target.value)}
+                rows={10}
+                placeholder="请输入提示词"
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditingPrompt(null)}>
+                取消
+              </Button>
+              <Button type="button" onClick={() => void applyEditedPrompt()}>
+                保存并套用
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </Dialog>
   );
 }

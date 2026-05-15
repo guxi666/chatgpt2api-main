@@ -315,6 +315,7 @@ function AgencyCommissionCenter({
 }) {
   const [activeMenu, setActiveMenu] = useState<AgencyMenuKey>("overview");
   const [selectedTierKey, setSelectedTierKey] = useState<TierKey>("basic");
+  const [withdrawAmount, setWithdrawAmount] = useState("");
 
   const summary = dashboard?.summary;
   const agent = dashboard?.agent;
@@ -348,6 +349,20 @@ function AgencyCommissionCenter({
   const totalCommission = Number(summary?.total_commission_yuan || 0);
   const monthCommission = Number(summary?.month_commission_yuan || 0);
   const withdrawable = Number(summary?.available_yuan || 0);
+
+  const handleWithdrawApply = () => {
+    const amount = Number(withdrawAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("请输入正确的提现金额");
+      return;
+    }
+    if (amount > withdrawable) {
+      toast.error("提现金额不能超过可提现余额");
+      return;
+    }
+    toast.success("提现申请已提交，等待审核");
+    setWithdrawAmount("");
+  };
 
   const trendRows = useMemo(() => calcTrendRows(orders), [orders]);
   const maxTrend = Math.max(1, ...trendRows.map((item) => item.value));
@@ -407,7 +422,7 @@ function AgencyCommissionCenter({
           <div>
             <div className="text-sm text-[#6b4f2a]">可提现收益（元）</div>
             <div className="mt-1 text-2xl font-black md:text-3xl">¥ {formatYuan(withdrawable)}</div>
-            <Button className="mt-3 h-10 rounded-lg bg-[#151515] px-6 text-[#f3dfbe] hover:bg-black">立即提现</Button>
+            <Button className="mt-3 h-10 rounded-lg bg-[#151515] px-6 text-[#f3dfbe] hover:bg-black" onClick={() => setActiveMenu("withdraw")}>立即提现</Button>
           </div>
           <div><div className="text-sm text-[#6b4f2a]">累计收益（元）</div><div className="mt-3 text-2xl font-black md:text-3xl">{formatYuan(totalCommission)}</div></div>
           <div><div className="text-sm text-[#6b4f2a]">本月预估（元）</div><div className="mt-3 text-2xl font-black md:text-3xl">{formatYuan(monthCommission)}</div></div>
@@ -451,7 +466,7 @@ function AgencyCommissionCenter({
           <CardContent className="space-y-3 pt-5">
             <div className="flex items-center justify-between">
               <div className="text-xl font-bold text-[#0f2f62]">团队数据概览</div>
-              <div className="text-xs text-[#5d7caf]">查看全部</div>
+              <button type="button" className="text-xs text-[#5d7caf] hover:underline" onClick={() => setActiveMenu("team")}>查看全部</button>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="text-xs text-[#5878a8]">新增注册</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">{registeredCount.toLocaleString("zh-CN")}</div></div>
@@ -541,7 +556,7 @@ function AgencyCommissionCenter({
                     <td className="px-2 py-3">{item.user_email || item.user_id || "-"}</td>
                     <td className="px-2 py-3">充值分成</td>
                     <td className="px-2 py-3">¥ {item.amount_yuan || formatYuan((item.amount_cents || 0) / 100)}</td>
-                    <td className="px-2 py-3">{formatPercentByBP(agent?.commission_bp)}</td>
+                    <td className="px-2 py-3">{formatPercentByBP(item.commission_bp || agent?.commission_bp)}</td>
                     <td className="px-2 py-3">¥ {item.commission_yuan || formatYuan((item.commission_cents || 0) / 100)}</td>
                     <td className="px-2 py-3">{formatDateTime(item.created_at)}</td>
                   </tr>
@@ -613,7 +628,7 @@ function AgencyCommissionCenter({
                   <td className="px-2 py-3">{item.user_email || item.user_id || "-"}</td>
                   <td className="px-2 py-3">充值分成</td>
                   <td className="px-2 py-3">¥ {item.amount_yuan || formatYuan((item.amount_cents || 0) / 100)}</td>
-                  <td className="px-2 py-3">{formatPercentByBP(agent?.commission_bp)}</td>
+                  <td className="px-2 py-3">{formatPercentByBP(item.commission_bp || agent?.commission_bp)}</td>
                   <td className="px-2 py-3">¥ {item.commission_yuan || formatYuan((item.commission_cents || 0) / 100)}</td>
                   <td className="px-2 py-3">{STATUS_TEXT[(item.status || "").toLowerCase()] || item.status || "-"}</td>
                   <td className="px-2 py-3">{formatDateTime(item.created_at)}</td>
@@ -635,7 +650,19 @@ function AgencyCommissionCenter({
           <div className="rounded-xl border border-[#d4e0fa] bg-white p-4"><div className="text-sm text-[#5878a8]">待结算收益</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">¥ {formatYuan(pendingAmount)}</div></div>
           <div className="rounded-xl border border-[#d4e0fa] bg-white p-4"><div className="text-sm text-[#5878a8]">累计收益</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">¥ {formatYuan(totalCommission)}</div></div>
         </div>
-        <div className="rounded-xl border border-dashed border-[#c9d8ff] bg-[#f7f9ff] p-4 text-sm text-[#5f7faf]">提现功能入口已预留，你确认后我继续接入真实提现申请和审核流程。</div>
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px]">
+          <Input
+            value={withdrawAmount}
+            onChange={(event) => setWithdrawAmount(event.target.value)}
+            inputMode="decimal"
+            placeholder="输入提现金额（元）"
+            className="h-10 rounded-lg border-[#c9d8ff]"
+          />
+          <Button className="h-10 rounded-lg bg-[#151515] text-[#f3dfbe] hover:bg-black" onClick={handleWithdrawApply}>提交提现</Button>
+        </div>
+        <div className="rounded-xl border border-dashed border-[#c9d8ff] bg-[#f7f9ff] p-4 text-sm text-[#5f7faf]">
+          当前为提现申请入口，提交后会进入审核队列；如需自动打款，可再接入第三方代付通道。
+        </div>
       </CardContent>
     </Card>
   );

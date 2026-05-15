@@ -44,6 +44,7 @@ var settingEnvKeys = map[string]string{
 	"update_github_token":                "CHATGPT2API_UPDATE_GITHUB_TOKEN",
 	"registration_enabled":               "CHATGPT2API_REGISTRATION_ENABLED",
 	"registration_allowed_email_domains": "CHATGPT2API_REGISTRATION_ALLOWED_EMAIL_DOMAINS",
+	"registration_bonus_image_times":     "CHATGPT2API_REGISTRATION_BONUS_IMAGE_TIMES",
 	"cf_turnstile_site_key":              "CHATGPT2API_CF_TURNSTILE_SITE_KEY",
 	"cf_turnstile_secret_key":            "CHATGPT2API_CF_TURNSTILE_SECRET_KEY",
 	"email_smtp_enabled":                 "CHATGPT2API_EMAIL_SMTP_ENABLED",
@@ -285,6 +286,17 @@ func (s *Store) RegistrationAllowedEmailDomains() []string {
 		out = append(out, domain)
 	}
 	return out
+}
+
+func (s *Store) RegistrationBonusImageTimes() int {
+	value := intSetting(s.settingValue("registration_bonus_image_times", 20), 20)
+	if value < 0 {
+		return 0
+	}
+	if value > 100000 {
+		return 100000
+	}
+	return value
 }
 
 func (s *Store) EmailAllowedDomains() []string {
@@ -720,6 +732,7 @@ func (s *Store) Get() map[string]any {
 	data["brand_site_logo_url"] = s.BrandSiteLogoURL()
 	data["registration_enabled"] = s.RegistrationEnabled()
 	data["registration_allowed_email_domains"] = strings.Join(s.RegistrationAllowedEmailDomains(), ",")
+	data["registration_bonus_image_times"] = s.RegistrationBonusImageTimes()
 	data["cf_turnstile_site_key"] = s.CFTurnstileSiteKey()
 	data["cf_turnstile_secret_key_configured"] = s.CFTurnstileSecretKey() != ""
 	emailSMTP := s.EmailSMTP()
@@ -935,6 +948,10 @@ func (s *Store) validateSettingsUpdateLocked(data map[string]any) error {
 		if value < 0 {
 			return fmt.Errorf("%s must be >= 0", key)
 		}
+	}
+	registrationBonusImageTimes := intSetting(util.ValueOr(data["registration_bonus_image_times"], 20), 20)
+	if registrationBonusImageTimes < 0 {
+		return errors.New("registration_bonus_image_times must be >= 0")
 	}
 	yipay := s.yiPayFromData(data)
 	if yipay.Enabled {

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Download, Eye, ImageIcon, LoaderCircle, RefreshCw, Search, Trash2 } from "lucide-react";
@@ -9,14 +9,8 @@ import { ImageLightbox } from "@/components/image-lightbox";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { deleteManagedImages, fetchManagedImages, type ManagedImage } from "@/lib/api";
 import { formatBeijingDateTime } from "@/lib/datetime";
@@ -42,7 +36,6 @@ function buildManagedImageDownloadName(item: ManagedImage, index: number) {
 async function downloadManagedImage(item: ManagedImage, index: number) {
   let href = item.url;
   let objectUrl = "";
-
   try {
     const response = await fetch(item.url);
     if (response.ok) {
@@ -53,14 +46,12 @@ async function downloadManagedImage(item: ManagedImage, index: number) {
   } catch {
     href = item.url;
   }
-
   const link = document.createElement("a");
   link.href = href;
   link.download = buildManagedImageDownloadName(item, index);
   document.body.appendChild(link);
   link.click();
   link.remove();
-
   if (objectUrl) window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
@@ -78,11 +69,21 @@ function getManagedImageFormatLabel(item: ManagedImage) {
   return format.toUpperCase();
 }
 
+function formatOwner(item: ManagedImage) {
+  const ownerName = String(item.owner_name || "").trim();
+  if (ownerName) return ownerName;
+  const ownerID = String(item.owner_id || "").trim();
+  return ownerID || "-";
+}
+
 function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) {
   const activeLoadRef = useRef<AbortController | null>(null);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [items, setItems] = useState<ManagedImage[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [page, setPage] = useState(1);
   const [selectedImageIds, setSelectedImageIds] = useState<Record<string, boolean>>({});
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteImageTarget | null>(null);
@@ -91,39 +92,47 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [pageSize, setPageSize] = useState<number>(20);
-  const [page, setPage] = useState(1);
+
+  const totalPages = Math.max(1, Math.ceil(Math.max(0, total) / pageSize));
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  const sortedItems = useMemo(
+    () =>
+      [...items].sort((a, b) => {
+        const left = new Date(a.created_at || 0).getTime();
+        const right = new Date(b.created_at || 0).getTime();
+        return right - left;
+      }),
+    [items],
+  );
 
   const lightboxImages = useMemo(
     () =>
-      items.map((item) => ({
+      sortedItems.map((item) => ({
         id: item.path,
         src: item.url,
         sizeLabel: formatImageFileSize(item.size),
         dimensions: item.width && item.height ? `${item.width} x ${item.height}` : undefined,
       })),
-    [items],
+    [sortedItems],
   );
 
   const selectedItems = useMemo(
-    () => items.filter((item) => selectedImageIds[managedImageKey(item)]),
-    [items, selectedImageIds],
+    () => sortedItems.filter((item) => selectedImageIds[managedImageKey(item)]),
+    [selectedImageIds, sortedItems],
   );
   const selectedCount = selectedItems.length;
-  const allSelected = items.length > 0 && selectedCount === items.length;
+  const allSelected = sortedItems.length > 0 && selectedCount === sortedItems.length;
   const isMutatingImages = downloadingKey !== null || isDeleting;
-
-  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
-  const currentPage = Math.min(page, totalPages);
-
-  useEffect(() => {
-    setPage((prev) => Math.max(1, Math.min(prev, totalPages)));
-  }, [totalPages]);
-
-  const pagedItems = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return items.slice(start, start + pageSize);
-  }, [currentPage, items, pageSize]);
+  const itemIndexByPath = useMemo(
+    () => new Map(sortedItems.map((item, index) => [item.path, index])),
+    [sortedItems],
+  );
 
   const loadImages = useCallback(async () => {
     activeLoadRef.current?.abort();
@@ -131,18 +140,17 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
     activeLoadRef.current = controller;
     setIsLoading(true);
     setLoadError("");
-
     try {
       const data = await fetchManagedImages(
-        { start_date: startDate, end_date: endDate },
+        { start_date: startDate, end_date: endDate, page, page_size: pageSize },
         { signal: controller.signal },
       );
-      setItems(data.items);
+      setItems(Array.isArray(data.items) ? data.items : []);
+      setTotal(Number.isFinite(data.total) && data.total > 0 ? data.total : (Array.isArray(data.items) ? data.items.length : 0));
       setSelectedImageIds({});
-      setPage(1);
     } catch (error) {
       if (controller.signal.aborted || isRequestCanceled(error)) return;
-      const message = error instanceof Error ? error.message : "加载图片失败";
+      const message = error instanceof Error ? error.message : "鍔犺浇鍥惧簱澶辫触";
       setLoadError(message);
       toast.error(message);
     } finally {
@@ -151,7 +159,7 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
         setIsLoading(false);
       }
     }
-  }, [endDate, startDate]);
+  }, [endDate, page, pageSize, startDate]);
 
   useEffect(() => {
     void loadImages();
@@ -162,14 +170,12 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
   const clearFilters = () => {
     setStartDate("");
     setEndDate("");
+    setPage(1);
   };
 
   const toggleImageSelection = (item: ManagedImage) => {
     const key = managedImageKey(item);
-    setSelectedImageIds((current) => ({
-      ...current,
-      [key]: !current[key],
-    }));
+    setSelectedImageIds((current) => ({ ...current, [key]: !current[key] }));
   };
 
   const toggleAllImages = () => {
@@ -177,7 +183,15 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
       setSelectedImageIds({});
       return;
     }
-    setSelectedImageIds(Object.fromEntries(items.map((item) => [managedImageKey(item), true])));
+    setSelectedImageIds(Object.fromEntries(sortedItems.map((item) => [managedImageKey(item), true])));
+  };
+
+  const selectCurrentPageImages = () => {
+    if (sortedItems.length === 0) return;
+    setSelectedImageIds((current) => ({
+      ...current,
+      ...Object.fromEntries(sortedItems.map((item) => [managedImageKey(item), true])),
+    }));
   };
 
   const downloadItems = async (key: string, targetItems: ManagedImage[]) => {
@@ -186,7 +200,7 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
     try {
       for (let index = 0; index < targetItems.length; index += 1) {
         const item = targetItems[index];
-        await downloadManagedImage(item, items.indexOf(item));
+        await downloadManagedImage(item, itemIndexByPath.get(item.path) ?? index);
         if (index < targetItems.length - 1) await sleep(120);
       }
     } finally {
@@ -198,7 +212,7 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
     if (!canDeleteImages) return;
     const paths = Array.from(new Set(targetItems.map((item) => item.path)));
     if (paths.length === 0) {
-      toast.error("没有可删除的图片");
+      toast.error("娌℃湁鍙垹闄ょ殑鍥剧墖");
       return;
     }
     setDeleteTarget({ paths });
@@ -217,16 +231,13 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
         paths.forEach((path) => delete next[path]);
         return next;
       });
+      setTotal((current) => Math.max(0, current - Number(data.deleted || 0)));
       setLightboxOpen(false);
       setLightboxIndex(0);
       setDeleteTarget(null);
-      toast.success(
-        data.missing > 0
-          ? `已删除 ${data.deleted} 张，${data.missing} 张不存在`
-          : `已删除 ${data.deleted} 张图片`,
-      );
+      toast.success(data.missing > 0 ? `已删除 ${data.deleted} 张，${data.missing} 张不存在` : `已删除 ${data.deleted} 张图片`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "删除图片失败");
+      toast.error(error instanceof Error ? error.message : "鍒犻櫎鍥剧墖澶辫触");
     } finally {
       setIsDeleting(false);
     }
@@ -245,14 +256,14 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
               onChange={(start, end) => {
                 setStartDate(start);
                 setEndDate(end);
+                setPage(1);
               }}
             />
             <Button variant="outline" onClick={clearFilters} className="h-10 rounded-lg">
-              清除筛选
-            </Button>
+              娓呴櫎绛涢€?            </Button>
             <Button onClick={() => void loadImages()} disabled={isLoading || isMutatingImages} className="h-10 rounded-lg">
               {isLoading ? <LoaderCircle className="size-4 animate-spin" /> : <Search className="size-4" />}
-              查询
+              鏌ヨ
             </Button>
           </>
         )}
@@ -263,10 +274,10 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <ImageIcon className="size-4" />
-              共 {items.length} 张
+              鍏?{total} 寮狅紙榛樿鎸夋椂闂翠粠杩戝埌杩滐級
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-muted-foreground">每页</span>
+              <span className="text-sm text-muted-foreground">姣忛〉</span>
               <Select
                 value={String(pageSize)}
                 onValueChange={(value: string) => {
@@ -279,18 +290,40 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
                 </SelectTrigger>
                 <SelectContent>
                   {PAGE_SIZE_OPTIONS.map((size) => (
-                    <SelectItem key={size} value={String(size)}>{size}</SelectItem>
+                    <SelectItem key={size} value={String(size)}>
+                      {size}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <Input
+                value={String(page)}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  if (!Number.isFinite(next)) return;
+                  setPage(Math.max(1, Math.min(totalPages, Math.trunc(next))));
+                }}
+                inputMode="numeric"
+                className="h-8 w-[120px] rounded-lg"
+                placeholder={`椤电爜 1-${totalPages}`}
+              />
               <Button
                 type="button"
                 variant="outline"
                 className="h-8 rounded-lg px-3 text-xs"
-                disabled={items.length === 0 || isMutatingImages}
+                disabled={sortedItems.length === 0 || isMutatingImages}
                 onClick={toggleAllImages}
               >
                 {allSelected ? "取消全选" : "全选"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-8 rounded-lg px-3 text-xs"
+                disabled={sortedItems.length === 0 || isMutatingImages}
+                onClick={selectCurrentPageImages}
+              >
+                选中此页
               </Button>
               <Button
                 type="button"
@@ -299,7 +332,7 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
                 onClick={() => void downloadItems("selected", selectedItems)}
               >
                 {downloadingKey === "selected" ? <LoaderCircle className="size-3 animate-spin" /> : <Download className="size-3" />}
-                下载已选 ({selectedCount})
+                涓嬭浇宸查€?({selectedCount})
               </Button>
               {canDeleteImages ? (
                 <Button
@@ -310,22 +343,22 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
                   onClick={() => openDeleteConfirm(selectedItems)}
                 >
                   <Trash2 className="size-3" />
-                  删除已选 ({selectedCount})
+                  鍒犻櫎宸查€?({selectedCount})
                 </Button>
               ) : null}
               <Button
                 type="button"
                 variant="outline"
                 className="h-8 rounded-lg px-2.5 text-[11px]"
-                disabled={items.length === 0 || isMutatingImages}
-                onClick={() => void downloadItems("all", items)}
+                disabled={sortedItems.length === 0 || isMutatingImages}
+                onClick={() => void downloadItems("all", sortedItems)}
               >
                 {downloadingKey === "all" ? <LoaderCircle className="size-3 animate-spin" /> : <Download className="size-3" />}
-                下载全部
+                涓嬭浇鏈〉
               </Button>
               <Button variant="outline" className="h-8 rounded-lg px-3 text-xs" onClick={() => void loadImages()} disabled={isLoading || isMutatingImages}>
                 <RefreshCw className={`size-4 ${isLoading ? "animate-spin" : ""}`} />
-                刷新
+                鍒锋柊
               </Button>
             </div>
           </div>
@@ -340,27 +373,21 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
             <div className="px-6 py-14 text-center text-sm text-rose-600">{loadError}</div>
           ) : null}
 
-          {!isLoading && !loadError && items.length === 0 ? (
-            <div className="px-6 py-14 text-center text-sm text-muted-foreground">暂无图片</div>
+          {!isLoading && !loadError && sortedItems.length === 0 ? (
+            <div className="px-6 py-14 text-center text-sm text-muted-foreground">鏆傛棤鍥剧墖</div>
           ) : null}
 
-          {!isLoading && !loadError && pagedItems.length > 0 ? (
+          {!isLoading && !loadError && sortedItems.length > 0 ? (
             <div className="grid gap-3 px-5 py-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {pagedItems.map((item) => {
-                const globalIndex = items.findIndex((candidate) => candidate.path === item.path);
+              {sortedItems.map((item) => {
+                const globalIndex = itemIndexByPath.get(item.path) ?? 0;
                 const selected = Boolean(selectedImageIds[managedImageKey(item)]);
                 const dimensions = item.width && item.height ? `${item.width} x ${item.height}` : "";
                 const sizeLabel = formatImageFileSize(item.size);
                 const imageMeta = [dimensions, sizeLabel].filter(Boolean).join(" | ");
-
                 return (
                   <figure key={item.path} className={`group relative overflow-hidden rounded-xl border bg-muted/20 ${selected ? "ring-2 ring-[#1456f0]/80 ring-offset-2" : ""}`}>
-                    <button
-                      type="button"
-                      onClick={() => toggleImageSelection(item)}
-                      className="block w-full text-left"
-                      aria-label={selected ? "取消选择图片" : "选择图片"}
-                    >
+                    <button type="button" onClick={() => toggleImageSelection(item)} className="block w-full text-left" aria-label={selected ? "鍙栨秷閫夋嫨鍥剧墖" : "閫夋嫨鍥剧墖"}>
                       <img
                         src={item.thumbnail_url || item.url}
                         alt={item.name || item.path}
@@ -375,11 +402,9 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
                       type="button"
                       onClick={() => toggleImageSelection(item)}
                       className={`absolute left-2 top-2 z-10 inline-flex size-6 items-center justify-center rounded-full border ${
-                        selected
-                          ? "border-[#1456f0] bg-[#1456f0] text-white"
-                          : "border-white/90 bg-black/25 text-transparent"
+                        selected ? "border-[#1456f0] bg-[#1456f0] text-white" : "border-white/90 bg-black/25 text-transparent"
                       }`}
-                      aria-label={selected ? "取消选择图片" : "选择图片"}
+                      aria-label={selected ? "鍙栨秷閫夋嫨鍥剧墖" : "閫夋嫨鍥剧墖"}
                     >
                       {selected ? <Check className="size-3.5" /> : null}
                     </button>
@@ -391,11 +416,11 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
                           setLightboxOpen(true);
                         }}
                         className="inline-flex h-7 items-center gap-1 rounded-full bg-white/95 px-2 text-[11px] font-medium text-stone-800"
-                        aria-label="查看原图"
-                        title="查看原图"
+                        aria-label="鏌ョ湅鍘熷浘"
+                        title="鏌ョ湅鍘熷浘"
                       >
                         <Eye className="size-3" />
-                        原图
+                        鍘熷浘
                       </button>
                       <button
                         type="button"
@@ -404,8 +429,8 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
                           toast.success("图片地址已复制");
                         }}
                         className="inline-flex size-7 items-center justify-center rounded-full bg-white/95 text-stone-800"
-                        aria-label="复制地址"
-                        title="复制地址"
+                        aria-label="澶嶅埗鍦板潃"
+                        title="澶嶅埗鍦板潃"
                       >
                         <Copy className="size-3.5" />
                       </button>
@@ -415,8 +440,8 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
                           onClick={() => openDeleteConfirm([item])}
                           disabled={isDeleting}
                           className="inline-flex size-7 items-center justify-center rounded-full bg-white/95 text-rose-600 disabled:opacity-60"
-                          aria-label="删除图片"
-                          title="删除图片"
+                          aria-label="鍒犻櫎鍥剧墖"
+                          title="鍒犻櫎鍥剧墖"
                         >
                           {isDeleting && deleteTarget?.paths.includes(item.path) ? <LoaderCircle className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
                         </button>
@@ -425,6 +450,7 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
                     <figcaption className="space-y-1 px-3 py-2 text-xs">
                       <div className="truncate font-medium text-foreground">{item.name || item.path}</div>
                       <div className="truncate text-muted-foreground">{formatBeijingDateTime(item.created_at)}</div>
+                      <div className="truncate text-muted-foreground">浣跨敤鑰咃細{formatOwner(item)}</div>
                       <div className="truncate text-muted-foreground">{getManagedImageFormatLabel(item)} {imageMeta ? `| ${imageMeta}` : ""}</div>
                     </figcaption>
                   </figure>
@@ -433,28 +459,38 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
             </div>
           ) : null}
 
-          {!isLoading && !loadError && items.length > 0 ? (
+          {!isLoading && !loadError && total > 0 ? (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-3 text-sm">
-              <span>第 {currentPage} / {totalPages} 页</span>
+              <span>
+                绗?{page} / {totalPages} 椤碉紝鍏?{total} 鏉?              </span>
               <div className="flex items-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   className="h-8 rounded-lg px-3"
-                  disabled={currentPage <= 1}
+                  disabled={page <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
-                  上一页
-                </Button>
+                  涓婁竴椤?                </Button>
                 <Button
                   type="button"
                   variant="outline"
                   className="h-8 rounded-lg px-3"
-                  disabled={currentPage >= totalPages}
+                  disabled={page >= totalPages}
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 >
-                  下一页
-                </Button>
+                  涓嬩竴椤?                </Button>
+                <Input
+                  value={String(page)}
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
+                    if (!Number.isFinite(next)) return;
+                    setPage(Math.max(1, Math.min(totalPages, Math.trunc(next))));
+                  }}
+                  inputMode="numeric"
+                  className="h-8 w-[120px] rounded-lg"
+                  placeholder={`页码 1-${totalPages}`}
+                />
               </div>
             </div>
           ) : null}
@@ -473,18 +509,17 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
         <Dialog open onOpenChange={(open) => (!open && !isDeleting ? setDeleteTarget(null) : null)}>
           <DialogContent showCloseButton={false} className="rounded-2xl p-6">
             <DialogHeader className="gap-2">
-              <DialogTitle>删除图片</DialogTitle>
+              <DialogTitle>鍒犻櫎鍥剧墖</DialogTitle>
               <DialogDescription className="text-sm leading-6">
-                确认删除 {deleteTarget.paths.length} 张图片吗？删除后不可恢复。
-              </DialogDescription>
+                纭鍒犻櫎 {deleteTarget.paths.length} 寮犲浘鐗囧悧锛熷垹闄ゅ悗涓嶅彲鎭㈠銆?              </DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button type="button" variant="outline" className="h-10 rounded-xl px-5" onClick={() => setDeleteTarget(null)} disabled={isDeleting}>
-                取消
+                鍙栨秷
               </Button>
               <Button type="button" className="h-10 rounded-xl bg-rose-600 px-5 text-white hover:bg-rose-700" onClick={() => void handleConfirmDelete()} disabled={isDeleting}>
                 {isDeleting ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-                确认删除
+                纭鍒犻櫎
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -506,3 +541,4 @@ export default function ImageManagerPage() {
   const canDeleteImages = session.role === "admin" || session.provider !== "linuxdo";
   return <ImageManagerContent canDeleteImages={canDeleteImages} />;
 }
+

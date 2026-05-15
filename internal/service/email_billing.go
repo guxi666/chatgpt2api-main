@@ -34,6 +34,11 @@ const (
 	BillingOrderStatusPaid    = "paid"
 	BillingOrderStatusFailed  = "failed"
 
+	BillingWithdrawStatusPending  = "pending"
+	BillingWithdrawStatusApproved = "approved"
+	BillingWithdrawStatusRejected = "rejected"
+	BillingWithdrawStatusPaid     = "paid"
+
 	BillingOrderKindRecharge      = "recharge"
 	BillingOrderKindAgencyJoin    = "agency_join"
 	BillingOrderKindAgencyUpgrade = "agency_upgrade"
@@ -97,6 +102,7 @@ type EmailBillingService struct {
 	registerCodes    map[string]*billingRegisterCode
 	redeemCodes      map[string]*billingRedeemCode
 	orders           map[string]*billingOrder
+	withdrawals      []*billingWithdrawalRequest
 	transactions     []map[string]any
 }
 
@@ -164,6 +170,22 @@ type billingOrder struct {
 	PaidAt      string
 }
 
+type billingWithdrawalRequest struct {
+	ID           string
+	UserID       string
+	UserEmail    string
+	AmountCents  int
+	AlipayQRCode string
+	WeChatQRCode string
+	Phone        string
+	WeChatID     string
+	Status       string
+	AdminNote    string
+	CreatedAt    string
+	UpdatedAt    string
+	ProcessedAt  string
+}
+
 func NewEmailBillingService(dataDir string, backend storage.Backend, auth *AuthService) *EmailBillingService {
 	s := &EmailBillingService{
 		path:             filepath.Join(dataDir, "billing.json"),
@@ -176,6 +198,7 @@ func NewEmailBillingService(dataDir string, backend storage.Backend, auth *AuthS
 		registerCodes:    map[string]*billingRegisterCode{},
 		redeemCodes:      map[string]*billingRedeemCode{},
 		orders:           map[string]*billingOrder{},
+		withdrawals:      make([]*billingWithdrawalRequest, 0),
 	}
 	s.mu.Lock()
 	s.loadLocked()
@@ -183,7 +206,7 @@ func NewEmailBillingService(dataDir string, backend storage.Backend, auth *AuthS
 	return s
 }
 
-func (s *EmailBillingService) RegisterEmailUser(email, password, name, verifyCode, inviteCode string, imagePriceCents int, allowedDomains []string, smtpConfig EmailSMTPConfig) (map[string]any, string, error) {
+func (s *EmailBillingService) RegisterEmailUser(email, password, name, verifyCode, inviteCode string, imagePriceCents int, registerBonusTimes int, allowedDomains []string, smtpConfig EmailSMTPConfig) (map[string]any, string, error) {
 	normalizedEmail, err := normalizeEmail(email)
 	if err != nil {
 		return nil, "", err
@@ -254,7 +277,10 @@ func (s *EmailBillingService) RegisterEmailUser(email, password, name, verifyCod
 
 	now := util.NowISO()
 	generatedInviteCode := s.newInviteCodeLocked(userID)
-	registerBonusCents := maxBillingInt(0, imagePriceCents) * RegisterBonusImageTimes
+	if registerBonusTimes < 0 {
+		registerBonusTimes = 0
+	}
+	registerBonusCents := maxBillingInt(0, imagePriceCents) * registerBonusTimes
 	inviteBonusCents := maxBillingInt(0, imagePriceCents) * InviteBonusImageTimes
 	user := &billingUser{
 		ID:                 userID,
@@ -291,7 +317,7 @@ func (s *EmailBillingService) RegisterEmailUser(email, password, name, verifyCod
 			"amount_cents":        registerBonusCents,
 			"balance_after_cents": user.BalanceCents,
 			"provider":            BillingProviderRegisterBonus,
-			"note":                fmt.Sprintf("new user bonus (%d image credits)", RegisterBonusImageTimes),
+			"note":                fmt.Sprintf("new user bonus (%d image credits)", registerBonusTimes),
 			"created_at":          now,
 		})
 		appendTxCount++
@@ -442,12 +468,21 @@ func (s *EmailBillingService) GetWalletByIdentity(identity Identity) map[string]
 		return nil
 	}
 	invitedUsers := s.invitedUsersByCodeLocked(user.InviteCode)
+	invitedByEmail := ""
+	if invitedByCode := normalizeInviteCode(user.InvitedBy); invitedByCode != "" {
+		if inviterID := strings.TrimSpace(s.userByInviteCode[invitedByCode]); inviterID != "" {
+			if inviter := s.users[inviterID]; inviter != nil {
+				invitedByEmail = strings.TrimSpace(inviter.Email)
+			}
+		}
+	}
 	return map[string]any{
 		"user_id":               user.ID,
 		"email":                 user.Email,
 		"name":                  user.Name,
 		"invite_code":           user.InviteCode,
 		"invited_by":            user.InvitedBy,
+		"invited_by_email":      invitedByEmail,
 		"invited_count":         len(invitedUsers),
 		"invited_users":         invitedUsers,
 		"balance_cents":         user.BalanceCents,
@@ -463,6 +498,61 @@ func (s *EmailBillingService) GetWalletByIdentity(identity Identity) map[string]
 		"updated_at":            user.UpdatedAt,
 		"billing_provider_hint": BillingProviderYiPay,
 	}
+}
+
+func (s *EmailBillingService) ApplyRegisterBonusForUser(userID string, imagePriceCents int, registerBonusTimes int) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("user id is required")
+	}
+	if registerBonusTimes <= 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user := s.users[userID]
+	if user == nil {
+		return fmt.Errorf("user not found")
+	}
+	for _, tx := range s.transactions {
+		if strings.TrimSpace(util.Clean(tx["user_id"])) != userID {
+			continue
+		}
+		if strings.TrimSpace(util.Clean(tx["provider"])) == BillingProviderRegisterBonus {
+			return nil
+		}
+	}
+
+	bonusCents := maxBillingInt(0, imagePriceCents) * registerBonusTimes
+	if bonusCents <= 0 {
+		return nil
+	}
+	now := util.NowISO()
+	user.BalanceCents += bonusCents
+	user.TotalRechargeCents += bonusCents
+	user.UpdatedAt = now
+	s.transactions = append(s.transactions, map[string]any{
+		"id":                  "tx_" + util.NewHex(18),
+		"user_id":             user.ID,
+		"email":               user.Email,
+		"type":                BillingTxTypeRecharge,
+		"amount_cents":        bonusCents,
+		"balance_after_cents": user.BalanceCents,
+		"provider":            BillingProviderRegisterBonus,
+		"note":                fmt.Sprintf("new user bonus (%d image credits)", registerBonusTimes),
+		"created_at":          now,
+	})
+	if err := s.saveLocked(); err != nil {
+		user.BalanceCents -= bonusCents
+		user.TotalRechargeCents -= bonusCents
+		user.UpdatedAt = util.NowISO()
+		if len(s.transactions) > 0 {
+			s.transactions = s.transactions[:len(s.transactions)-1]
+		}
+		return err
+	}
+	return nil
 }
 
 type AgencyTierBenefit struct {
@@ -562,6 +652,179 @@ func (s *EmailBillingService) AgencyDashboardByIdentity(identity Identity, regis
 func (s *EmailBillingService) agencyDashboardLocked(user *billingUser, registerURLBase string) map[string]any {
 	inviteCode := strings.TrimSpace(user.InviteCode)
 	invitedUsers := s.invitedUsersByCodeLocked(inviteCode)
+	todayCommission, monthCommission, totalCommission, orderRows := s.agencyCommissionStatsLocked(user, invitedUsers)
+	withdrawReservedCents := s.agencyWithdrawReservedCentsLocked(user.ID)
+	availableCents := totalCommission - withdrawReservedCents
+	if availableCents < 0 {
+		availableCents = 0
+	}
+	withdrawRequests := s.listAgencyWithdrawalsByUserIDLocked(user.ID, 200)
+
+	return map[string]any{
+		"agent": map[string]any{
+			"user_id":        user.ID,
+			"email":          user.Email,
+			"name":           user.Name,
+			"tier":           user.AgencyTier,
+			"enabled":        user.AgencyEnabled,
+			"commission_bp":  user.AgencyCommissionBP,
+			"discount_bp":    user.AgencyDiscountBP,
+			"joined_at":      user.AgencyJoinedAt,
+			"invite_code":    user.InviteCode,
+			"channel_link":   buildAgencyInviteLink(registerURLBase, user.InviteCode),
+			"invited_count":  len(invitedUsers),
+			"invited_users":  invitedUsers,
+			"wallet_balance": user.BalanceCents,
+		},
+		"summary": map[string]any{
+			"today_commission_cents": todayCommission,
+			"today_commission_yuan":  centsToYuan(todayCommission),
+			"month_commission_cents": monthCommission,
+			"month_commission_yuan":  centsToYuan(monthCommission),
+			"total_commission_cents": totalCommission,
+			"total_commission_yuan":  centsToYuan(totalCommission),
+			"available_cents":        availableCents,
+			"available_yuan":         centsToYuan(availableCents),
+		},
+		"orders":      orderRows,
+		"withdrawals": withdrawRequests,
+	}
+}
+
+func (s *EmailBillingService) CreateAgencyWithdrawalRequest(identity Identity, amountCents int, alipayQRCode, weChatQRCode, phone, weChatID string) (map[string]any, error) {
+	if amountCents <= 0 {
+		return nil, fmt.Errorf("withdraw amount must be greater than 0")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user := s.ensureUserByIdentityLocked(identity)
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	if !user.AgencyEnabled || normalizeAgencyTier(user.AgencyTier) == "" {
+		return nil, fmt.Errorf("agency permission required")
+	}
+
+	_, _, totalCommission, _ := s.agencyCommissionStatsLocked(user, s.invitedUsersByCodeLocked(user.InviteCode))
+	reserved := s.agencyWithdrawReservedCentsLocked(user.ID)
+	available := totalCommission - reserved
+	if available < 0 {
+		available = 0
+	}
+	if amountCents > available {
+		return nil, fmt.Errorf("withdraw amount exceeds available balance")
+	}
+
+	item := &billingWithdrawalRequest{
+		ID:           "wd_" + util.NewHex(18),
+		UserID:       user.ID,
+		UserEmail:    user.Email,
+		AmountCents:  amountCents,
+		AlipayQRCode: strings.TrimSpace(alipayQRCode),
+		WeChatQRCode: strings.TrimSpace(weChatQRCode),
+		Phone:        strings.TrimSpace(phone),
+		WeChatID:     strings.TrimSpace(weChatID),
+		Status:       BillingWithdrawStatusPending,
+		AdminNote:    "",
+		CreatedAt:    util.NowISO(),
+		UpdatedAt:    util.NowISO(),
+		ProcessedAt:  "",
+	}
+	if item.AlipayQRCode == "" && item.WeChatQRCode == "" && item.Phone == "" && item.WeChatID == "" {
+		return nil, fmt.Errorf("at least one payout contact is required")
+	}
+	s.withdrawals = append(s.withdrawals, item)
+	if err := s.saveLocked(); err != nil {
+		if len(s.withdrawals) > 0 {
+			s.withdrawals = s.withdrawals[:len(s.withdrawals)-1]
+		}
+		return nil, err
+	}
+	return publicBillingWithdrawalRequest(item), nil
+}
+
+func (s *EmailBillingService) ListAgencyWithdrawalRequestsByIdentity(identity Identity, limit int) ([]map[string]any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.ensureUserByIdentityLocked(identity)
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	return s.listAgencyWithdrawalsByUserIDLocked(user.ID, limit), nil
+}
+
+func (s *EmailBillingService) ListAgencyWithdrawalRequestsForAdmin(limit int) []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]map[string]any, 0, len(s.withdrawals))
+	for _, item := range s.withdrawals {
+		if item == nil {
+			continue
+		}
+		out = append(out, publicBillingWithdrawalRequest(item))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := parseBillingTimestamp(strings.TrimSpace(util.Clean(out[i]["created_at"])))
+		right := parseBillingTimestamp(strings.TrimSpace(util.Clean(out[j]["created_at"])))
+		if !left.Equal(right) {
+			return left.After(right)
+		}
+		return strings.TrimSpace(util.Clean(out[i]["id"])) > strings.TrimSpace(util.Clean(out[j]["id"]))
+	})
+	if limit > 0 && len(out) > limit {
+		return out[:limit]
+	}
+	return out
+}
+
+func (s *EmailBillingService) listAgencyWithdrawalsByUserIDLocked(userID string, limit int) []map[string]any {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return []map[string]any{}
+	}
+	out := make([]map[string]any, 0)
+	for _, item := range s.withdrawals {
+		if item == nil || strings.TrimSpace(item.UserID) != userID {
+			continue
+		}
+		out = append(out, publicBillingWithdrawalRequest(item))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := parseBillingTimestamp(strings.TrimSpace(util.Clean(out[i]["created_at"])))
+		right := parseBillingTimestamp(strings.TrimSpace(util.Clean(out[j]["created_at"])))
+		if !left.Equal(right) {
+			return left.After(right)
+		}
+		return strings.TrimSpace(util.Clean(out[i]["id"])) > strings.TrimSpace(util.Clean(out[j]["id"]))
+	})
+	if limit > 0 && len(out) > limit {
+		return out[:limit]
+	}
+	return out
+}
+
+func (s *EmailBillingService) agencyWithdrawReservedCentsLocked(userID string) int {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return 0
+	}
+	total := 0
+	for _, item := range s.withdrawals {
+		if item == nil || strings.TrimSpace(item.UserID) != userID {
+			continue
+		}
+		switch normalizeAgencyWithdrawStatus(item.Status) {
+		case BillingWithdrawStatusRejected:
+			continue
+		default:
+			total += maxBillingInt(0, item.AmountCents)
+		}
+	}
+	return total
+}
+
+func (s *EmailBillingService) agencyCommissionStatsLocked(user *billingUser, invitedUsers []map[string]any) (int, int, int, []map[string]any) {
 	invitedUserSet := map[string]struct{}{}
 	for _, item := range invitedUsers {
 		id := strings.TrimSpace(util.Clean(item["id"]))
@@ -618,35 +881,7 @@ func (s *EmailBillingService) agencyDashboardLocked(user *billingUser, registerU
 		right := parseBillingTimestamp(strings.TrimSpace(util.Clean(orderRows[j]["created_at"])))
 		return left.After(right)
 	})
-
-	return map[string]any{
-		"agent": map[string]any{
-			"user_id":        user.ID,
-			"email":          user.Email,
-			"name":           user.Name,
-			"tier":           user.AgencyTier,
-			"enabled":        user.AgencyEnabled,
-			"commission_bp":  user.AgencyCommissionBP,
-			"discount_bp":    user.AgencyDiscountBP,
-			"joined_at":      user.AgencyJoinedAt,
-			"invite_code":    user.InviteCode,
-			"channel_link":   buildAgencyInviteLink(registerURLBase, user.InviteCode),
-			"invited_count":  len(invitedUsers),
-			"invited_users":  invitedUsers,
-			"wallet_balance": user.BalanceCents,
-		},
-		"summary": map[string]any{
-			"today_commission_cents": todayCommission,
-			"today_commission_yuan":  centsToYuan(todayCommission),
-			"month_commission_cents": monthCommission,
-			"month_commission_yuan":  centsToYuan(monthCommission),
-			"total_commission_cents": totalCommission,
-			"total_commission_yuan":  centsToYuan(totalCommission),
-			"available_cents":        totalCommission,
-			"available_yuan":         centsToYuan(totalCommission),
-		},
-		"orders": orderRows,
-	}
+	return todayCommission, monthCommission, totalCommission, orderRows
 }
 
 func buildAgencyInviteLink(base, inviteCode string) string {
@@ -1784,6 +2019,7 @@ func (s *EmailBillingService) loadLocked() {
 	registerCodes := util.AsMapSlice(obj["register_codes"])
 	redeemCodes := util.AsMapSlice(obj["redeem_codes"])
 	orders := util.AsMapSlice(obj["orders"])
+	withdrawals := util.AsMapSlice(obj["withdrawals"])
 	transactions := util.AsMapSlice(obj["transactions"])
 
 	s.users = map[string]*billingUser{}
@@ -1792,6 +2028,7 @@ func (s *EmailBillingService) loadLocked() {
 	s.registerCodes = map[string]*billingRegisterCode{}
 	s.redeemCodes = map[string]*billingRedeemCode{}
 	s.orders = map[string]*billingOrder{}
+	s.withdrawals = make([]*billingWithdrawalRequest, 0, len(withdrawals))
 	s.transactions = make([]map[string]any, 0, len(transactions))
 
 	for _, rawUser := range users {
@@ -1828,6 +2065,13 @@ func (s *EmailBillingService) loadLocked() {
 		}
 		s.redeemCodes[item.Code] = item
 	}
+	for _, rawWithdraw := range withdrawals {
+		item := normalizeBillingWithdrawalRequest(rawWithdraw)
+		if item == nil {
+			continue
+		}
+		s.withdrawals = append(s.withdrawals, item)
+	}
 	for _, tx := range transactions {
 		s.transactions = append(s.transactions, tx)
 	}
@@ -1850,6 +2094,13 @@ func (s *EmailBillingService) saveLocked() error {
 	for _, item := range s.redeemCodes {
 		redeemCodes = append(redeemCodes, billingRedeemCodeToMap(item))
 	}
+	withdrawals := make([]map[string]any, 0, len(s.withdrawals))
+	for _, item := range s.withdrawals {
+		if item == nil {
+			continue
+		}
+		withdrawals = append(withdrawals, billingWithdrawalRequestToMap(item))
+	}
 	sort.Slice(users, func(i, j int) bool {
 		return util.Clean(users[i]["created_at"]) > util.Clean(users[j]["created_at"])
 	})
@@ -1862,11 +2113,15 @@ func (s *EmailBillingService) saveLocked() error {
 	sort.Slice(redeemCodes, func(i, j int) bool {
 		return util.Clean(redeemCodes[i]["created_at"]) > util.Clean(redeemCodes[j]["created_at"])
 	})
+	sort.Slice(withdrawals, func(i, j int) bool {
+		return util.Clean(withdrawals[i]["created_at"]) > util.Clean(withdrawals[j]["created_at"])
+	})
 	value := map[string]any{
 		"users":          users,
 		"register_codes": registerCodes,
 		"redeem_codes":   redeemCodes,
 		"orders":         orders,
+		"withdrawals":    withdrawals,
 		"transactions":   s.transactions,
 	}
 	return saveStoredJSON(s.store, s.docName, s.path, value)
@@ -2230,6 +2485,85 @@ func billingRedeemCodeToMap(item *billingRedeemCode) map[string]any {
 		"used_by":      item.UsedBy,
 		"used_at":      item.UsedAt,
 		"note":         item.Note,
+	}
+}
+
+func normalizeAgencyWithdrawStatus(value any) string {
+	switch strings.ToLower(strings.TrimSpace(util.Clean(value))) {
+	case BillingWithdrawStatusApproved:
+		return BillingWithdrawStatusApproved
+	case BillingWithdrawStatusRejected:
+		return BillingWithdrawStatusRejected
+	case BillingWithdrawStatusPaid:
+		return BillingWithdrawStatusPaid
+	default:
+		return BillingWithdrawStatusPending
+	}
+}
+
+func normalizeBillingWithdrawalRequest(raw map[string]any) *billingWithdrawalRequest {
+	id := strings.TrimSpace(util.Clean(raw["id"]))
+	userID := strings.TrimSpace(util.Clean(raw["user_id"]))
+	if id == "" || userID == "" {
+		return nil
+	}
+	amountCents := maxBillingInt(0, util.ToInt(raw["amount_cents"], 0))
+	if amountCents <= 0 {
+		return nil
+	}
+	createdAt := firstNonEmpty(strings.TrimSpace(util.Clean(raw["created_at"])), util.NowISO())
+	updatedAt := firstNonEmpty(strings.TrimSpace(util.Clean(raw["updated_at"])), createdAt)
+	return &billingWithdrawalRequest{
+		ID:           id,
+		UserID:       userID,
+		UserEmail:    strings.TrimSpace(util.Clean(raw["user_email"])),
+		AmountCents:  amountCents,
+		AlipayQRCode: strings.TrimSpace(util.Clean(raw["alipay_qr_code"])),
+		WeChatQRCode: strings.TrimSpace(util.Clean(raw["wechat_qr_code"])),
+		Phone:        strings.TrimSpace(util.Clean(raw["phone"])),
+		WeChatID:     strings.TrimSpace(util.Clean(raw["wechat_id"])),
+		Status:       normalizeAgencyWithdrawStatus(raw["status"]),
+		AdminNote:    strings.TrimSpace(util.Clean(raw["admin_note"])),
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
+		ProcessedAt:  strings.TrimSpace(util.Clean(raw["processed_at"])),
+	}
+}
+
+func billingWithdrawalRequestToMap(item *billingWithdrawalRequest) map[string]any {
+	return map[string]any{
+		"id":             item.ID,
+		"user_id":        item.UserID,
+		"user_email":     item.UserEmail,
+		"amount_cents":   item.AmountCents,
+		"alipay_qr_code": item.AlipayQRCode,
+		"wechat_qr_code": item.WeChatQRCode,
+		"phone":          item.Phone,
+		"wechat_id":      item.WeChatID,
+		"status":         normalizeAgencyWithdrawStatus(item.Status),
+		"admin_note":     item.AdminNote,
+		"created_at":     item.CreatedAt,
+		"updated_at":     item.UpdatedAt,
+		"processed_at":   item.ProcessedAt,
+	}
+}
+
+func publicBillingWithdrawalRequest(item *billingWithdrawalRequest) map[string]any {
+	return map[string]any{
+		"id":             item.ID,
+		"user_id":        item.UserID,
+		"user_email":     item.UserEmail,
+		"amount_cents":   item.AmountCents,
+		"amount_yuan":    centsToYuan(item.AmountCents),
+		"alipay_qr_code": item.AlipayQRCode,
+		"wechat_qr_code": item.WeChatQRCode,
+		"phone":          item.Phone,
+		"wechat_id":      item.WeChatID,
+		"status":         normalizeAgencyWithdrawStatus(item.Status),
+		"admin_note":     item.AdminNote,
+		"created_at":     item.CreatedAt,
+		"updated_at":     item.UpdatedAt,
+		"processed_at":   item.ProcessedAt,
 	}
 }
 

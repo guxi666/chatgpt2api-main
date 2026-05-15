@@ -123,6 +123,7 @@ const IMAGE_CUSTOM_HEIGHT_STORAGE_KEY = "chatgpt2api:image_last_custom_height";
 const IMAGE_QUALITY_STORAGE_KEY = "chatgpt2api:image_last_quality";
 const IMAGE_OUTPUT_FORMAT_STORAGE_KEY = "chatgpt2api:image_last_output_format";
 const IMAGE_OUTPUT_COMPRESSION_STORAGE_KEY = "chatgpt2api:image_last_output_compression";
+const IMAGE_PRESETS_STORAGE_KEY = "chatgpt2api:image_prompt_presets_v1";
 const QUOTA_REFRESH_EVENT = "chatgpt2api:quota-refresh";
 const DEFAULT_IMAGE_QUALITY: ImageQuality = "high";
 const DEFAULT_IMAGE_OUTPUT_FORMAT: ImageOutputFormat = "png";
@@ -153,6 +154,51 @@ type EditingTurnDraft = {
 };
 
 type CreationTaskDataItem = NonNullable<CreationTask["data"]>[number];
+
+function loadStoredImagePromptPresets() {
+  if (typeof window === "undefined") {
+    return IMAGE_PROMPT_PRESETS;
+  }
+  try {
+    const raw = window.localStorage.getItem(IMAGE_PRESETS_STORAGE_KEY);
+    if (!raw) {
+      return IMAGE_PROMPT_PRESETS;
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return IMAGE_PROMPT_PRESETS;
+    }
+    const byID = new Map<string, ImagePromptPreset>();
+    IMAGE_PROMPT_PRESETS.forEach((item) => {
+      byID.set(item.id, item);
+    });
+    parsed.forEach((item) => {
+      if (!item || typeof item !== "object") return;
+      const id = String((item as { id?: unknown }).id || "").trim();
+      if (!id || !byID.has(id)) return;
+      const current = byID.get(id)!;
+      byID.set(id, {
+        ...current,
+        title: String((item as { title?: unknown }).title ?? current.title),
+        prompt: String((item as { prompt?: unknown }).prompt ?? current.prompt),
+        hint: String((item as { hint?: unknown }).hint ?? current.hint),
+        imageSrc: String((item as { imageSrc?: unknown }).imageSrc ?? current.imageSrc),
+        count: Math.max(1, Number((item as { count?: unknown }).count ?? current.count) || current.count),
+        size: String((item as { size?: unknown }).size ?? current.size),
+      });
+    });
+    return IMAGE_PROMPT_PRESETS.map((item) => byID.get(item.id) || item);
+  } catch {
+    return IMAGE_PROMPT_PRESETS;
+  }
+}
+
+function persistImagePromptPresets(presets: ImagePromptPreset[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(IMAGE_PRESETS_STORAGE_KEY, JSON.stringify(presets));
+}
 
 function buildConversationTitle(prompt: string) {
   const trimmed = prompt.trim();
@@ -593,6 +639,15 @@ function formatCreationTaskErrorMessage(message: string) {
     return "当前没有可用的图片额度，请检查账号额度或稍后重试。";
   }
 
+  if (normalized.includes("platform_authorize_http_403") || normalized.includes("challenges.cloudflare.com") || normalized.includes("just a moment")) {
+    return "请求被 Cloudflare 风控拦截（403），请更换网络/代理出口，或降低并发后重试。";
+  }
+  if (normalized.includes("password_verify_http_409") || normalized.includes("invalid_state") || normalized.includes("invalid session")) {
+    return "注册会话已失效（409），请重新开始本次注册流程后再试。";
+  }
+  if (normalized.includes("single image count limit")) {
+    return "超出单次出图数量限制，请减少本次生成张数后重试。";
+  }
   return trimmed;
 }
 
@@ -900,11 +955,20 @@ function ImagePageContent() {
   const [progressNow, setProgressNow] = useState(Date.now());
   const [composerDockHeight, setComposerDockHeight] = useState(0);
   const [visibilityMutatingImageKey, setVisibilityMutatingImageKey] = useState("");
+  const [promptPresets, setPromptPresets] = useState<ImagePromptPreset[]>(loadStoredImagePromptPresets);
   const appMeta = useAppMeta();
   const imageSingleCountLimit = useMemo(
     () => Math.max(1, Math.min(10, Number(appMeta.image_single_count_limit) || 10)),
     [appMeta.image_single_count_limit],
   );
+
+  const handleUpdatePromptPreset = useCallback((preset: ImagePromptPreset) => {
+    setPromptPresets((current) => {
+      const next = current.map((item) => (item.id === preset.id ? { ...item, ...preset } : item));
+      persistImagePromptPresets(next);
+      return next;
+    });
+  }, []);
 
   const parsedCount = useMemo(
     () => normalizeRequestedImageCount(imageCount, imageSingleCountLimit),
@@ -2956,7 +3020,8 @@ function ImagePageContent() {
               selectedConversation={selectedConversation}
               progressByTurnKey={progressByTurnKey}
               progressNow={progressNow}
-              promptPresets={IMAGE_PROMPT_PRESETS}
+              promptPresets={promptPresets}
+              onUpdatePromptPreset={handleUpdatePromptPreset}
               onOpenLightbox={openLightbox}
               onApplyPromptPreset={handleApplyPromptPreset}
               onContinueEdit={handleContinueEdit}

@@ -60,6 +60,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     positionX: Number(config.login_page_image_position_x),
     positionY: Number(config.login_page_image_position_y),
   });
+  const registrationBonusImageTimes = Number(config.registration_bonus_image_times);
   return {
     ...config,
     refresh_account_interval_minute: Number(config.refresh_account_interval_minute || 5),
@@ -86,6 +87,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
       typeof config.registration_allowed_email_domains === "string"
         ? config.registration_allowed_email_domains
         : "qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,icloud.com,yahoo.com,foxmail.com,sina.com",
+    registration_bonus_image_times: Number.isFinite(registrationBonusImageTimes) ? registrationBonusImageTimes : 20,
     cf_turnstile_site_key: typeof config.cf_turnstile_site_key === "string" ? config.cf_turnstile_site_key : "",
     cf_turnstile_secret_key: "",
     cf_turnstile_secret_key_configured: Boolean(config.cf_turnstile_secret_key_configured),
@@ -211,6 +213,7 @@ type SettingsStore = {
   setBrandSiteLogoURL: (value: string) => void;
   setRegistrationEnabled: (value: boolean) => void;
   setRegistrationAllowedEmailDomains: (value: string) => void;
+  setRegistrationBonusImageTimes: (value: string) => void;
   setCFTurnstileSiteKey: (value: string) => void;
   setCFTurnstileSecretKey: (value: string) => void;
   setEmailSMTPEnabled: (value: boolean) => void;
@@ -370,6 +373,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         brand_site_logo_url: String(config.brand_site_logo_url || "").trim(),
         registration_enabled: Boolean(config.registration_enabled),
         registration_allowed_email_domains: String(config.registration_allowed_email_domains || "").trim(),
+        registration_bonus_image_times: Math.max(0, Number(config.registration_bonus_image_times) || 0),
         cf_turnstile_site_key: String(config.cf_turnstile_site_key || "").trim(),
         cf_turnstile_secret_key: cfTurnstileSecretKey,
         email_smtp_enabled: Boolean(config.email_smtp_enabled),
@@ -556,6 +560,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setRegistrationAllowedEmailDomains: (value) => {
     set((state) => state.config ? { config: { ...state.config, registration_allowed_email_domains: value } } : {});
+  },
+
+  setRegistrationBonusImageTimes: (value) => {
+    set((state) => state.config ? { config: { ...state.config, registration_bonus_image_times: value } } : {});
   },
 
   setCFTurnstileSiteKey: (value) => {

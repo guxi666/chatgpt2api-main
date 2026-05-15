@@ -194,6 +194,64 @@ func (s *ImageService) ListImages(baseURL, startDate, endDate string, scope Imag
 	return map[string]any{"items": items, "groups": groups}
 }
 
+func (s *ImageService) ListImagesPage(baseURL, startDate, endDate string, scope ImageAccessScope, page, pageSize int) map[string]any {
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 500 {
+		pageSize = 500
+	}
+	if page < 1 {
+		page = 1
+	}
+	all := s.ListImages(baseURL, startDate, endDate, scope)
+	allItems, _ := all["items"].([]map[string]any)
+	if allItems == nil {
+		allItems = []map[string]any{}
+	}
+	total := len(allItems)
+	totalPages := 1
+	if total > 0 {
+		totalPages = (total + pageSize - 1) / pageSize
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start := (page - 1) * pageSize
+	if start < 0 {
+		start = 0
+	}
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	items := allItems[start:end]
+	groupMap := map[string][]map[string]any{}
+	order := make([]string, 0)
+	for _, item := range items {
+		day := toString(item["date"])
+		if _, ok := groupMap[day]; !ok {
+			order = append(order, day)
+		}
+		groupMap[day] = append(groupMap[day], item)
+	}
+	groups := make([]map[string]any, 0, len(order))
+	for _, day := range order {
+		groups = append(groups, map[string]any{"date": day, "items": groupMap[day]})
+	}
+	return map[string]any{
+		"items":      items,
+		"groups":     groups,
+		"total":      total,
+		"page":       page,
+		"page_size":  pageSize,
+		"total_page": totalPages,
+	}
+}
+
 func (s *ImageService) UpdateImageVisibility(value, visibility string, scope ImageAccessScope) (map[string]any, error) {
 	visibility, err := NormalizeImageVisibility(visibility)
 	if err != nil {

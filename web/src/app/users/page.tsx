@@ -536,6 +536,17 @@ function UsersContent() {
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-3 text-sm">
               <span>第 {currentPage} / {totalPages} 页</span>
               <div className="flex items-center gap-2">
+                <Input
+                  value={String(currentPage)}
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
+                    if (!Number.isFinite(next)) return;
+                    setPage(Math.max(1, Math.min(totalPages, Math.trunc(next))));
+                  }}
+                  inputMode="numeric"
+                  className="h-8 w-[120px] rounded-lg"
+                  placeholder={`页码 1-${totalPages}`}
+                />
                 <Button type="button" variant="outline" className="h-8 rounded-lg px-3" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>上一页</Button>
                 <Button type="button" variant="outline" className="h-8 rounded-lg px-3" disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>下一页</Button>
               </div>

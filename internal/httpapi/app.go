@@ -543,6 +543,10 @@ func (a *App) handleAccountRegister(w http.ResponseWriter, r *http.Request) {
 		userID = strings.TrimSpace(identity.ID)
 	}
 	a.billing.EnsureWalletUserWithEmail(userID, email, identity.Name, service.AuthProviderLocal)
+	if err := a.billing.ApplyRegisterBonusForUser(userID, a.config.ImagePriceCents(), a.config.RegistrationBonusImageTimes()); err != nil {
+		util.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := a.billing.BindRegisterFingerprint(userID, registerIP, registerDeviceID); err != nil {
 		util.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -925,7 +929,17 @@ func (a *App) handleImages(w http.ResponseWriter, r *http.Request) {
 			util.WriteError(w, status, message)
 			return
 		}
-		payload := a.images.ListImages(a.resolveImageBaseURL(r), strings.TrimSpace(r.URL.Query().Get("start_date")), strings.TrimSpace(r.URL.Query().Get("end_date")), scope)
+		query := r.URL.Query()
+		startDate := strings.TrimSpace(query.Get("start_date"))
+		endDate := strings.TrimSpace(query.Get("end_date"))
+		page := util.ToInt(query.Get("page"), 0)
+		pageSize := util.ToInt(query.Get("page_size"), 0)
+		var payload map[string]any
+		if page > 0 || pageSize > 0 {
+			payload = a.images.ListImagesPage(a.resolveImageBaseURL(r), startDate, endDate, scope, page, pageSize)
+		} else {
+			payload = a.images.ListImages(a.resolveImageBaseURL(r), startDate, endDate, scope)
+		}
 		a.decorateImageList(payload)
 		util.WriteJSON(w, http.StatusOK, payload)
 	case http.MethodDelete:

@@ -138,6 +138,9 @@ export function ConfigCard() {
   const setRegistrationAllowedEmailDomains = useSettingsStore(
     (state) => state.setRegistrationAllowedEmailDomains,
   );
+  const setRegistrationBonusImageTimes = useSettingsStore(
+    (state) => state.setRegistrationBonusImageTimes,
+  );
   const setCFTurnstileSiteKey = useSettingsStore(
     (state) => state.setCFTurnstileSiteKey,
   );
@@ -446,6 +449,20 @@ export function ConfigCard() {
                   setRegistrationAllowedEmailDomains(event.target.value)
                 }
                 placeholder="qq.com,163.com,gmail.com,outlook.com"
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-registration-bonus-image-times">
+                新用户注册赠送次数
+              </ConfigFieldLabel>
+              <Input
+                id="settings-registration-bonus-image-times"
+                value={String(config?.registration_bonus_image_times ?? "")}
+                onChange={(event) =>
+                  setRegistrationBonusImageTimes(event.target.value)
+                }
+                placeholder="20"
                 className={settingsInputClassName}
               />
             </Field>

@@ -4,6 +4,16 @@ import { useRef, useState } from "react";
 import { Check, CircleStop, Clock3, Download, Eye, Globe2, LoaderCircle, Lock, PencilLine, Plus, RotateCcw, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import type { ImagePromptPreset } from "@/app/image/image-presets";
 import type { ImageVisibility } from "@/lib/api";
 import { formatBase64ImageFileSize, formatImageFileSize } from "@/lib/image-size";
@@ -31,6 +41,7 @@ type ImageResultsProps = {
   progressByTurnKey: Record<string, ImageTurnProgress>;
   progressNow: number;
   promptPresets: readonly ImagePromptPreset[];
+  onUpdatePromptPreset: (preset: ImagePromptPreset) => void;
   onOpenLightbox: (images: ImageLightboxItem[], index: number) => void;
   onApplyPromptPreset: (preset: ImagePromptPreset) => void | Promise<void>;
   onContinueEdit: (conversationId: string, image: StoredImage | StoredReferenceImage) => void;
@@ -202,6 +213,7 @@ export function ImageResults({
   progressByTurnKey,
   progressNow,
   promptPresets,
+  onUpdatePromptPreset,
   onOpenLightbox,
   onApplyPromptPreset,
   onContinueEdit,
@@ -217,7 +229,42 @@ export function ImageResults({
   const [imageSizeLabels, setImageSizeLabels] = useState<Record<string, string>>({});
   const [selectedImageIds, setSelectedImageIds] = useState<Record<string, boolean>>({});
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
+  const [editingPreset, setEditingPreset] = useState<ImagePromptPreset | null>(null);
+  const [editingPresetTitle, setEditingPresetTitle] = useState("");
+  const [editingPresetPrompt, setEditingPresetPrompt] = useState("");
+  const [editingPresetImageSrc, setEditingPresetImageSrc] = useState("");
   const pendingImageSizeIdsRef = useRef<Set<string>>(new Set());
+
+  const openPresetEditor = (preset: ImagePromptPreset) => {
+    setEditingPreset(preset);
+    setEditingPresetTitle(preset.title);
+    setEditingPresetPrompt(preset.prompt);
+    setEditingPresetImageSrc(preset.imageSrc);
+  };
+
+  const buildEditedPreset = () => {
+    if (!editingPreset) {
+      return null;
+    }
+    return {
+      ...editingPreset,
+      title: editingPresetTitle.trim() || editingPreset.title,
+      prompt: editingPresetPrompt.trim() || editingPreset.prompt,
+      imageSrc: editingPresetImageSrc.trim() || editingPreset.imageSrc,
+    } satisfies ImagePromptPreset;
+  };
+
+  const handleSaveEditedPreset = async (applyAfterSave: boolean) => {
+    const nextPreset = buildEditedPreset();
+    if (!nextPreset) {
+      return;
+    }
+    onUpdatePromptPreset(nextPreset);
+    setEditingPreset(null);
+    if (applyAfterSave) {
+      await onApplyPromptPreset(nextPreset);
+    }
+  };
 
   const updateImageDimensions = (id: string, width: number, height: number) => {
     const dimensions = formatImageDimensions(width, height);
@@ -323,12 +370,72 @@ export function ImageResults({
                 <div className="flex flex-col gap-2 px-4 py-3.5">
                   <div className="font-display text-sm font-semibold text-[#222222]">{preset.title}</div>
                   <div className="line-clamp-2 text-sm leading-6 text-[#45515e]">{preset.hint}</div>
-                  <div className="border-t border-[#f2f3f5] pt-2 text-xs font-medium text-[#1456f0]">套用这个预设</div>
+                  <div className="flex items-center justify-between border-t border-[#f2f3f5] pt-2">
+                    <span className="text-xs font-medium text-[#1456f0]">套用这个预设</span>
+                    <button
+                      type="button"
+                      className="text-xs text-[#45515e] hover:text-[#1456f0]"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openPresetEditor(preset);
+                      }}
+                    >
+                      编辑后套用
+                    </button>
+                  </div>
                 </div>
               </button>
             ))}
           </div>
         </div>
+        {editingPreset ? (
+          <Dialog open onOpenChange={(next) => (!next ? setEditingPreset(null) : null)}>
+            <DialogContent className="rounded-2xl p-6 sm:max-w-2xl">
+              <DialogHeader className="gap-2">
+                <DialogTitle>编辑套图模板</DialogTitle>
+                <DialogDescription>可同时修改模板标题、提示词和展示图片。</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <Input
+                  value={editingPresetTitle}
+                  onChange={(event) => setEditingPresetTitle(event.target.value)}
+                  placeholder="模板标题"
+                />
+                <Input
+                  value={editingPresetImageSrc}
+                  onChange={(event) => setEditingPresetImageSrc(event.target.value)}
+                  placeholder="图片地址（支持本地路径或完整 URL）"
+                />
+                {editingPresetImageSrc.trim() ? (
+                  <div className="overflow-hidden rounded-xl border border-[#e5e7eb] bg-[#f8f8f8]">
+                    <img
+                      src={editingPresetImageSrc.trim()}
+                      alt={editingPresetTitle || "模板预览图"}
+                      className="h-40 w-full object-cover"
+                    />
+                  </div>
+                ) : null}
+                <Textarea
+                  value={editingPresetPrompt}
+                  onChange={(event) => setEditingPresetPrompt(event.target.value)}
+                  rows={10}
+                  placeholder="请输入提示词"
+                />
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setEditingPreset(null)}>
+                  取消
+                </Button>
+                <Button type="button" variant="outline" onClick={() => void handleSaveEditedPreset(false)}>
+                  仅保存模板
+                </Button>
+                <Button type="button" onClick={() => void handleSaveEditedPreset(true)}>
+                  保存并套用
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        ) : null}
       </div>
     );
   }
@@ -885,6 +992,13 @@ function getTurnOutcomeLabel(successCount: number, failedCount: number, cancelle
 function normalizeImageError(error?: string) {
   if (!error) {
     return "";
+  }
+  const normalized = error.toLowerCase();
+  if (normalized.includes("platform_authorize_http_403") || normalized.includes("challenges.cloudflare.com") || normalized.includes("just a moment")) {
+    return "请求被 Cloudflare 风控拦截（403），请更换网络/代理后重试。";
+  }
+  if (normalized.includes("password_verify_http_409") || normalized.includes("invalid_state") || normalized.includes("invalid session")) {
+    return "会话已失效（409），请重新发起任务。";
   }
   if (error.includes("Paid") && (error.includes("1K/2K/4K") || error.includes("高分辨率"))) {
     return "生成失败，请点击重试";
