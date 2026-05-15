@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"image"
@@ -19,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"chatgpt2api/internal/objectstore"
 	"chatgpt2api/internal/storage"
 )
 
@@ -37,6 +39,10 @@ type ImageConfig interface {
 	ImageThumbnailsDir() string
 	ImageMetadataDir() string
 	CleanupOldImages() int
+}
+
+type imageObjectStorageConfig interface {
+	ImageObjectStorage() objectstore.Config
 }
 
 type ImageAccessScope struct {
@@ -59,6 +65,25 @@ type GeneratedImageMetadata struct {
 	ResolutionPreset string
 	RequestedSize    string
 	OutputFormat     string
+}
+
+type RemoteImageRecord struct {
+	Path             string
+	Name             string
+	Date             string
+	Size             int64
+	URL              string
+	ObjectKey        string
+	CreatedAt        string
+	Visibility       string
+	OwnerID          string
+	OwnerName        string
+	PublishedAt      string
+	ResolutionPreset string
+	RequestedSize    string
+	OutputFormat     string
+	Width            int
+	Height           int
 }
 
 type ImageFileAccess struct {
@@ -95,6 +120,7 @@ func (s *ImageService) ListImages(baseURL, startDate, endDate string, scope Imag
 	s.config.CleanupOldImages()
 	root := s.config.ImagesDir()
 	items := make([]map[string]any, 0)
+	localPaths := map[string]struct{}{}
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
@@ -104,6 +130,7 @@ func (s *ImageService) ListImages(baseURL, startDate, endDate string, scope Imag
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
+		localPaths[rel] = struct{}{}
 		info, err := d.Info()
 		if err != nil {
 			return nil
@@ -156,6 +183,12 @@ func (s *ImageService) ListImages(baseURL, startDate, endDate string, scope Imag
 		if meta.OutputFormat != "" {
 			item["output_format"] = meta.OutputFormat
 		}
+		if provider, ok := s.config.(imageObjectStorageConfig); ok {
+			cfg := provider.ImageObjectStorage()
+			if cfg.PublicBaseURL != "" {
+				item["r2_url"] = cfg.PublicURL(cfg.ObjectKey(rel))
+			}
+		}
 		if thumbRel, ok := thumb["thumbnail_rel"].(string); ok && thumbRel != "" {
 			item["thumbnail_url"] = thumbnailURL(baseURL, thumbRel, info.ModTime())
 		} else {
@@ -169,6 +202,7 @@ func (s *ImageService) ListImages(baseURL, startDate, endDate string, scope Imag
 		items = append(items, item)
 		return nil
 	})
+	items = append(items, s.remoteImageItems(startDate, endDate, scope, localPaths)...)
 	sort.Slice(items, func(i, j int) bool {
 		left := toString(items[i]["created_at"])
 		right := toString(items[j]["created_at"])
@@ -250,6 +284,79 @@ func (s *ImageService) ListImagesPage(baseURL, startDate, endDate string, scope 
 		"page_size":  pageSize,
 		"total_page": totalPages,
 	}
+}
+
+func (s *ImageService) remoteImageItems(startDate, endDate string, scope ImageAccessScope, localPaths map[string]struct{}) []map[string]any {
+	records := LoadRemoteImageRecords(s.store, s.config.ImagesDir())
+	items := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		if record.Path == "" || record.URL == "" {
+			continue
+		}
+		if _, ok := localPaths[record.Path]; ok {
+			continue
+		}
+		day := record.Date
+		if day == "" {
+			day = imageDay(record.Path, time.Now())
+		}
+		if startDate != "" && day < startDate {
+			continue
+		}
+		if endDate != "" && day > endDate {
+			continue
+		}
+		meta := imageMetadata{
+			OwnerID:          record.OwnerID,
+			OwnerName:        record.OwnerName,
+			Visibility:       record.Visibility,
+			PublishedAt:      record.PublishedAt,
+			ResolutionPreset: record.ResolutionPreset,
+			RequestedSize:    record.RequestedSize,
+			OutputFormat:     record.OutputFormat,
+		}
+		if meta.Visibility == "" {
+			meta.Visibility = ImageVisibilityPrivate
+		}
+		if !imageMetadataAllowsAccess(meta, scope) {
+			continue
+		}
+		item := map[string]any{
+			"name":          firstNonEmptyString(record.Name, filepath.Base(record.Path)),
+			"path":          record.Path,
+			"date":          day,
+			"size":          record.Size,
+			"url":           record.URL,
+			"r2_url":        record.URL,
+			"thumbnail_url": record.URL,
+			"created_at":    firstNonEmptyString(record.CreatedAt, day+" 00:00:00"),
+			"visibility":    meta.Visibility,
+			"storage":       "r2",
+		}
+		if meta.OwnerID != "" {
+			item["owner_id"] = meta.OwnerID
+		}
+		if meta.OwnerName != "" {
+			item["owner_name"] = meta.OwnerName
+		}
+		if meta.PublishedAt != "" {
+			item["published_at"] = meta.PublishedAt
+		}
+		if meta.ResolutionPreset != "" {
+			item["resolution_preset"] = meta.ResolutionPreset
+		}
+		if meta.RequestedSize != "" {
+			item["requested_size"] = meta.RequestedSize
+		}
+		if meta.OutputFormat != "" {
+			item["output_format"] = meta.OutputFormat
+		}
+		if record.Width > 0 && record.Height > 0 {
+			setImageItemDimensions(item, record.Width, record.Height)
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func (s *ImageService) UpdateImageVisibility(value, visibility string, scope ImageAccessScope) (map[string]any, error) {
@@ -364,12 +471,17 @@ func (s *ImageService) DeleteImages(paths []string, scope ImageAccessScope) (map
 			continue
 		}
 		seen[rel] = struct{}{}
+		remoteRecord, hasRemoteRecord := s.remoteImageRecord(rel)
 
 		imagePath := filepath.Join(imageRoot, filepath.FromSlash(rel))
 		if !pathInsideRoot(imageRoot, imagePath) {
 			return nil, errors.New("invalid image path")
 		}
-		if !scope.All && (scope.OwnerID == "" || s.imageOwner(rel) != scope.OwnerID) {
+		ownerID := s.imageOwner(rel)
+		if ownerID == "" {
+			ownerID = remoteRecord.OwnerID
+		}
+		if !scope.All && (scope.OwnerID == "" || ownerID != scope.OwnerID) {
 			missing++
 			continue
 		}
@@ -379,12 +491,19 @@ func (s *ImageService) DeleteImages(paths []string, scope ImageAccessScope) (map
 		if err := s.removeImageOwner(rel); err != nil {
 			return nil, err
 		}
+		if hasRemoteRecord {
+			_ = RemoveRemoteImageRecords(s.store, s.config.ImagesDir(), []string{rel})
+		}
 		info, err := os.Stat(imagePath)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
 				return nil, err
 			}
-			missing++
+			if hasRemoteRecord {
+				deleted++
+			} else {
+				missing++
+			}
 		} else if info.IsDir() {
 			return nil, errors.New("image path is not a file")
 		} else if err := os.Remove(imagePath); err != nil {
@@ -400,6 +519,125 @@ func (s *ImageService) DeleteImages(paths []string, scope ImageAccessScope) (map
 		removedPaths = append(removedPaths, rel)
 	}
 	return map[string]any{"deleted": deleted, "missing": missing, "paths": removedPaths}, nil
+}
+
+func (s *ImageService) remoteImageRecord(rel string) (RemoteImageRecord, bool) {
+	for _, record := range LoadRemoteImageRecords(s.store, s.config.ImagesDir()) {
+		if record.Path == rel {
+			return record, true
+		}
+	}
+	return RemoteImageRecord{}, false
+}
+
+func (s *ImageService) UploadImagesToObjectStorage(ctx context.Context, paths []string, scope ImageAccessScope) (map[string]any, error) {
+	if len(paths) == 0 {
+		return nil, errors.New("paths is required")
+	}
+	provider, ok := s.config.(imageObjectStorageConfig)
+	if !ok {
+		return nil, errors.New("R2 storage is not supported")
+	}
+	cfg := provider.ImageObjectStorage()
+	if !cfg.Ready() {
+		return nil, errors.New("R2 storage is not configured")
+	}
+	imageRoot, err := filepath.Abs(s.config.ImagesDir())
+	if err != nil {
+		return nil, err
+	}
+	thumbnailRoot, err := filepath.Abs(s.config.ImageThumbnailsDir())
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(paths))
+	items := make([]map[string]any, 0, len(paths))
+	var errorsList []map[string]any
+	uploaded := 0
+	missing := 0
+	failed := 0
+	for _, value := range paths {
+		rel, err := cleanImageRelativePath(value)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seen[rel]; ok {
+			continue
+		}
+		seen[rel] = struct{}{}
+		ref, err := s.imageFileRef(imageRoot, rel)
+		if err != nil {
+			missing++
+			continue
+		}
+		meta := s.imageMetadata(ref.rel)
+		if !imageMetadataAllowsAccess(meta, scope) {
+			missing++
+			continue
+		}
+		data, err := os.ReadFile(ref.path)
+		if err != nil {
+			failed++
+			errorsList = append(errorsList, map[string]any{"path": ref.rel, "error": err.Error()})
+			continue
+		}
+		width, height, _ := imageFileDimensions(ref.path)
+		key := cfg.ObjectKey(ref.rel)
+		publicURL, err := objectstore.Upload(ctx, cfg, key, data, objectstore.ContentTypeForPath(ref.path))
+		if err != nil {
+			failed++
+			errorsList = append(errorsList, map[string]any{"path": ref.rel, "error": err.Error()})
+			continue
+		}
+		if publicURL == "" {
+			failed++
+			errorsList = append(errorsList, map[string]any{"path": ref.rel, "error": "R2 public base URL is required before deleting local image"})
+			continue
+		}
+		createdAt := ref.info.ModTime().Format("2006-01-02 15:04:05")
+		if saveErr := SaveRemoteImageRecord(s.store, s.config.ImagesDir(), RemoteImageRecord{
+			Path:             ref.rel,
+			Name:             filepath.Base(ref.path),
+			Date:             imageDay(ref.rel, ref.info.ModTime()),
+			Size:             ref.info.Size(),
+			URL:              publicURL,
+			ObjectKey:        key,
+			CreatedAt:        createdAt,
+			Visibility:       meta.Visibility,
+			OwnerID:          meta.OwnerID,
+			OwnerName:        meta.OwnerName,
+			PublishedAt:      meta.PublishedAt,
+			ResolutionPreset: meta.ResolutionPreset,
+			RequestedSize:    meta.RequestedSize,
+			OutputFormat:     meta.OutputFormat,
+			Width:            width,
+			Height:           height,
+		}); saveErr != nil {
+			failed++
+			errorsList = append(errorsList, map[string]any{"path": ref.rel, "error": saveErr.Error()})
+			continue
+		}
+		if removeErr := os.Remove(ref.path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			failed++
+			errorsList = append(errorsList, map[string]any{"path": ref.rel, "error": removeErr.Error()})
+			continue
+		}
+		_ = s.removeImageThumbnail(thumbnailRoot, ref.rel)
+		removeEmptyParentDirs(imageRoot, filepath.Dir(ref.path))
+		uploaded++
+		item := map[string]any{"path": ref.rel, "key": key}
+		if publicURL != "" {
+			item["url"] = publicURL
+		}
+		items = append(items, item)
+	}
+	return map[string]any{
+		"uploaded": uploaded,
+		"missing":  missing,
+		"failed":   failed,
+		"items":    items,
+		"errors":   errorsList,
+	}, nil
 }
 
 func (s *ImageService) RecordImageOwners(values []string, ownerID string) {
@@ -428,6 +666,37 @@ func (s *ImageService) RecordGeneratedImages(values []string, ownerID, ownerName
 		if ownerID != "" && ownerID != "anonymous" {
 			_ = s.writeImageMetadataForRef(ref, ownerID, ownerName, visibility, metadata)
 		}
+	}
+	for _, value := range values {
+		rel, err := imageRelativePathFromValue(value)
+		if err != nil {
+			continue
+		}
+		record, ok := s.remoteImageRecord(rel)
+		if !ok {
+			continue
+		}
+		if ownerID != "" && ownerID != "anonymous" {
+			record.OwnerID = ownerID
+			record.OwnerName = ownerName
+		}
+		record.Visibility = visibility
+		if visibility == ImageVisibilityPublic && record.PublishedAt == "" {
+			record.PublishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		if visibility != ImageVisibilityPublic {
+			record.PublishedAt = ""
+		}
+		if preset := NormalizeImageResolutionPreset(metadata.ResolutionPreset); preset != "" {
+			record.ResolutionPreset = preset
+		}
+		if requestedSize := strings.TrimSpace(metadata.RequestedSize); requestedSize != "" {
+			record.RequestedSize = requestedSize
+		}
+		if outputFormat := NormalizeImageOutputFormat(metadata.OutputFormat); outputFormat != "" {
+			record.OutputFormat = outputFormat
+		}
+		_ = SaveRemoteImageRecord(s.store, s.config.ImagesDir(), record)
 	}
 }
 
@@ -793,6 +1062,147 @@ func (s *ImageService) removeImageThumbnail(root, rel string) error {
 	return removeImageThumbnail(root, rel)
 }
 
+const remoteImageIndexDocumentName = "image_remote_index.json"
+
+func LoadRemoteImageRecords(store storage.JSONDocumentBackend, imagesDir string) []RemoteImageRecord {
+	raw := loadStoredJSON(store, remoteImageIndexDocumentName, remoteImageIndexPath(imagesDir))
+	items := utilMapSlice(raw)
+	records := make([]RemoteImageRecord, 0, len(items))
+	for _, item := range items {
+		record := remoteImageRecordFromMap(item)
+		if record.Path != "" && record.URL != "" {
+			records = append(records, record)
+		}
+	}
+	return records
+}
+
+func SaveRemoteImageRecord(store storage.JSONDocumentBackend, imagesDir string, record RemoteImageRecord) error {
+	record.Path = filepath.ToSlash(strings.TrimSpace(record.Path))
+	record.URL = strings.TrimSpace(record.URL)
+	if record.Path == "" || record.URL == "" {
+		return nil
+	}
+	records := LoadRemoteImageRecords(store, imagesDir)
+	next := make([]RemoteImageRecord, 0, len(records)+1)
+	replaced := false
+	for _, item := range records {
+		if item.Path == record.Path {
+			next = append(next, record)
+			replaced = true
+			continue
+		}
+		next = append(next, item)
+	}
+	if !replaced {
+		next = append(next, record)
+	}
+	return saveStoredJSON(store, remoteImageIndexDocumentName, remoteImageIndexPath(imagesDir), remoteImageRecordsToMaps(next))
+}
+
+func RemoveRemoteImageRecords(store storage.JSONDocumentBackend, imagesDir string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	remove := map[string]struct{}{}
+	for _, item := range paths {
+		if rel := filepath.ToSlash(strings.TrimSpace(item)); rel != "" {
+			remove[rel] = struct{}{}
+		}
+	}
+	records := LoadRemoteImageRecords(store, imagesDir)
+	next := make([]RemoteImageRecord, 0, len(records))
+	for _, record := range records {
+		if _, ok := remove[record.Path]; ok {
+			continue
+		}
+		next = append(next, record)
+	}
+	return saveStoredJSON(store, remoteImageIndexDocumentName, remoteImageIndexPath(imagesDir), remoteImageRecordsToMaps(next))
+}
+
+func remoteImageIndexPath(imagesDir string) string {
+	return filepath.Join(filepath.Dir(imagesDir), remoteImageIndexDocumentName)
+}
+
+func remoteImageRecordsToMaps(records []RemoteImageRecord) []map[string]any {
+	out := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		item := map[string]any{
+			"path":       record.Path,
+			"name":       record.Name,
+			"date":       record.Date,
+			"size":       record.Size,
+			"url":        record.URL,
+			"object_key": record.ObjectKey,
+			"created_at": record.CreatedAt,
+			"visibility": record.Visibility,
+			"width":      record.Width,
+			"height":     record.Height,
+		}
+		if record.OwnerID != "" {
+			item["owner_id"] = record.OwnerID
+		}
+		if record.OwnerName != "" {
+			item["owner_name"] = record.OwnerName
+		}
+		if record.PublishedAt != "" {
+			item["published_at"] = record.PublishedAt
+		}
+		if record.ResolutionPreset != "" {
+			item["resolution_preset"] = record.ResolutionPreset
+		}
+		if record.RequestedSize != "" {
+			item["requested_size"] = record.RequestedSize
+		}
+		if record.OutputFormat != "" {
+			item["output_format"] = record.OutputFormat
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func remoteImageRecordFromMap(item map[string]any) RemoteImageRecord {
+	return RemoteImageRecord{
+		Path:             strings.TrimSpace(toString(item["path"])),
+		Name:             strings.TrimSpace(toString(item["name"])),
+		Date:             strings.TrimSpace(toString(item["date"])),
+		Size:             int64(numericMetaValue(item["size"])),
+		URL:              strings.TrimSpace(toString(item["url"])),
+		ObjectKey:        strings.TrimSpace(toString(item["object_key"])),
+		CreatedAt:        strings.TrimSpace(toString(item["created_at"])),
+		Visibility:       strings.TrimSpace(toString(item["visibility"])),
+		OwnerID:          strings.TrimSpace(toString(item["owner_id"])),
+		OwnerName:        strings.TrimSpace(toString(item["owner_name"])),
+		PublishedAt:      strings.TrimSpace(toString(item["published_at"])),
+		ResolutionPreset: NormalizeImageResolutionPreset(toString(item["resolution_preset"])),
+		RequestedSize:    strings.TrimSpace(toString(item["requested_size"])),
+		OutputFormat:     NormalizeImageOutputFormat(toString(item["output_format"])),
+		Width:            numericMetaValue(item["width"]),
+		Height:           numericMetaValue(item["height"]),
+	}
+}
+
+func utilMapSlice(raw any) []map[string]any {
+	switch list := raw.(type) {
+	case []map[string]any:
+		return list
+	case []any:
+		out := make([]map[string]any, 0, len(list))
+		for _, item := range list {
+			if m, ok := item.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	case map[string]any:
+		return utilMapSlice(list["items"])
+	default:
+		return nil
+	}
+}
+
 func imageOwnerDocumentName(rel string) string {
 	return "image_metadata/" + filepath.ToSlash(rel) + ".json"
 }
@@ -1082,9 +1492,20 @@ func numericMetaValue(value any) int {
 		return int(v)
 	case float64:
 		return int(v)
+	case json.Number:
+		n, err := v.Int64()
+		if err == nil {
+			return int(n)
+		}
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err == nil {
+			return n
+		}
 	default:
 		return 0
 	}
+	return 0
 }
 
 func flattenImage(src image.Image) image.Image {

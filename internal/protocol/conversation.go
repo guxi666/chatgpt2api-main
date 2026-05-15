@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"chatgpt2api/internal/backend"
+	"chatgpt2api/internal/objectstore"
 	"chatgpt2api/internal/service"
 	"chatgpt2api/internal/storage"
 	"chatgpt2api/internal/util"
@@ -101,6 +102,13 @@ func NormalizeImageOutputFormat(format string) string {
 type ImageOutputOptions struct {
 	Format      string
 	Compression *int
+}
+
+type savedImageLocation struct {
+	URL       string
+	LocalURL  string
+	RemoteURL string
+	Path      string
 }
 
 func ImageOutputOptionsFromPayload(payload map[string]any) ImageOutputOptions {
@@ -922,8 +930,14 @@ func (e *Engine) FormatImageResultWithOptions(items []map[string]any, prompt, re
 			continue
 		}
 		outputFormat := NormalizeImageOutputFormat(itemOptions.Format)
-		urlValue := e.SaveImageBytesForOwnerWithFormat(imageBytes, baseURL, ownerID, ownerName, outputFormat)
-		responseItem := map[string]any{"url": urlValue, "revised_prompt": revised, "output_format": outputFormat}
+		location := e.SaveImageBytesForOwnerWithFormatInfo(imageBytes, baseURL, ownerID, ownerName, outputFormat)
+		responseItem := map[string]any{"url": location.URL, "path": location.Path, "revised_prompt": revised, "output_format": outputFormat}
+		if location.LocalURL != "" && location.LocalURL != location.URL {
+			responseItem["local_url"] = location.LocalURL
+		}
+		if location.RemoteURL != "" {
+			responseItem["r2_url"] = location.RemoteURL
+		}
 		if responseFormat == "b64_json" {
 			responseItem["b64_json"] = base64.StdEncoding.EncodeToString(imageBytes)
 		}
@@ -948,11 +962,16 @@ func (e *Engine) SaveImageBytesForOwner(imageData []byte, baseURL, ownerID, owne
 }
 
 func (e *Engine) SaveImageBytesForOwnerWithFormat(imageData []byte, baseURL, ownerID, ownerName, outputFormat string) string {
+	return e.SaveImageBytesForOwnerWithFormatInfo(imageData, baseURL, ownerID, ownerName, outputFormat).URL
+}
+
+func (e *Engine) SaveImageBytesForOwnerWithFormatInfo(imageData []byte, baseURL, ownerID, ownerName, outputFormat string) savedImageLocation {
 	outputFormat = NormalizeImageOutputFormat(outputFormat)
 	e.Config.CleanupOldImages()
 	sum := md5.Sum(imageData)
-	filename := fmt.Sprintf("%d_%s.%s", time.Now().Unix(), hex.EncodeToString(sum[:]), imageFileExtension(outputFormat))
-	relativeDir := filepath.Join(time.Now().Format("2006"), time.Now().Format("01"), time.Now().Format("02"))
+	now := time.Now()
+	filename := fmt.Sprintf("%d_%s.%s", now.Unix(), hex.EncodeToString(sum[:]), imageFileExtension(outputFormat))
+	relativeDir := filepath.Join(now.Format("2006"), now.Format("01"), now.Format("02"))
 	rel := filepath.Join(relativeDir, filename)
 	filePath := filepath.Join(e.Config.ImagesDir(), rel)
 	_ = os.MkdirAll(filepath.Dir(filePath), 0o755)
@@ -961,7 +980,119 @@ func (e *Engine) SaveImageBytesForOwnerWithFormat(imageData []byte, baseURL, own
 	if baseURL == "" {
 		baseURL = e.Config.BaseURL()
 	}
-	return strings.TrimRight(baseURL, "/") + "/images/" + filepath.ToSlash(rel)
+	localURL := strings.TrimRight(baseURL, "/") + "/images/" + filepath.ToSlash(rel)
+	remoteURL := e.uploadImageObject(rel, imageData, outputFormat)
+	if remoteURL != "" {
+		width, height := imageBytesDimensions(imageData)
+		saveErr := service.SaveRemoteImageRecord(e.Storage, e.Config.ImagesDir(), service.RemoteImageRecord{
+			Path:         filepath.ToSlash(rel),
+			Name:         filename,
+			Date:         now.Format("2006-01-02"),
+			Size:         int64(len(imageData)),
+			URL:          remoteURL,
+			ObjectKey:    e.imageObjectKey(rel),
+			CreatedAt:    now.Format("2006-01-02 15:04:05"),
+			Visibility:   service.ImageVisibilityPrivate,
+			OwnerID:      strings.TrimSpace(ownerID),
+			OwnerName:    strings.TrimSpace(ownerName),
+			OutputFormat: outputFormat,
+			Width:        width,
+			Height:       height,
+		})
+		if saveErr == nil {
+			_ = os.Remove(filePath)
+			removeEmptyImageParents(e.Config.ImagesDir(), filepath.Dir(filePath))
+			return savedImageLocation{URL: remoteURL, LocalURL: localURL, RemoteURL: remoteURL, Path: filepath.ToSlash(rel)}
+		}
+		if e.Logger != nil {
+			e.Logger.Warning("R2 image index save failed", "path", filepath.ToSlash(rel), "error", saveErr.Error())
+		}
+	}
+	return savedImageLocation{URL: localURL, LocalURL: localURL, Path: filepath.ToSlash(rel)}
+}
+
+func (e *Engine) uploadImageObject(rel string, data []byte, outputFormat string) string {
+	if e == nil || e.Config == nil {
+		return ""
+	}
+	cfgProvider, ok := e.Config.(interface {
+		ImageObjectStorage() objectstore.Config
+	})
+	if !ok {
+		return ""
+	}
+	cfg := cfgProvider.ImageObjectStorage()
+	if !cfg.Ready() {
+		return ""
+	}
+	key := cfg.ObjectKey(rel)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	publicURL, err := objectstore.Upload(ctx, cfg, key, data, imageContentType(outputFormat))
+	if err != nil {
+		if e.Logger != nil {
+			e.Logger.Warning("R2 image upload failed", "path", filepath.ToSlash(rel), "error", err.Error())
+		}
+		return ""
+	}
+	if publicURL == "" && e.Logger != nil {
+		e.Logger.Info("R2 image uploaded", "path", filepath.ToSlash(rel), "key", key)
+	}
+	return publicURL
+}
+
+func (e *Engine) imageObjectKey(rel string) string {
+	if e == nil || e.Config == nil {
+		return ""
+	}
+	cfgProvider, ok := e.Config.(interface {
+		ImageObjectStorage() objectstore.Config
+	})
+	if !ok {
+		return ""
+	}
+	cfg := cfgProvider.ImageObjectStorage()
+	return cfg.ObjectKey(rel)
+}
+
+func imageBytesDimensions(data []byte) (int, int) {
+	config, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return 0, 0
+	}
+	return config.Width, config.Height
+}
+
+func removeEmptyImageParents(root, start string) {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return
+	}
+	current, err := filepath.Abs(start)
+	if err != nil {
+		return
+	}
+	for {
+		rel, err := filepath.Rel(rootAbs, current)
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+			return
+		}
+		if err := os.Remove(current); err != nil {
+			return
+		}
+		current = filepath.Dir(current)
+	}
+}
+
+func imageContentType(outputFormat string) string {
+	switch NormalizeImageOutputFormat(outputFormat) {
+	case "jpeg":
+		return "image/jpeg"
+	case "webp":
+		return "image/webp"
+	default:
+		return "image/png"
+	}
 }
 
 func imageFileExtension(outputFormat string) string {

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"chatgpt2api/internal/objectstore"
 	"chatgpt2api/internal/storage"
 	"chatgpt2api/internal/util"
 )
@@ -86,6 +87,14 @@ var settingEnvKeys = map[string]string{
 	"login_page_image_zoom":              "CHATGPT2API_LOGIN_PAGE_IMAGE_ZOOM",
 	"login_page_image_position_x":        "CHATGPT2API_LOGIN_PAGE_IMAGE_POSITION_X",
 	"login_page_image_position_y":        "CHATGPT2API_LOGIN_PAGE_IMAGE_POSITION_Y",
+	"image_r2_enabled":                   "CHATGPT2API_IMAGE_R2_ENABLED",
+	"image_r2_endpoint":                  "CHATGPT2API_IMAGE_R2_ENDPOINT",
+	"image_r2_bucket":                    "CHATGPT2API_IMAGE_R2_BUCKET",
+	"image_r2_region":                    "CHATGPT2API_IMAGE_R2_REGION",
+	"image_r2_access_key_id":             "CHATGPT2API_IMAGE_R2_ACCESS_KEY_ID",
+	"image_r2_secret_access_key":         "CHATGPT2API_IMAGE_R2_SECRET_ACCESS_KEY",
+	"image_r2_public_base_url":           "CHATGPT2API_IMAGE_R2_PUBLIC_BASE_URL",
+	"image_r2_prefix":                    "CHATGPT2API_IMAGE_R2_PREFIX",
 }
 
 var envKeyRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -539,6 +548,20 @@ func (s *Store) Proxy() string {
 	return strings.TrimSpace(fmt.Sprint(s.settingValue("proxy", "")))
 }
 
+func (s *Store) ImageObjectStorage() objectstore.Config {
+	accountEndpoint := strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_endpoint", "")))
+	return objectstore.Config{
+		Enabled:         util.ToBool(s.settingValue("image_r2_enabled", false)),
+		Endpoint:        accountEndpoint,
+		Region:          strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_region", "auto"))),
+		Bucket:          strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_bucket", ""))),
+		AccessKeyID:     strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_access_key_id", ""))),
+		SecretAccessKey: strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_secret_access_key", ""))),
+		PublicBaseURL:   strings.TrimRight(strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_public_base_url", ""))), "/"),
+		Prefix:          strings.Trim(strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_prefix", "images"))), "/"),
+	}.Normalize()
+}
+
 func (s *Store) UpdateProxyURL() string {
 	if value := strings.TrimSpace(os.Getenv("CHATGPT2API_UPDATE_PROXY_URL")); value != "" {
 		return value
@@ -786,11 +809,21 @@ func (s *Store) Get() map[string]any {
 	data["login_page_image_zoom"] = s.LoginPageImageZoom()
 	data["login_page_image_position_x"] = s.LoginPageImagePositionX()
 	data["login_page_image_position_y"] = s.LoginPageImagePositionY()
+	imageR2 := s.ImageObjectStorage()
+	data["image_r2_enabled"] = imageR2.Enabled
+	data["image_r2_endpoint"] = imageR2.Endpoint
+	data["image_r2_bucket"] = imageR2.Bucket
+	data["image_r2_region"] = imageR2.Region
+	data["image_r2_access_key_id"] = imageR2.AccessKeyID
+	data["image_r2_secret_access_key_configured"] = imageR2.SecretAccessKey != ""
+	data["image_r2_public_base_url"] = imageR2.PublicBaseURL
+	data["image_r2_prefix"] = imageR2.Prefix
 	delete(data, "linuxdo_client_secret")
 	delete(data, "update_github_token")
 	delete(data, "cf_turnstile_secret_key")
 	delete(data, "email_smtp_auth_code")
 	delete(data, "yipay_key")
+	delete(data, "image_r2_secret_access_key")
 	return data
 }
 
@@ -813,6 +846,9 @@ func (s *Store) Update(data map[string]any) (map[string]any, error) {
 		if key == "yipay_key_configured" {
 			continue
 		}
+		if key == "image_r2_secret_access_key_configured" {
+			continue
+		}
 		if key == "linuxdo_client_secret" && strings.TrimSpace(fmt.Sprint(value)) == "" {
 			continue
 		}
@@ -826,6 +862,9 @@ func (s *Store) Update(data map[string]any) (map[string]any, error) {
 			continue
 		}
 		if key == "yipay_key" && strings.TrimSpace(fmt.Sprint(value)) == "" {
+			continue
+		}
+		if key == "image_r2_secret_access_key" && strings.TrimSpace(fmt.Sprint(value)) == "" {
 			continue
 		}
 		next[key] = value
@@ -996,6 +1035,39 @@ func (s *Store) validateSettingsUpdateLocked(data map[string]any) error {
 			if err := validateAbsoluteHTTPURL(usdt.PaymentURL); err != nil {
 				return errors.New("USDT Payment URL must be an absolute http(s) URL")
 			}
+		}
+	}
+	imageR2 := objectstore.Config{
+		Enabled:         util.ToBool(util.ValueOr(data["image_r2_enabled"], false)),
+		Endpoint:        strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_endpoint"], ""))),
+		Region:          strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_region"], "auto"))),
+		Bucket:          strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_bucket"], ""))),
+		AccessKeyID:     strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_access_key_id"], ""))),
+		SecretAccessKey: strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_secret_access_key"], ""))),
+		PublicBaseURL:   strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_public_base_url"], ""))),
+		Prefix:          strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_prefix"], "images"))),
+	}.Normalize()
+	if imageR2.Enabled {
+		if imageR2.Endpoint == "" {
+			return errors.New("R2 Endpoint is required when enabled")
+		}
+		if err := validateAbsoluteHTTPURL(imageR2.Endpoint); err != nil {
+			return errors.New("R2 Endpoint must be an absolute http(s) URL")
+		}
+		if imageR2.Bucket == "" {
+			return errors.New("R2 Bucket is required when enabled")
+		}
+		if imageR2.AccessKeyID == "" {
+			return errors.New("R2 Access Key ID is required when enabled")
+		}
+		if imageR2.SecretAccessKey == "" {
+			return errors.New("R2 Secret Access Key is required when enabled")
+		}
+		if imageR2.PublicBaseURL == "" {
+			return errors.New("R2 Public Base URL is required when enabled")
+		}
+		if err := validateAbsoluteHTTPURL(imageR2.PublicBaseURL); err != nil {
+			return errors.New("R2 Public Base URL must be an absolute http(s) URL")
 		}
 	}
 

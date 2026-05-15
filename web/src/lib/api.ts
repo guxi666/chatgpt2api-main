@@ -217,6 +217,15 @@ export type SettingsConfig = {
   usdt_network?: string;
   usdt_address?: string;
   usdt_payment_url?: string;
+  image_r2_enabled?: boolean;
+  image_r2_endpoint?: string;
+  image_r2_bucket?: string;
+  image_r2_region?: string;
+  image_r2_access_key_id?: string;
+  image_r2_secret_access_key?: string;
+  image_r2_secret_access_key_configured?: boolean;
+  image_r2_public_base_url?: string;
+  image_r2_prefix?: string;
   refresh_account_interval_minute?: number | string;
   image_concurrent_limit?: number | string;
   image_single_count_limit?: number | string;
@@ -334,6 +343,7 @@ export type ManagedImage = {
   date: string;
   size: number;
   url: string;
+  r2_url?: string;
   thumbnail_url?: string;
   width?: number;
   height?: number;
@@ -1292,6 +1302,19 @@ export async function updateManagedImageVisibility(path: string, visibility: Ima
 export async function deleteManagedImages(paths: string[]) {
   return httpRequest<{ deleted: number; missing: number; paths: string[] }>("/api/images", {
     method: "DELETE",
+    body: { paths },
+  });
+}
+
+export async function uploadManagedImagesToR2(paths: string[]) {
+  return httpRequest<{
+    uploaded: number;
+    missing: number;
+    failed: number;
+    items: Array<{ path: string; key: string; url?: string }>;
+    errors?: Array<{ path?: string; error: string }>;
+  }>("/api/images/r2-upload", {
+    method: "POST",
     body: { paths },
   });
 }

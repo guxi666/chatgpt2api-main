@@ -121,6 +121,15 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     usdt_network: typeof config.usdt_network === "string" ? config.usdt_network : "TRC20",
     usdt_address: typeof config.usdt_address === "string" ? config.usdt_address : "",
     usdt_payment_url: typeof config.usdt_payment_url === "string" ? config.usdt_payment_url : "",
+    image_r2_enabled: Boolean(config.image_r2_enabled),
+    image_r2_endpoint: typeof config.image_r2_endpoint === "string" ? config.image_r2_endpoint : "",
+    image_r2_bucket: typeof config.image_r2_bucket === "string" ? config.image_r2_bucket : "",
+    image_r2_region: typeof config.image_r2_region === "string" ? config.image_r2_region : "auto",
+    image_r2_access_key_id: typeof config.image_r2_access_key_id === "string" ? config.image_r2_access_key_id : "",
+    image_r2_secret_access_key: "",
+    image_r2_secret_access_key_configured: Boolean(config.image_r2_secret_access_key_configured),
+    image_r2_public_base_url: typeof config.image_r2_public_base_url === "string" ? config.image_r2_public_base_url : "",
+    image_r2_prefix: typeof config.image_r2_prefix === "string" ? config.image_r2_prefix : "images",
     linuxdo_enabled: Boolean(config.linuxdo_enabled),
     linuxdo_client_id: typeof config.linuxdo_client_id === "string" ? config.linuxdo_client_id : "",
     linuxdo_client_secret: "",
@@ -234,6 +243,14 @@ type SettingsStore = {
   setYiPayNotifyUrl: (value: string) => void;
   setYiPayReturnUrl: (value: string) => void;
   setYiPaySiteName: (value: string) => void;
+  setImageR2Enabled: (value: boolean) => void;
+  setImageR2Endpoint: (value: string) => void;
+  setImageR2Bucket: (value: string) => void;
+  setImageR2Region: (value: string) => void;
+  setImageR2AccessKeyId: (value: string) => void;
+  setImageR2SecretAccessKey: (value: string) => void;
+  setImageR2PublicBaseUrl: (value: string) => void;
+  setImageR2Prefix: (value: string) => void;
   setLinuxDoEnabled: (value: boolean) => void;
   setLinuxDoClientId: (value: string) => void;
   setLinuxDoClientSecret: (value: string) => void;
@@ -353,6 +370,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const cfTurnstileSecretKey = String(config.cf_turnstile_secret_key || "").trim();
       const emailSMTPAuthCode = String(config.email_smtp_auth_code || "").trim();
       const yiPayKey = String(config.yipay_key || "").trim();
+      const imageR2SecretAccessKey = String(config.image_r2_secret_access_key || "").trim();
       const payload: SettingsConfig = {
         ...config,
         refresh_account_interval_minute: Math.max(1, Number(config.refresh_account_interval_minute) || 1),
@@ -404,6 +422,14 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         usdt_network: String(config.usdt_network || "").trim(),
         usdt_address: String(config.usdt_address || "").trim(),
         usdt_payment_url: String(config.usdt_payment_url || "").trim(),
+        image_r2_enabled: Boolean(config.image_r2_enabled),
+        image_r2_endpoint: String(config.image_r2_endpoint || "").trim(),
+        image_r2_bucket: String(config.image_r2_bucket || "").trim(),
+        image_r2_region: String(config.image_r2_region || "auto").trim(),
+        image_r2_access_key_id: String(config.image_r2_access_key_id || "").trim(),
+        image_r2_secret_access_key: imageR2SecretAccessKey,
+        image_r2_public_base_url: String(config.image_r2_public_base_url || "").trim(),
+        image_r2_prefix: String(config.image_r2_prefix || "images").trim(),
         linuxdo_enabled: Boolean(config.linuxdo_enabled),
         linuxdo_client_id: String(config.linuxdo_client_id || "").trim(),
         linuxdo_client_secret: linuxDoClientSecret,
@@ -427,11 +453,15 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       if (!yiPayKey) {
         delete payload.yipay_key;
       }
+      if (!imageR2SecretAccessKey) {
+        delete payload.image_r2_secret_access_key;
+      }
       delete payload.linuxdo_client_secret_configured;
       delete payload.update_github_token_configured;
       delete payload.cf_turnstile_secret_key_configured;
       delete payload.email_smtp_auth_code_configured;
       delete payload.yipay_key_configured;
+      delete payload.image_r2_secret_access_key_configured;
 
       const data = await updateSettingsConfig(payload);
       const nextConfig = normalizeConfig(data.config);
@@ -644,6 +674,38 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setYiPaySiteName: (value) => {
     set((state) => state.config ? { config: { ...state.config, yipay_site_name: value } } : {});
+  },
+
+  setImageR2Enabled: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_r2_enabled: value } } : {});
+  },
+
+  setImageR2Endpoint: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_r2_endpoint: value } } : {});
+  },
+
+  setImageR2Bucket: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_r2_bucket: value } } : {});
+  },
+
+  setImageR2Region: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_r2_region: value } } : {});
+  },
+
+  setImageR2AccessKeyId: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_r2_access_key_id: value } } : {});
+  },
+
+  setImageR2SecretAccessKey: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_r2_secret_access_key: value } } : {});
+  },
+
+  setImageR2PublicBaseUrl: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_r2_public_base_url: value } } : {});
+  },
+
+  setImageR2Prefix: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_r2_prefix: value } } : {});
   },
 
   setLinuxDoEnabled: (value) => {

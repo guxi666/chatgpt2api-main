@@ -996,6 +996,32 @@ func (a *App) handleImageVisibility(w http.ResponseWriter, r *http.Request) {
 	util.WriteJSON(w, http.StatusOK, map[string]any{"item": item})
 }
 
+func (a *App) handleImageR2Upload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	identity, ok := a.requireIdentity(w, r, "")
+	if !ok {
+		return
+	}
+	if identity.Role != service.AuthRoleAdmin {
+		util.WriteError(w, http.StatusForbidden, "admin permission required")
+		return
+	}
+	body, err := readJSONMap(r)
+	if err != nil {
+		util.WriteError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	result, err := a.images.UploadImagesToObjectStorage(r.Context(), util.AsStringSlice(body["paths"]), service.ImageAccessScope{All: true})
+	if err != nil {
+		util.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	util.WriteJSON(w, http.StatusOK, result)
+}
+
 func (a *App) handleImageFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -1851,7 +1877,7 @@ func collectURLs(v any) []string {
 	case map[string]any:
 		var urls []string
 		for key, value := range x {
-			if key == "url" {
+			if key == "url" || key == "local_url" || key == "r2_url" {
 				if u := util.Clean(value); u != "" {
 					urls = append(urls, u)
 				}

@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Copy, Download, Eye, ImageIcon, LoaderCircle, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Check, CloudUpload, Copy, Download, Eye, ImageIcon, LoaderCircle, RefreshCw, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { DateRangeFilter } from "@/components/date-range-filter";
@@ -12,7 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { deleteManagedImages, fetchManagedImages, type ManagedImage } from "@/lib/api";
+import { deleteManagedImages, fetchManagedImages, uploadManagedImagesToR2, type ManagedImage } from "@/lib/api";
 import { formatBeijingDateTime } from "@/lib/datetime";
 import { formatImageFileSize } from "@/lib/image-size";
 import { useAuthGuard } from "@/lib/use-auth-guard";
@@ -76,7 +76,7 @@ function formatOwner(item: ManagedImage) {
   return ownerID || "-";
 }
 
-function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) {
+function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages: boolean; canUploadR2: boolean }) {
   const activeLoadRef = useRef<AbortController | null>(null);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -88,6 +88,7 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteImageTarget | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isUploadingR2, setIsUploadingR2] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -128,7 +129,7 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
   );
   const selectedCount = selectedItems.length;
   const allSelected = sortedItems.length > 0 && selectedCount === sortedItems.length;
-  const isMutatingImages = downloadingKey !== null || isDeleting;
+  const isMutatingImages = downloadingKey !== null || isDeleting || isUploadingR2;
   const itemIndexByPath = useMemo(
     () => new Map(sortedItems.map((item, index) => [item.path, index])),
     [sortedItems],
@@ -216,6 +217,24 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
       return;
     }
     setDeleteTarget({ paths });
+  };
+
+  const uploadSelectedToR2 = async () => {
+    if (!canUploadR2 || selectedItems.length === 0 || isUploadingR2) return;
+    const paths = Array.from(new Set(selectedItems.map((item) => item.path)));
+    setIsUploadingR2(true);
+    try {
+      const data = await uploadManagedImagesToR2(paths);
+      const message = data.failed > 0
+        ? `已上传 ${data.uploaded} 张，${data.failed} 张失败`
+        : `已上传 ${data.uploaded} 张到 R2，并清理本地原图`;
+      toast.success(message);
+      await loadImages();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "上传到 R2 失败");
+    } finally {
+      setIsUploadingR2(false);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -345,6 +364,18 @@ function ImageManagerContent({ canDeleteImages }: { canDeleteImages: boolean }) 
                 >
                   <Trash2 className="size-3" />
                   删除已选 ({selectedCount})
+                </Button>
+              ) : null}
+              {canUploadR2 ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 rounded-lg px-2.5 text-[11px] text-sky-700 hover:bg-sky-50 hover:text-sky-800"
+                  disabled={selectedCount === 0 || isMutatingImages}
+                  onClick={() => void uploadSelectedToR2()}
+                >
+                  {isUploadingR2 ? <LoaderCircle className="size-3 animate-spin" /> : <CloudUpload className="size-3" />}
+                  上传 R2 ({selectedCount})
                 </Button>
               ) : null}
               <Button
@@ -544,6 +575,6 @@ export default function ImageManagerPage() {
     );
   }
   const canDeleteImages = session.role === "admin" || session.provider !== "linuxdo";
-  return <ImageManagerContent canDeleteImages={canDeleteImages} />;
+  return <ImageManagerContent canDeleteImages={canDeleteImages} canUploadR2={session.role === "admin"} />;
 }
 

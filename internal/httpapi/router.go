@@ -86,6 +86,7 @@ func (a *App) routes() []appRoute {
 		exact("", "/api/settings/login-page-image", a.handleLoginPageImageSettings),
 		exact(http.MethodGet, "/api/app-meta", a.handleAppMeta),
 		exact(http.MethodGet, "/api/admin/permissions", a.handlePermissionCatalog),
+		exact(http.MethodPost, "/api/images/r2-upload", a.handleImageR2Upload),
 		exact("", "/api/images/visibility", a.handleImageVisibility),
 		exact("", "/api/images", a.handleImages),
 		exact("", "/api/logs/governance", a.handleLogGovernance),
