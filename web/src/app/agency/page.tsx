@@ -352,6 +352,12 @@ function AgencyCommissionCenter({
     setWithdrawals(dashboard?.withdrawals || []);
   }, [dashboard?.withdrawals]);
 
+  useEffect(() => {
+    if (currentTier === "basic" || currentTier === "pro" || currentTier === "premium") {
+      setSelectedTierKey(currentTier);
+    }
+  }, [currentTier]);
+
   const fallbackLink = useMemo(() => {
     const code = String(agent?.invite_code || "").trim();
     if (!code || typeof window === "undefined") return "";
@@ -470,10 +476,13 @@ function AgencyCommissionCenter({
     return map;
   }, [tiers]);
 
+  const currentTierConfig = currentTier === "basic" || currentTier === "pro" || currentTier === "premium" ? tierByKey.get(currentTier) : undefined;
+  const effectiveCommissionBP = Number(agent?.commission_bp || 0) || Number(currentTierConfig?.commission_bp || 0);
+
   const upgradeCandidates = useMemo(() => {
-    const selectedRank = tierRank(selectedTierKey);
-    return tiers.filter((tier) => tierRank(tier.key) > selectedRank && (tier.key === "basic" || tier.key === "pro" || tier.key === "premium")) as Array<AgencyTier & { key: TierKey }>;
-  }, [selectedTierKey, tiers]);
+    const baseRank = tierRank(currentTier) > 0 ? tierRank(currentTier) : tierRank(selectedTierKey);
+    return tiers.filter((tier) => tierRank(tier.key) > baseRank && (tier.key === "basic" || tier.key === "pro" || tier.key === "premium")) as Array<AgencyTier & { key: TierKey }>;
+  }, [currentTier, selectedTierKey, tiers]);
 
   const renderOverview = () => (
     <div className="space-y-4 min-w-0">
@@ -562,7 +571,7 @@ function AgencyCommissionCenter({
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="text-xl font-bold">升级更高等级，享受更高分成比例</div>
-            <div className="mt-1 text-sm text-[#5a77a8]">当前等级：{currentTierName || "未开通"}（分成比例 {formatPercentByBP(agent?.commission_bp)}）</div>
+            <div className="mt-1 text-sm text-[#5a77a8]">当前等级：{currentTierName || "未开通"}（分成比例 {formatPercentByBP(effectiveCommissionBP)}）</div>
           </div>
           <Button className="h-10 rounded-lg bg-[#e4c794] px-5 text-[#271a0e] hover:bg-[#f0d6ab]" onClick={() => setActiveMenu("benefits")}>查看等级权益</Button>
         </div>
@@ -636,7 +645,7 @@ function AgencyCommissionCenter({
                     <td className="px-2 py-3">{item.user_email || item.user_id || "-"}</td>
                     <td className="px-2 py-3">充值分成</td>
                     <td className="px-2 py-3">¥ {item.amount_yuan || formatYuan((item.amount_cents || 0) / 100)}</td>
-                    <td className="px-2 py-3">{formatPercentByBP(item.commission_bp || agent?.commission_bp)}</td>
+                    <td className="px-2 py-3">{formatPercentByBP(item.commission_bp || effectiveCommissionBP)}</td>
                     <td className="px-2 py-3">¥ {item.commission_yuan || formatYuan((item.commission_cents || 0) / 100)}</td>
                     <td className="px-2 py-3">{formatDateTime(item.created_at)}</td>
                   </tr>
@@ -708,7 +717,7 @@ function AgencyCommissionCenter({
                   <td className="px-2 py-3">{item.user_email || item.user_id || "-"}</td>
                   <td className="px-2 py-3">充值分成</td>
                   <td className="px-2 py-3">¥ {item.amount_yuan || formatYuan((item.amount_cents || 0) / 100)}</td>
-                  <td className="px-2 py-3">{formatPercentByBP(item.commission_bp || agent?.commission_bp)}</td>
+                  <td className="px-2 py-3">{formatPercentByBP(item.commission_bp || effectiveCommissionBP)}</td>
                   <td className="px-2 py-3">¥ {item.commission_yuan || formatYuan((item.commission_cents || 0) / 100)}</td>
                   <td className="px-2 py-3">{STATUS_TEXT[(item.status || "").toLowerCase()] || item.status || "-"}</td>
                   <td className="px-2 py-3">{formatDateTime(item.created_at)}</td>
@@ -812,7 +821,7 @@ function AgencyCommissionCenter({
     <div className="space-y-4">
       <div className="rounded-xl border border-[#d6d9f5] bg-[linear-gradient(120deg,#eef0ff,#f5f6ff)] px-5 py-4 text-[#133764]">
         <div className="text-xl font-bold">等级权益与升级</div>
-        <div className="mt-1 text-sm text-[#5a77a8]">当前等级：{currentTierName || "未开通"}（分成比例 {formatPercentByBP(agent?.commission_bp)}）</div>
+        <div className="mt-1 text-sm text-[#5a77a8]">当前等级：{currentTierName || "未开通"}（分成比例 {formatPercentByBP(effectiveCommissionBP)}）</div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
@@ -1006,7 +1015,8 @@ export default function AgencyPage() {
               roleID = String(sessionData.role_id || "").trim();
             } catch {}
           }
-          const tier = tierFromRole(roleName, roleID);
+          const walletTier = wallet.wallet?.agency_enabled ? String(wallet.wallet?.agency_tier || "").trim() : "";
+          const tier = tierRank(walletTier) > 0 ? walletTier : tierFromRole(roleName, roleID);
           const enabled = tier !== "";
           const channels = Array.isArray(wallet.pay_channels) ? (wallet.pay_channels.filter(Boolean) as PayType[]) : [];
           setAgencyPayChannels(channels);

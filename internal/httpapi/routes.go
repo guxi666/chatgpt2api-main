@@ -507,9 +507,7 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if _, hasRoleID := updates["role_id"]; hasRoleID {
-			if !isAgencyRoleID(a.auth.ListRoles(), util.Clean(item["role_id"])) {
-				_, _ = a.billing.DeactivateAgencyByUserID(userID)
-			}
+			a.syncAgencyByRoleID(userID, util.Clean(item["role_id"]))
 		}
 		items := a.managedUsers()
 		if current := findManagedUser(items, userID); current != nil {

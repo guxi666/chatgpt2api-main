@@ -75,7 +75,7 @@ func (a *App) handleAgencyJoin(w http.ResponseWriter, r *http.Request) {
 		util.WriteError(w, http.StatusBadRequest, "admin account cannot join agency tier")
 		return
 	}
-	a.deactivateAgencyIfRoleRevoked(identity)
+	a.syncAgencyByIdentityRole(identity)
 
 	body, _ := readJSONMap(r)
 	tierKey := strings.TrimSpace(util.Clean(body["tier"]))
@@ -114,7 +114,7 @@ func (a *App) handleAgencyUpgrade(w http.ResponseWriter, r *http.Request) {
 		util.WriteError(w, http.StatusBadRequest, "admin account cannot upgrade agency tier")
 		return
 	}
-	a.deactivateAgencyIfRoleRevoked(identity)
+	a.syncAgencyByIdentityRole(identity)
 
 	body, _ := readJSONMap(r)
 	tierKey := strings.TrimSpace(util.Clean(body["tier"]))
@@ -149,6 +149,7 @@ func (a *App) handleAgencyCommission(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	a.syncAgencyByIdentityRole(identity)
 
 	registerURL := strings.TrimSpace(a.config.BaseURL())
 	if registerURL == "" {
@@ -477,4 +478,44 @@ func (a *App) deactivateAgencyIfRoleRevoked(identity service.Identity) {
 		return
 	}
 	_, _ = a.billing.DeactivateAgencyByUserID(userID)
+}
+
+func (a *App) syncAgencyByRoleID(userID, roleID string) {
+	userID = strings.TrimSpace(userID)
+	roleID = strings.TrimSpace(roleID)
+	if userID == "" {
+		return
+	}
+	a.ensureAgencyTierRoles()
+	tier, ok := a.agencyTierByRoleID(roleID)
+	if !ok {
+		_, _ = a.billing.DeactivateAgencyByUserID(userID)
+		return
+	}
+	_, _ = a.billing.ActivateAgencyByUserID(userID, service.AgencyTierBenefit{
+		Tier:         tier.Key,
+		CommissionBP: tier.CommissionBP,
+		DiscountBP:   tier.DiscountBP,
+	}, false)
+}
+
+func (a *App) syncAgencyByIdentityRole(identity service.Identity) {
+	userID := strings.TrimSpace(identity.OwnerID)
+	if userID == "" {
+		userID = strings.TrimSpace(identity.ID)
+	}
+	a.syncAgencyByRoleID(userID, identity.RoleID)
+}
+
+func (a *App) agencyTierByRoleID(roleID string) (agencyTierRuntime, bool) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return agencyTierRuntime{}, false
+	}
+	for _, tier := range a.agencyTiers() {
+		if id, ok := a.agencyRoleIDByTier(tier.Key); ok && id == roleID {
+			return tier, true
+		}
+	}
+	return agencyTierRuntime{}, false
 }
