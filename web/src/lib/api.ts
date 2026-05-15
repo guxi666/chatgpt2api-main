@@ -286,6 +286,23 @@ export type AgencyCommissionOrder = {
   out_trade_no?: string;
 };
 
+export type AgencyWithdrawalRequest = {
+  id: string;
+  user_id?: string;
+  user_email?: string;
+  amount_cents: number;
+  amount_yuan?: string;
+  alipay_qr_code?: string;
+  wechat_qr_code?: string;
+  phone?: string;
+  wechat_id?: string;
+  status?: "pending" | "approved" | "rejected" | "paid" | string;
+  admin_note?: string;
+  created_at?: string;
+  updated_at?: string;
+  processed_at?: string;
+};
+
 export type AgencyCommissionDashboard = {
   agent: {
     user_id: string;
@@ -313,6 +330,7 @@ export type AgencyCommissionDashboard = {
     available_yuan: string;
   };
   orders: AgencyCommissionOrder[];
+  withdrawals?: AgencyWithdrawalRequest[];
 };
 
 export type AgencyAdminUser = {
@@ -1205,6 +1223,23 @@ export async function updateAgencyConfig(payload: {
 
 export async function fetchAgencyCommissionDashboard() {
   return httpRequest<AgencyCommissionDashboard>("/api/agency/commission");
+}
+
+export async function fetchAgencyWithdrawals(limit = 100) {
+  return httpRequest<{ items: AgencyWithdrawalRequest[] }>(`/api/agency/withdrawals?limit=${encodeURIComponent(String(limit))}`);
+}
+
+export async function createAgencyWithdrawal(payload: {
+  amount_cents: number;
+  alipay_qr_code?: string;
+  wechat_qr_code?: string;
+  phone?: string;
+  wechat_id?: string;
+}) {
+  return httpRequest<{ ok: boolean; item: AgencyWithdrawalRequest }>("/api/agency/withdrawals", {
+    method: "POST",
+    body: payload,
+  });
 }
 
 export async function joinAgencyTier(tier: "basic" | "pro" | "premium", pay_type?: PayType) {

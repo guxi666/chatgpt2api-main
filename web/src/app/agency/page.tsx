@@ -25,9 +25,11 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   activateAgencyUser,
+  createAgencyWithdrawal,
   fetchAgencyAdminUsers,
   fetchAgencyCommissionDashboard,
   fetchAgencyConfig,
+  fetchAgencyWithdrawals,
   fetchManagedUsers,
   fetchWallet,
   joinAgencyTier,
@@ -39,6 +41,7 @@ import {
   type AgencyCommissionOrder,
   type AgencyConfig,
   type AgencyTier,
+  type AgencyWithdrawalRequest,
   type ManagedUser,
   type PayType,
 } from "@/lib/api";
@@ -62,6 +65,13 @@ const STATUS_TEXT: Record<string, string> = {
   paid: "已结算",
   pending: "待结算",
   failed: "失败",
+};
+
+const WITHDRAW_STATUS_TEXT: Record<string, string> = {
+  pending: "待审核",
+  approved: "已通过",
+  paid: "已打款",
+  rejected: "已驳回",
 };
 
 const AGENCY_MENU: Array<{ key: AgencyMenuKey; label: string; icon: typeof Crown }> = [
@@ -151,6 +161,16 @@ function sumPendingCommissionYuan(orders: AgencyCommissionOrder[]) {
     }
     return sum + Number(item.commission_cents || 0) / 100;
   }, 0);
+}
+
+function payoutSummary(item: AgencyWithdrawalRequest) {
+  const parts = [
+    item.alipay_qr_code ? "支付宝收款码" : "",
+    item.wechat_qr_code ? "微信收款码" : "",
+    item.phone ? `手机号 ${item.phone}` : "",
+    item.wechat_id ? `微信号 ${item.wechat_id}` : "",
+  ].filter(Boolean);
+  return parts.join(" / ") || "-";
 }
 
 function calcTrendRows(orders: AgencyCommissionOrder[]) {
@@ -316,10 +336,21 @@ function AgencyCommissionCenter({
   const [activeMenu, setActiveMenu] = useState<AgencyMenuKey>("overview");
   const [selectedTierKey, setSelectedTierKey] = useState<TierKey>("basic");
   const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawAlipayQRCode, setWithdrawAlipayQRCode] = useState("");
+  const [withdrawWechatQRCode, setWithdrawWechatQRCode] = useState("");
+  const [withdrawPhone, setWithdrawPhone] = useState("");
+  const [withdrawWechatID, setWithdrawWechatID] = useState("");
+  const [withdrawals, setWithdrawals] = useState<AgencyWithdrawalRequest[]>([]);
+  const [isLoadingWithdrawals, setIsLoadingWithdrawals] = useState(false);
+  const [isSubmittingWithdraw, setIsSubmittingWithdraw] = useState(false);
 
   const summary = dashboard?.summary;
   const agent = dashboard?.agent;
   const orders = dashboard?.orders || [];
+
+  useEffect(() => {
+    setWithdrawals(dashboard?.withdrawals || []);
+  }, [dashboard?.withdrawals]);
 
   const fallbackLink = useMemo(() => {
     const code = String(agent?.invite_code || "").trim();
@@ -350,7 +381,24 @@ function AgencyCommissionCenter({
   const monthCommission = Number(summary?.month_commission_yuan || 0);
   const withdrawable = Number(summary?.available_yuan || 0);
 
-  const handleWithdrawApply = () => {
+  const loadWithdrawals = useCallback(async () => {
+    setIsLoadingWithdrawals(true);
+    try {
+      const data = await fetchAgencyWithdrawals(100);
+      setWithdrawals(data.items || []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "提现明细加载失败");
+    } finally {
+      setIsLoadingWithdrawals(false);
+    }
+  }, []);
+
+  const openWithdrawDetails = useCallback(() => {
+    setActiveMenu("withdraw");
+    void loadWithdrawals();
+  }, [loadWithdrawals]);
+
+  const handleWithdrawApply = async () => {
     const amount = Number(withdrawAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       toast.error("请输入正确的提现金额");
@@ -360,8 +408,34 @@ function AgencyCommissionCenter({
       toast.error("提现金额不能超过可提现余额");
       return;
     }
-    toast.success("提现申请已提交，等待审核");
-    setWithdrawAmount("");
+    const payload = {
+      amount_cents: parseYuanToCents(withdrawAmount),
+      alipay_qr_code: withdrawAlipayQRCode.trim(),
+      wechat_qr_code: withdrawWechatQRCode.trim(),
+      phone: withdrawPhone.trim(),
+      wechat_id: withdrawWechatID.trim(),
+    };
+    if (!payload.alipay_qr_code && !payload.wechat_qr_code && !payload.phone && !payload.wechat_id) {
+      toast.error("请至少填写一种收款联系方式");
+      return;
+    }
+    setIsSubmittingWithdraw(true);
+    try {
+      const data = await createAgencyWithdrawal(payload);
+      toast.success("提现申请已提交，等待管理员审核");
+      setWithdrawAmount("");
+      setWithdrawAlipayQRCode("");
+      setWithdrawWechatQRCode("");
+      setWithdrawPhone("");
+      setWithdrawWechatID("");
+      setWithdrawals((items) => [data.item, ...items.filter((item) => item.id !== data.item.id)]);
+      await onReload();
+      await loadWithdrawals();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "提现申请提交失败");
+    } finally {
+      setIsSubmittingWithdraw(false);
+    }
   };
 
   const trendRows = useMemo(() => calcTrendRows(orders), [orders]);
@@ -422,11 +496,17 @@ function AgencyCommissionCenter({
           <div>
             <div className="text-sm text-[#6b4f2a]">可提现收益（元）</div>
             <div className="mt-1 text-2xl font-black md:text-3xl">¥ {formatYuan(withdrawable)}</div>
-            <Button className="mt-3 h-10 rounded-lg bg-[#151515] px-6 text-[#f3dfbe] hover:bg-black" onClick={() => setActiveMenu("withdraw")}>立即提现</Button>
+            <Button className="mt-3 h-10 rounded-lg bg-[#151515] px-6 text-[#f3dfbe] hover:bg-black" onClick={openWithdrawDetails}>立即提现</Button>
           </div>
           <div><div className="text-sm text-[#6b4f2a]">累计收益（元）</div><div className="mt-3 text-2xl font-black md:text-3xl">{formatYuan(totalCommission)}</div></div>
           <div><div className="text-sm text-[#6b4f2a]">本月预估（元）</div><div className="mt-3 text-2xl font-black md:text-3xl">{formatYuan(monthCommission)}</div></div>
-          <div><div className="text-sm text-[#6b4f2a]">可提现余额（元）</div><div className="mt-3 text-2xl font-black md:text-3xl">{formatYuan(withdrawable)}</div><div className="mt-2 text-right text-sm text-[#6b4f2a]">提现明细</div></div>
+          <div><div className="text-sm text-[#6b4f2a]">可提现余额（元）</div><div className="mt-3 text-2xl font-black md:text-3xl">{formatYuan(withdrawable)}</div><button
+              type="button"
+              onClick={openWithdrawDetails}
+              className="mt-2 ml-auto block rounded-full px-2 py-1 text-right text-sm font-semibold text-[#6b4f2a] transition hover:-translate-y-0.5 hover:bg-white/45 hover:text-[#24180e] hover:shadow-sm"
+            >
+              提现明细
+            </button></div>
         </div>
       </div>
 
@@ -643,25 +723,73 @@ function AgencyCommissionCenter({
 
   const renderWithdraw = () => (
     <Card className="min-w-0 rounded-xl border-[#d9e3fb] bg-none [background:linear-gradient(160deg,#ffffff,#f8fbff)] text-[#16335f]">
-      <CardHeader><CardTitle className="text-lg text-[#16335f]">提现管理</CardTitle></CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-lg text-[#16335f]">提现管理</CardTitle>
+        <Button variant="outline" className="h-8 rounded-lg border-[#c9d8ff] bg-white text-[#3d56d8]" onClick={() => void loadWithdrawals()} disabled={isLoadingWithdrawals}>
+          <RefreshCw className={cn("size-4", isLoadingWithdrawals ? "animate-spin" : "")} />
+          刷新明细
+        </Button>
+      </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-xl border border-[#d4e0fa] bg-white p-4"><div className="text-sm text-[#5878a8]">可提现余额</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">¥ {formatYuan(withdrawable)}</div></div>
           <div className="rounded-xl border border-[#d4e0fa] bg-white p-4"><div className="text-sm text-[#5878a8]">待结算收益</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">¥ {formatYuan(pendingAmount)}</div></div>
           <div className="rounded-xl border border-[#d4e0fa] bg-white p-4"><div className="text-sm text-[#5878a8]">累计收益</div><div className="mt-2 text-2xl font-black text-[#1a3f72]">¥ {formatYuan(totalCommission)}</div></div>
         </div>
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px]">
-          <Input
-            value={withdrawAmount}
-            onChange={(event) => setWithdrawAmount(event.target.value)}
-            inputMode="decimal"
-            placeholder="输入提现金额（元）"
-            className="h-10 rounded-lg border-[#c9d8ff]"
-          />
-          <Button className="h-10 rounded-lg bg-[#151515] text-[#f3dfbe] hover:bg-black" onClick={handleWithdrawApply}>提交提现</Button>
+        <div className="rounded-xl border border-[#d4e0fa] bg-white p-4">
+          <div className="mb-3 text-base font-bold text-[#16335f]">提交提现申请</div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Input value={withdrawAmount} onChange={(event) => setWithdrawAmount(event.target.value)} inputMode="decimal" placeholder="提现金额（元）" className="h-10 rounded-lg border-[#c9d8ff]" />
+            <Input value={withdrawPhone} onChange={(event) => setWithdrawPhone(event.target.value)} placeholder="手机号" className="h-10 rounded-lg border-[#c9d8ff]" />
+            <Input value={withdrawWechatID} onChange={(event) => setWithdrawWechatID(event.target.value)} placeholder="微信号" className="h-10 rounded-lg border-[#c9d8ff]" />
+            <Input value={withdrawAlipayQRCode} onChange={(event) => setWithdrawAlipayQRCode(event.target.value)} placeholder="支付宝收款码链接或备注" className="h-10 rounded-lg border-[#c9d8ff]" />
+            <Input value={withdrawWechatQRCode} onChange={(event) => setWithdrawWechatQRCode(event.target.value)} placeholder="微信收款码链接或备注" className="h-10 rounded-lg border-[#c9d8ff] md:col-span-2" />
+          </div>
+          <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="text-xs text-[#6d89b6]">至少填写一种收款联系方式；提交后进入管理员审核，不会自动打款。</div>
+            <Button className="h-10 rounded-lg bg-[#151515] px-6 text-[#f3dfbe] hover:bg-black" onClick={handleWithdrawApply} disabled={isSubmittingWithdraw}>
+              {isSubmittingWithdraw ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              提交提现
+            </Button>
+          </div>
         </div>
-        <div className="rounded-xl border border-dashed border-[#c9d8ff] bg-[#f7f9ff] p-4 text-sm text-[#5f7faf]">
-          当前为提现申请入口，提交后会进入审核队列；如需自动打款，可再接入第三方代付通道。
+        <div className="rounded-xl border border-[#d4e0fa] bg-white p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="text-base font-bold text-[#16335f]">提现明细</div>
+            <div className="text-xs text-[#6d89b6]">共 {withdrawals.length} 条</div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-[760px] w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#d7e2fb] text-left text-[#5d7cad]">
+                  <th className="px-2 py-3">申请编号</th>
+                  <th className="px-2 py-3">金额</th>
+                  <th className="px-2 py-3">状态</th>
+                  <th className="px-2 py-3">收款信息</th>
+                  <th className="px-2 py-3">申请时间</th>
+                  <th className="px-2 py-3">处理时间</th>
+                  <th className="px-2 py-3">备注</th>
+                </tr>
+              </thead>
+              <tbody>
+                {isLoadingWithdrawals ? (
+                  <tr><td className="px-2 py-9 text-center text-[#7892bf]" colSpan={7}><LoaderCircle className="mr-2 inline size-4 animate-spin" />正在加载提现明细</td></tr>
+                ) : withdrawals.length === 0 ? (
+                  <tr><td className="px-2 py-9 text-center text-[#7892bf]" colSpan={7}>暂无提现明细</td></tr>
+                ) : withdrawals.map((item) => (
+                  <tr key={item.id} className="border-b border-[#edf2ff] text-[#1f3f72]">
+                    <td className="px-2 py-3 font-mono text-xs">{item.id || "-"}</td>
+                    <td className="px-2 py-3">¥ {item.amount_yuan || formatYuan((item.amount_cents || 0) / 100)}</td>
+                    <td className="px-2 py-3">{WITHDRAW_STATUS_TEXT[(item.status || "").toLowerCase()] || item.status || "-"}</td>
+                    <td className="px-2 py-3">{payoutSummary(item)}</td>
+                    <td className="px-2 py-3">{formatDateTime(item.created_at)}</td>
+                    <td className="px-2 py-3">{formatDateTime(item.processed_at)}</td>
+                    <td className="px-2 py-3">{item.admin_note || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </CardContent>
     </Card>
