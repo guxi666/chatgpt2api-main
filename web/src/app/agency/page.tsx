@@ -1395,18 +1395,6 @@ export default function AgencyPage() {
     };
   }, [isDraggingMaterialQR, materialQRConfig.size_percent]);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  const showAgencyPackage = isAdmin || !agencyEnabled;
-  const currentTierName = tierLabel(currentTier, tiers);
-  const brandTitle = (appMeta.app_title || "chatgpt2api").trim() || "chatgpt2api";
-  const brandLogoURL = resolveBrandAssetURL(appMeta.top_left_logo_url || "/logo-mark.svg") || "/logo-mark.svg";
   const qrOverlayPreview = useMemo(() => materialQROverlayStyle(materialQRConfig), [materialQRConfig]);
   const previewMaterialImageURL = useMemo(
     () =>
@@ -1419,6 +1407,18 @@ export default function AgencyPage() {
     const demoLink = `${siteOrigin.replace(/\/$/, "")}/login?invite_code=demo`;
     return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&margin=8&data=${encodeURIComponent(demoLink)}`;
   }, [config]);
+  const showAgencyPackage = isAdmin || !agencyEnabled;
+  const currentTierName = tierLabel(currentTier, tiers);
+  const brandTitle = (appMeta.app_title || "chatgpt2api").trim() || "chatgpt2api";
+  const brandLogoURL = resolveBrandAssetURL(appMeta.top_left_logo_url || "/logo-mark.svg") || "/logo-mark.svg";
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1280px] space-y-5">

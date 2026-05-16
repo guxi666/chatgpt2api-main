@@ -1577,7 +1577,6 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
         })),
       );
 
-      setComposerMode("image");
       setReferenceImages((prev) => [...prev, ...previews].slice(-MAX_REFERENCE_IMAGES));
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
