@@ -554,6 +554,7 @@ func (s *ImageService) UploadImagesToObjectStorage(ctx context.Context, paths []
 	items := make([]map[string]any, 0, len(paths))
 	var errorsList []map[string]any
 	uploaded := 0
+	skipped := 0
 	missing := 0
 	failed := 0
 	for _, value := range paths {
@@ -565,14 +566,49 @@ func (s *ImageService) UploadImagesToObjectStorage(ctx context.Context, paths []
 			continue
 		}
 		seen[rel] = struct{}{}
+		remoteRecord, hasRemoteRecord := s.remoteImageRecord(rel)
 		ref, err := s.imageFileRef(imageRoot, rel)
 		if err != nil {
+			if hasRemoteRecord && strings.TrimSpace(remoteRecord.URL) != "" {
+				meta := imageMetadata{
+					OwnerID:          remoteRecord.OwnerID,
+					OwnerName:        remoteRecord.OwnerName,
+					Visibility:       remoteRecord.Visibility,
+					PublishedAt:      remoteRecord.PublishedAt,
+					ResolutionPreset: remoteRecord.ResolutionPreset,
+					RequestedSize:    remoteRecord.RequestedSize,
+					OutputFormat:     remoteRecord.OutputFormat,
+				}
+				if meta.Visibility == "" {
+					meta.Visibility = ImageVisibilityPrivate
+				}
+				if !imageMetadataAllowsAccess(meta, scope) {
+					missing++
+					continue
+				}
+				skipped++
+				items = append(items, map[string]any{"path": rel, "key": firstNonEmptyString(remoteRecord.ObjectKey, cfg.ObjectKey(rel)), "url": remoteRecord.URL, "skipped": true})
+				continue
+			}
 			missing++
 			continue
 		}
 		meta := s.imageMetadata(ref.rel)
 		if !imageMetadataAllowsAccess(meta, scope) {
 			missing++
+			continue
+		}
+		if hasRemoteRecord && strings.TrimSpace(remoteRecord.URL) != "" {
+			if removeErr := os.Remove(ref.path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				failed++
+				errorsList = append(errorsList, map[string]any{"path": ref.rel, "error": removeErr.Error()})
+				continue
+			}
+			_ = s.removeImageThumbnail(thumbnailRoot, ref.rel)
+			_ = s.removeImageOwner(ref.rel)
+			removeEmptyParentDirs(imageRoot, filepath.Dir(ref.path))
+			skipped++
+			items = append(items, map[string]any{"path": ref.rel, "key": firstNonEmptyString(remoteRecord.ObjectKey, cfg.ObjectKey(ref.rel)), "url": remoteRecord.URL, "skipped": true})
 			continue
 		}
 		data, err := os.ReadFile(ref.path)
@@ -623,6 +659,7 @@ func (s *ImageService) UploadImagesToObjectStorage(ctx context.Context, paths []
 			continue
 		}
 		_ = s.removeImageThumbnail(thumbnailRoot, ref.rel)
+		_ = s.removeImageOwner(ref.rel)
 		removeEmptyParentDirs(imageRoot, filepath.Dir(ref.path))
 		uploaded++
 		item := map[string]any{"path": ref.rel, "key": key}
@@ -633,6 +670,7 @@ func (s *ImageService) UploadImagesToObjectStorage(ctx context.Context, paths []
 	}
 	return map[string]any{
 		"uploaded": uploaded,
+		"skipped":  skipped,
 		"missing":  missing,
 		"failed":   failed,
 		"items":    items,

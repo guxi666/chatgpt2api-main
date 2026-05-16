@@ -85,10 +85,12 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
   const [pageSize, setPageSize] = useState<number>(20);
   const [page, setPage] = useState(1);
   const [selectedImageIds, setSelectedImageIds] = useState<Record<string, boolean>>({});
+  const [selectedAllItems, setSelectedAllItems] = useState<ManagedImage[]>([]);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteImageTarget | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUploadingR2, setIsUploadingR2] = useState(false);
+  const [isSelectingAll, setIsSelectingAll] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -123,13 +125,27 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
     [sortedItems],
   );
 
-  const selectedItems = useMemo(
-    () => sortedItems.filter((item) => selectedImageIds[managedImageKey(item)]),
-    [selectedImageIds, sortedItems],
-  );
+  const selectedItems = useMemo(() => {
+    const map = new Map<string, ManagedImage>();
+    for (const item of selectedAllItems) {
+      const key = managedImageKey(item);
+      if (selectedImageIds[key]) {
+        map.set(key, item);
+      }
+    }
+    for (const item of sortedItems) {
+      const key = managedImageKey(item);
+      if (selectedImageIds[key]) {
+        map.set(key, item);
+      }
+    }
+    return Array.from(map.values());
+  }, [selectedAllItems, selectedImageIds, sortedItems]);
   const selectedCount = selectedItems.length;
-  const allSelected = sortedItems.length > 0 && selectedCount === sortedItems.length;
-  const isMutatingImages = downloadingKey !== null || isDeleting || isUploadingR2;
+  const currentPageKeys = useMemo(() => sortedItems.map((item) => managedImageKey(item)), [sortedItems]);
+  const allCurrentPageSelected = currentPageKeys.length > 0 && currentPageKeys.every((key) => selectedImageIds[key]);
+  const allSelected = total > 0 && selectedCount >= total;
+  const isMutatingImages = downloadingKey !== null || isDeleting || isUploadingR2 || isSelectingAll;
   const itemIndexByPath = useMemo(
     () => new Map(sortedItems.map((item, index) => [item.path, index])),
     [sortedItems],
@@ -149,6 +165,7 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
       setItems(Array.isArray(data.items) ? data.items : []);
       setTotal(Number.isFinite(data.total) && data.total > 0 ? data.total : (Array.isArray(data.items) ? data.items.length : 0));
       setSelectedImageIds({});
+      setSelectedAllItems([]);
     } catch (error) {
       if (controller.signal.aborted || isRequestCanceled(error)) return;
       const message = error instanceof Error ? error.message : "加载图片库失败";
@@ -179,19 +196,42 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
     setSelectedImageIds((current) => ({ ...current, [key]: !current[key] }));
   };
 
-  const toggleAllImages = () => {
+  const loadAllImagesForSelection = async () => {
+    const first = await fetchManagedImages({ start_date: startDate, end_date: endDate, page: 1, page_size: 500 });
+    const allItems = [...first.items];
+    const pageCount = Math.max(1, Number(first.total_page || 1));
+    for (let nextPage = 2; nextPage <= pageCount; nextPage += 1) {
+      const data = await fetchManagedImages({ start_date: startDate, end_date: endDate, page: nextPage, page_size: 500 });
+      allItems.push(...data.items);
+    }
+    return allItems;
+  };
+
+  const toggleAllImages = async () => {
+    if (total === 0 || isSelectingAll) return;
     if (allSelected) {
       setSelectedImageIds({});
+      setSelectedAllItems([]);
       return;
     }
-    setSelectedImageIds(Object.fromEntries(sortedItems.map((item) => [managedImageKey(item), true])));
+    setIsSelectingAll(true);
+    try {
+      const allItems = await loadAllImagesForSelection();
+      setSelectedAllItems(allItems);
+      setSelectedImageIds(Object.fromEntries(allItems.map((item) => [managedImageKey(item), true])));
+      toast.success(`已选中 ${allItems.length} 张图片`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "全选图片失败");
+    } finally {
+      setIsSelectingAll(false);
+    }
   };
 
   const selectCurrentPageImages = () => {
-    if (sortedItems.length === 0) return;
+    if (currentPageKeys.length === 0) return;
     setSelectedImageIds((current) => ({
       ...current,
-      ...Object.fromEntries(sortedItems.map((item) => [managedImageKey(item), true])),
+      ...Object.fromEntries(currentPageKeys.map((key) => [key, true])),
     }));
   };
 
@@ -225,9 +265,10 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
     setIsUploadingR2(true);
     try {
       const data = await uploadManagedImagesToR2(paths);
+      const skipped = Number(data.skipped || 0);
       const message = data.failed > 0
-        ? `已上传 ${data.uploaded} 张，${data.failed} 张失败`
-        : `已上传 ${data.uploaded} 张到 R2，并清理本地原图`;
+        ? `已上传 ${data.uploaded} 张，跳过已在 R2 的 ${skipped} 张，${data.failed} 张失败`
+        : `已上传 ${data.uploaded} 张到 R2，跳过已在 R2 的 ${skipped} 张，并清理本地原图`;
       toast.success(message);
       await loadImages();
     } catch (error) {
@@ -331,10 +372,10 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
                 type="button"
                 variant="outline"
                 className="h-8 rounded-lg px-3 text-xs"
-                disabled={sortedItems.length === 0 || isMutatingImages}
-                onClick={toggleAllImages}
+                disabled={total === 0 || isMutatingImages}
+                onClick={() => void toggleAllImages()}
               >
-                {allSelected ? "取消全选" : "全选"}
+                {isSelectingAll ? "全选中..." : allSelected ? "取消全选" : "全选"}
               </Button>
               <Button
                 type="button"

@@ -411,7 +411,17 @@ func (e *Engine) StreamImageOutputsWithPool(ctx context.Context, request Convers
 			allowAccount = service.IsPaidImageAccount
 		}
 		for index := 1; index <= request.N; index++ {
+			attempts := 0
+			maxAttempts := len(e.Accounts.ListAccounts())
+			if maxAttempts < 1 {
+				maxAttempts = 1
+			}
 			for {
+				attempts++
+				if attempts > maxAttempts {
+					errCh <- &ImageGenerationError{Message: imageStreamErrorMessage(lastError), StatusCode: 502, Type: "server_error", Code: "upstream_error"}
+					return
+				}
 				token, err := e.Accounts.GetAvailableAccessTokenFor(ctx, allowAccount)
 				if err != nil {
 					if emitted {
@@ -430,6 +440,7 @@ func (e *Engine) StreamImageOutputsWithPool(ctx context.Context, request Convers
 				returnedResult := false
 				rateLimitedForToken := false
 				rateLimitMessage := ""
+				textResponseForToken := ""
 				client := backend.NewClient(token, e.Accounts, e.Proxy)
 				outputs, imageErr := e.StreamImageOutputs(ctx, client, request, index, request.N)
 				for output := range outputs {
@@ -440,9 +451,9 @@ func (e *Engine) StreamImageOutputsWithPool(ctx context.Context, request Convers
 						continue
 					}
 					if output.Kind == "message" && request.MessageAsError {
-						e.Accounts.MarkImageResult(token, false)
-						errCh <- &ImageGenerationError{Message: firstNonEmpty(output.Text, "Image generation returned a text response instead of image data."), StatusCode: 400, Type: "invalid_request_error", Code: "image_generation_text_response"}
-						return
+						textResponseForToken = firstNonEmpty(output.Text, "Image generation returned a text response instead of image data.")
+						lastError = textResponseForToken
+						continue
 					}
 					emitted = true
 					emittedForToken = true
@@ -455,6 +466,14 @@ func (e *Engine) StreamImageOutputsWithPool(ctx context.Context, request Convers
 					if rateLimitedForToken {
 						e.Accounts.MarkImageResult(token, false)
 						e.Accounts.ApplyAccountErrorMessage(token, "image_stream", rateLimitMessage)
+						continue
+					}
+					if textResponseForToken != "" {
+						e.Accounts.MarkImageResult(token, false)
+						if attempts >= maxAttempts {
+							errCh <- &ImageGenerationError{Message: textResponseForToken, StatusCode: 400, Type: "invalid_request_error", Code: "image_generation_text_response"}
+							return
+						}
 						continue
 					}
 					if returnedMessage || !returnedResult {

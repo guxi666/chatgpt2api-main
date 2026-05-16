@@ -87,7 +87,7 @@ export function BillingAdminCard() {
       const [usersData, codeData, ordersData] = await Promise.all([
         fetchManagedUsers(),
         fetchRedeemCodes(200),
-        fetchAdminBillingOrders(0),
+        fetchAdminBillingOrders({ limit: 0, page: 1, page_size: 1 }),
       ]);
       const nextUsers = Array.isArray(usersData.items) ? usersData.items : [];
       setUsers(nextUsers);
@@ -356,107 +356,7 @@ export function BillingAdminCard() {
             </div>
           </section>
 
-          <section className="flex flex-col gap-3 rounded-[14px] border border-border/80 p-4">
-            <h3 className="text-sm font-semibold">全时段用户充值记录</h3>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>订单号</TableHead>
-                    <TableHead>用户邮箱</TableHead>
-                    <TableHead>金额</TableHead>
-                    <TableHead>方式</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead>支付时间</TableHead>
-                    <TableHead>创建时间</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {orders.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="py-6 text-center text-sm text-muted-foreground">
-                        暂无充值记录
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    pagedOrders.map((order) => {
-                      const status = orderStatusLabel(String(order.status || "pending"));
-                      return (
-                        <TableRow key={order.id}>
-                          <TableCell className="font-mono text-xs">{order.out_trade_no}</TableCell>
-                          <TableCell className="text-xs">{order.user_email || "-"}</TableCell>
-                          <TableCell>￥{order.amount_yuan || centsToYuan(order.amount_cents)}</TableCell>
-                          <TableCell>{payTypeLabel(String(order.pay_type || "alipay"))}</TableCell>
-                          <TableCell>
-                            <Badge variant={status.variant}>{status.text}</Badge>
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{formatDateTime(order.paid_at)}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{formatDateTime(order.created_at)}</TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-            {orders.length > 0 ? (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Select
-                    value={String(orderPageSize)}
-                    onValueChange={(value) => {
-                      setOrderPageSize(Number(value));
-                      setOrderPage(1);
-                    }}
-                  >
-                    <SelectTrigger className="h-8 w-[110px] rounded-lg">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ORDER_PAGE_SIZE_OPTIONS.map((size) => (
-                        <SelectItem key={size} value={String(size)}>
-                          每页 {size}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    value={String(currentOrderPage)}
-                    onChange={(event) => {
-                      const next = Number(event.target.value);
-                      if (Number.isFinite(next)) {
-                        setOrderPage(Math.max(1, Math.min(totalOrderPages, Math.trunc(next))));
-                      }
-                    }}
-                    inputMode="numeric"
-                    placeholder={`页码 1-${totalOrderPages}`}
-                    className="h-8 w-[120px] rounded-lg"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span>第 {currentOrderPage} / {totalOrderPages} 页，共 {orders.length} 条</span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-8 rounded-lg px-3"
-                    disabled={currentOrderPage <= 1}
-                    onClick={() => setOrderPage((prev) => Math.max(1, prev - 1))}
-                  >
-                    上一页
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-8 rounded-lg px-3"
-                    disabled={currentOrderPage >= totalOrderPages}
-                    onClick={() => setOrderPage((prev) => Math.min(totalOrderPages, prev + 1))}
-                  >
-                    下一页
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-          </section>
+
         </div>
       )}
     </SettingsCard>

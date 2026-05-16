@@ -819,6 +819,38 @@ func (s *EmailBillingService) ListAgencyWithdrawalRequestsForAdmin(limit int) []
 	return out
 }
 
+func (s *EmailBillingService) UpdateAgencyWithdrawalRequestForAdmin(id, status, adminNote string) (map[string]any, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, fmt.Errorf("withdrawal id is required")
+	}
+	status = normalizeAgencyWithdrawStatus(status)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.withdrawals {
+		if item == nil || strings.TrimSpace(item.ID) != id {
+			continue
+		}
+		if normalizeAgencyWithdrawStatus(item.Status) == BillingWithdrawStatusPaid && status != BillingWithdrawStatusPaid {
+			return nil, fmt.Errorf("paid withdrawal cannot be changed")
+		}
+		now := util.NowISO()
+		item.Status = status
+		item.AdminNote = strings.TrimSpace(adminNote)
+		item.UpdatedAt = now
+		if status == BillingWithdrawStatusPending {
+			item.ProcessedAt = ""
+		} else if strings.TrimSpace(item.ProcessedAt) == "" {
+			item.ProcessedAt = now
+		}
+		if err := s.saveLocked(); err != nil {
+			return nil, err
+		}
+		return publicBillingWithdrawalRequest(item), nil
+	}
+	return nil, fmt.Errorf("withdrawal request not found")
+}
+
 func (s *EmailBillingService) listAgencyWithdrawalsByUserIDLocked(userID string, limit int) []map[string]any {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {

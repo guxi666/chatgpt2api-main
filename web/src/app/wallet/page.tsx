@@ -13,9 +13,14 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   createPayOrder,
+  fetchAdminBillingOrders,
+  fetchAgencyAdminWithdrawals,
   fetchPayOrders,
   fetchWallet,
   redeemWalletCode,
+  updateAgencyAdminWithdrawal,
+  type AdminBillingStats,
+  type AgencyWithdrawalRequest,
   type PayOrder,
   type PayType,
   type WalletInfo,
@@ -519,6 +524,312 @@ function WalletPageContent() {
   );
 }
 
+const WITHDRAW_STATUS_LABEL: Record<string, { text: string; variant: "success" | "danger" | "warning" }> = {
+  pending: { text: "待审核", variant: "warning" },
+  approved: { text: "已通过", variant: "success" },
+  paid: { text: "已打款", variant: "success" },
+  rejected: { text: "已驳回", variant: "danger" },
+};
+
+function orderKindLabel(kind?: string) {
+  switch (kind) {
+    case "agency_join":
+      return "代理开通";
+    case "agency_upgrade":
+      return "代理升级";
+    default:
+      return "钱包充值";
+  }
+}
+
+function payoutText(item: AgencyWithdrawalRequest) {
+  const parts = [
+    item.phone ? `手机号：${item.phone}` : "",
+    item.wechat_id ? `微信号：${item.wechat_id}` : "",
+    item.alipay_qr_code ? "支付宝码已提交" : "",
+    item.wechat_qr_code ? "微信码已提交" : "",
+  ].filter(Boolean);
+  return parts.join(" / ") || "-";
+}
+
+function AdminWalletPageContent() {
+  const [orders, setOrders] = useState<PayOrder[]>([]);
+  const [stats, setStats] = useState<AdminBillingStats | null>(null);
+  const [withdrawals, setWithdrawals] = useState<AgencyWithdrawalRequest[]>([]);
+  const [withdrawalNotes, setWithdrawalNotes] = useState<Record<string, string>>({});
+  const [orderStatus, setOrderStatus] = useState<"all" | "pending" | "paid" | "failed">("all");
+  const [orderKind, setOrderKind] = useState<"all" | "recharge" | "agency_join" | "agency_upgrade">("all");
+  const [orderPageSize, setOrderPageSize] = useState<number>(10);
+  const [orderPage, setOrderPage] = useState(1);
+  const [orderTotal, setOrderTotal] = useState(0);
+  const [orderTotalPages, setOrderTotalPages] = useState(1);
+  const [withdrawStatus, setWithdrawStatus] = useState<"all" | "pending" | "approved" | "paid" | "rejected">("all");
+  const [isLoading, setIsLoading] = useState(true);
+  const [processingWithdrawalID, setProcessingWithdrawalID] = useState("");
+
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [orderData, withdrawalData] = await Promise.all([
+        fetchAdminBillingOrders({
+          limit: 0,
+          status: orderStatus,
+          order_kind: orderKind,
+          page: orderPage,
+          page_size: orderPageSize,
+        }),
+        fetchAgencyAdminWithdrawals(500),
+      ]);
+      setOrders(Array.isArray(orderData.items) ? orderData.items : []);
+      setStats(orderData.stats || null);
+      setOrderTotal(Number(orderData.total || 0));
+      setOrderTotalPages(Math.max(1, Number(orderData.total_page || 1)));
+      const nextWithdrawals = Array.isArray(withdrawalData.items) ? withdrawalData.items : [];
+      setWithdrawals(nextWithdrawals);
+      setWithdrawalNotes((current) => {
+        const next = { ...current };
+        for (const item of nextWithdrawals) {
+          if (next[item.id] === undefined) next[item.id] = item.admin_note || "";
+        }
+        return next;
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载提现和收益明细失败");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [orderKind, orderPage, orderPageSize, orderStatus]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    setOrderPage((prev) => Math.max(1, Math.min(prev, orderTotalPages)));
+  }, [orderTotalPages]);
+
+  const filteredWithdrawals = useMemo(() => {
+    return withdrawals.filter((item) => withdrawStatus === "all" || String(item.status || "pending") === withdrawStatus);
+  }, [withdrawStatus, withdrawals]);
+
+  const updateWithdrawal = async (id: string, status: "pending" | "approved" | "paid" | "rejected") => {
+    setProcessingWithdrawalID(`${id}:${status}`);
+    try {
+      const res = await updateAgencyAdminWithdrawal({ id, status, admin_note: withdrawalNotes[id] || "" });
+      setWithdrawals((current) => current.map((item) => (item.id === id ? res.item : item)));
+      setWithdrawalNotes((current) => ({ ...current, [id]: res.item.admin_note || "" }));
+      toast.success("提现状态已更新");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "更新提现状态失败");
+    } finally {
+      setProcessingWithdrawalID("");
+    }
+  };
+
+  return (
+    <section className="flex flex-col gap-5">
+      <PageHeader
+        eyebrow="Finance"
+        title="提现和收益明细"
+        actions={(
+          <Button variant="outline" className="h-10 rounded-lg" onClick={() => void load()} disabled={isLoading}>
+            <RefreshCw className={`size-4 ${isLoading ? "animate-spin" : ""}`} />
+            刷新
+          </Button>
+        )}
+      />
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+        <Card className="rounded-[20px]">
+          <CardHeader className="pb-3"><CardTitle className="text-base">今日收益</CardTitle></CardHeader>
+          <CardContent><div className="text-2xl font-semibold">￥{stats?.today_revenue_yuan || "0.00"}</div></CardContent>
+        </Card>
+        <Card className="rounded-[20px]">
+          <CardHeader className="pb-3"><CardTitle className="text-base">累计收益</CardTitle></CardHeader>
+          <CardContent><div className="text-2xl font-semibold">￥{stats?.total_revenue_yuan || "0.00"}</div></CardContent>
+        </Card>
+        <Card className="rounded-[20px]">
+          <CardHeader className="pb-3"><CardTitle className="text-base">待支付订单</CardTitle></CardHeader>
+          <CardContent><div className="text-2xl font-semibold">{stats?.pending_count || 0}</div></CardContent>
+        </Card>
+        <Card className="rounded-[20px]">
+          <CardHeader className="pb-3"><CardTitle className="text-base">提现申请</CardTitle></CardHeader>
+          <CardContent><div className="text-2xl font-semibold">{withdrawals.length}</div></CardContent>
+        </Card>
+      </div>
+
+      <Card className="rounded-[20px]">
+        <CardHeader>
+          <CardTitle className="text-base">代理提现审核</CardTitle>
+          <CardDescription>代理提交提现后在这里审核、驳回或标记已打款。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <Select value={withdrawStatus} onValueChange={(value) => setWithdrawStatus(value as typeof withdrawStatus)}>
+              <SelectTrigger className="h-10 w-[160px] rounded-lg"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部状态</SelectItem>
+                <SelectItem value="pending">待审核</SelectItem>
+                <SelectItem value="approved">已通过</SelectItem>
+                <SelectItem value="paid">已打款</SelectItem>
+                <SelectItem value="rejected">已驳回</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="overflow-hidden rounded-[14px] border border-border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>申请编号</TableHead>
+                  <TableHead>用户邮箱</TableHead>
+                  <TableHead>金额</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>收款信息</TableHead>
+                  <TableHead>申请时间</TableHead>
+                  <TableHead>备注</TableHead>
+                  <TableHead>操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground"><LoaderCircle className="mr-2 inline size-4 animate-spin" />正在加载</TableCell></TableRow>
+                ) : filteredWithdrawals.length === 0 ? (
+                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">暂无提现申请</TableCell></TableRow>
+                ) : filteredWithdrawals.map((item) => {
+                  const status = String(item.status || "pending");
+                  const label = WITHDRAW_STATUS_LABEL[status] || { text: status, variant: "warning" as const };
+                  const isPaid = status === "paid";
+                  return (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-mono text-xs">{item.id}</TableCell>
+                      <TableCell className="text-xs">{item.user_email || item.user_id || "-"}</TableCell>
+                      <TableCell className="font-medium">￥{item.amount_yuan || centsToYuan(item.amount_cents || 0)}</TableCell>
+                      <TableCell><Badge variant={label.variant}>{label.text}</Badge></TableCell>
+                      <TableCell className="max-w-[240px] text-xs text-muted-foreground">
+                        <div>{payoutText(item)}</div>
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          {item.alipay_qr_code ? <a className="text-primary hover:underline" href={item.alipay_qr_code} target="_blank" rel="noreferrer">支付宝码</a> : null}
+                          {item.wechat_qr_code ? <a className="text-primary hover:underline" href={item.wechat_qr_code} target="_blank" rel="noreferrer">微信码</a> : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{formatDateTime(item.created_at)}</TableCell>
+                      <TableCell>
+                        <Input
+                          value={withdrawalNotes[item.id] ?? item.admin_note ?? ""}
+                          onChange={(event) => setWithdrawalNotes((current) => ({ ...current, [item.id]: event.target.value }))}
+                          placeholder="管理员备注"
+                          disabled={isPaid}
+                          className="h-9 min-w-[140px] rounded-lg"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" variant="outline" disabled={isPaid || processingWithdrawalID !== ""} onClick={() => void updateWithdrawal(item.id, "approved")}>通过</Button>
+                          <Button size="sm" disabled={isPaid || processingWithdrawalID !== ""} onClick={() => void updateWithdrawal(item.id, "paid")}>已打款</Button>
+                          <Button size="sm" variant="destructive" disabled={isPaid || processingWithdrawalID !== ""} onClick={() => void updateWithdrawal(item.id, "rejected")}>驳回</Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-[20px]">
+        <CardHeader>
+          <CardTitle className="text-base">充值和收益明细</CardTitle>
+          <CardDescription>包含钱包充值、代理开通、代理升级订单，默认每页 10 条。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-[160px_160px_140px_160px]">
+            <Select value={orderStatus} onValueChange={(value) => { setOrderStatus(value as typeof orderStatus); setOrderPage(1); }}>
+              <SelectTrigger className="h-10 rounded-lg"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部状态</SelectItem>
+                <SelectItem value="pending">待支付</SelectItem>
+                <SelectItem value="paid">已支付</SelectItem>
+                <SelectItem value="failed">失败</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={orderKind} onValueChange={(value) => { setOrderKind(value as typeof orderKind); setOrderPage(1); }}>
+              <SelectTrigger className="h-10 rounded-lg"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部类型</SelectItem>
+                <SelectItem value="recharge">钱包充值</SelectItem>
+                <SelectItem value="agency_join">代理开通</SelectItem>
+                <SelectItem value="agency_upgrade">代理升级</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={String(orderPageSize)} onValueChange={(value) => { setOrderPageSize(Number(value)); setOrderPage(1); }}>
+              <SelectTrigger className="h-10 rounded-lg"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((size) => <SelectItem key={size} value={String(size)}>每页 {size}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Input
+              value={String(orderPage)}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                if (Number.isFinite(next)) setOrderPage(Math.max(1, Math.min(orderTotalPages, Math.trunc(next))));
+              }}
+              inputMode="numeric"
+              placeholder={`页码 1-${orderTotalPages}`}
+              className="h-10 rounded-lg"
+            />
+          </div>
+          <div className="overflow-hidden rounded-[14px] border border-border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>订单号</TableHead>
+                  <TableHead>用户邮箱</TableHead>
+                  <TableHead>金额</TableHead>
+                  <TableHead>类型</TableHead>
+                  <TableHead>方式</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>支付时间</TableHead>
+                  <TableHead>创建时间</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground"><LoaderCircle className="mr-2 inline size-4 animate-spin" />正在加载</TableCell></TableRow>
+                ) : orders.length === 0 ? (
+                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">暂无记录</TableCell></TableRow>
+                ) : orders.map((order) => {
+                  const status = orderStatusLabel(order, Date.now());
+                  return (
+                    <TableRow key={order.id}>
+                      <TableCell className="font-mono text-xs">{order.out_trade_no || order.id}</TableCell>
+                      <TableCell className="text-xs">{order.user_email || "-"}</TableCell>
+                      <TableCell>￥{order.amount_yuan || centsToYuan(order.amount_cents || 0)}</TableCell>
+                      <TableCell>{orderKindLabel(order.order_kind)}</TableCell>
+                      <TableCell>{payTypeLabel(order.pay_type)}</TableCell>
+                      <TableCell><Badge variant={status.variant}>{status.text}</Badge></TableCell>
+                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{formatDateTime(order.paid_at)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{formatDateTime(order.created_at)}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+            <span>第 {orderPage} / {orderTotalPages} 页，共 {orderTotal} 条</span>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" className="h-8 rounded-lg px-3" disabled={orderPage <= 1} onClick={() => setOrderPage((p) => Math.max(1, p - 1))}>上一页</Button>
+              <Button type="button" variant="outline" className="h-8 rounded-lg px-3" disabled={orderPage >= orderTotalPages} onClick={() => setOrderPage((p) => Math.min(orderTotalPages, p + 1))}>下一页</Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
 export default function WalletPage() {
   const { isCheckingAuth, session } = useAuthGuard(undefined, "/wallet");
 
@@ -528,6 +839,10 @@ export default function WalletPage() {
         <LoaderCircle className="size-5 animate-spin text-stone-400" />
       </div>
     );
+  }
+
+  if (session.role === "admin") {
+    return <AdminWalletPageContent />;
   }
 
   if (session.provider === "linuxdo") {

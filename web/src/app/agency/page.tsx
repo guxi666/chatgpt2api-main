@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import {
   activateAgencyUser,
   createAgencyWithdrawal,
+  fetchAgencyAdminWithdrawals,
   fetchAgencyAdminUsers,
   fetchAgencyCommissionDashboard,
   fetchAgencyConfig,
@@ -35,6 +36,7 @@ import {
   fetchWallet,
   joinAgencyTier,
   updateAgencyConfig,
+  updateAgencyAdminWithdrawal,
   updateAgencyWithdrawProfile,
   uploadAgencyWithdrawQRCode,
   upgradeAgencyTier,
@@ -43,6 +45,7 @@ import {
   type AgencyCommissionDashboard,
   type AgencyCommissionOrder,
   type AgencyConfig,
+  type AgencyMaterial,
   type AgencyTier,
   type AgencyWithdrawalRequest,
   type ManagedUser,
@@ -322,6 +325,7 @@ function AgencyCommissionCenter({
   currentTierName,
   brandTitle,
   brandLogoURL,
+  materials,
   isLoading,
   onReload,
   onRequestUpgrade,
@@ -332,6 +336,7 @@ function AgencyCommissionCenter({
   currentTierName: string;
   brandTitle: string;
   brandLogoURL: string;
+  materials: AgencyMaterial[];
   isLoading: boolean;
   onReload: () => Promise<boolean>;
   onRequestUpgrade: (tier: TierKey) => void;
@@ -871,9 +876,18 @@ function AgencyCommissionCenter({
       <CardHeader><CardTitle className="text-lg text-[#16335f]">推广素材</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-4 md:grid-cols-3">
-          <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="mb-2 text-sm text-[#5878a8]">横幅素材 A</div><div className="h-24 rounded-lg bg-[linear-gradient(120deg,#f8edd8,#eef4ff)]" /></div>
-          <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="mb-2 text-sm text-[#5878a8]">横幅素材 B</div><div className="h-24 rounded-lg bg-[linear-gradient(120deg,#ecf2ff,#f6efff)]" /></div>
-          <div className="rounded-xl border border-[#d4e0fa] bg-white p-3"><div className="mb-2 text-sm text-[#5878a8]">短文案模板</div><div className="text-xs leading-6 text-[#5f7faf]">高质量 AI 生图，代理分成实时到账，扫码注册自动绑定邀请关系。</div></div>
+          {materials.map((item) => (
+            <div key={item.id} className="rounded-xl border border-[#d4e0fa] bg-white p-3">
+              <div className="mb-2 text-sm font-semibold text-[#274a7c]">{item.title || "推广素材"}</div>
+              {item.image_url ? (
+                <img src={item.image_url} alt={item.title || "推广素材"} className="h-28 w-full rounded-lg object-cover" />
+              ) : (
+                <div className="h-28 rounded-lg bg-[linear-gradient(120deg,#f8edd8,#eef4ff)]" />
+              )}
+              {item.description ? <div className="mt-2 text-xs leading-5 text-[#6d86ae]">{item.description}</div> : null}
+              {item.copy ? <div className="mt-2 rounded-lg bg-[#f6f9ff] p-2 text-xs leading-6 text-[#5f7faf]">{item.copy}</div> : null}
+            </div>
+          ))}
         </div>
       </CardContent>
     </Card>
@@ -992,6 +1006,7 @@ export default function AgencyPage() {
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [commissionBPs, setCommissionBPs] = useState<Record<string, string>>({});
   const [discountBPs, setDiscountBPs] = useState<Record<string, string>>({});
+  const [materialDrafts, setMaterialDrafts] = useState<AgencyMaterial[]>([]);
 
   const [currentTier, setCurrentTier] = useState("");
   const [agencyEnabled, setAgencyEnabled] = useState(false);
@@ -1007,6 +1022,10 @@ export default function AgencyPage() {
   const [agencyUsers, setAgencyUsers] = useState<AgencyAdminUser[]>([]);
   const [isLoadingAdminUsers, setIsLoadingAdminUsers] = useState(false);
   const [activatingUserID, setActivatingUserID] = useState("");
+  const [adminWithdrawals, setAdminWithdrawals] = useState<AgencyWithdrawalRequest[]>([]);
+  const [isLoadingAdminWithdrawals, setIsLoadingAdminWithdrawals] = useState(false);
+  const [processingWithdrawalID, setProcessingWithdrawalID] = useState("");
+  const [withdrawalNotes, setWithdrawalNotes] = useState<Record<string, string>>({});
 
   const loadDashboard = useCallback(async (): Promise<boolean> => {
     if (isAdmin) return true;
@@ -1044,6 +1063,29 @@ export default function AgencyPage() {
     }
   }, [isAdmin]);
 
+  const loadAdminWithdrawals = useCallback(async () => {
+    if (!isAdmin) return;
+    setIsLoadingAdminWithdrawals(true);
+    try {
+      const res = await fetchAgencyAdminWithdrawals(500);
+      const items = res.items || [];
+      setAdminWithdrawals(items);
+      setWithdrawalNotes((current) => {
+        const next = { ...current };
+        for (const item of items) {
+          if (next[item.id] === undefined) {
+            next[item.id] = item.admin_note || "";
+          }
+        }
+        return next;
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载提现申请失败");
+    } finally {
+      setIsLoadingAdminWithdrawals(false);
+    }
+  }, [isAdmin]);
+
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -1061,9 +1103,11 @@ export default function AgencyPage() {
       setPrices(nextPrices);
       setCommissionBPs(nextCommissionBPs);
       setDiscountBPs(nextDiscountBPs);
+      setMaterialDrafts((data.materials || []).map((item) => ({ ...item })));
 
       if (isAdmin) {
-        await loadAdminUsers();
+        setAgencyEnabled(false);
+        setDashboard(null);
       } else {
         try {
           const wallet = await fetchWallet();
@@ -1102,7 +1146,7 @@ export default function AgencyPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin, loadAdminUsers, loadDashboard, session?.roleId, session?.roleName]);
+  }, [isAdmin, loadDashboard, session?.roleId, session?.roleName]);
 
   useEffect(() => {
     void load();
@@ -1175,6 +1219,7 @@ export default function AgencyPage() {
         agency_tier_basic_discount_bp: parsePositiveInt(discountBPs.basic),
         agency_tier_pro_discount_bp: parsePositiveInt(discountBPs.pro),
         agency_tier_premium_discount_bp: parsePositiveInt(discountBPs.premium),
+        agency_materials: materialDrafts,
       });
       toast.success("代理配置已更新");
       await load();
@@ -1211,6 +1256,24 @@ export default function AgencyPage() {
     }
   };
 
+  const handleUpdateWithdrawal = async (id: string, status: "pending" | "approved" | "paid" | "rejected") => {
+    setProcessingWithdrawalID(`${id}:${status}`);
+    try {
+      const res = await updateAgencyAdminWithdrawal({
+        id,
+        status,
+        admin_note: withdrawalNotes[id] || "",
+      });
+      setAdminWithdrawals((current) => current.map((item) => (item.id === id ? res.item : item)));
+      setWithdrawalNotes((current) => ({ ...current, [id]: res.item.admin_note || "" }));
+      toast.success("提现申请状态已更新");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "更新提现申请失败");
+    } finally {
+      setProcessingWithdrawalID("");
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -1236,6 +1299,7 @@ export default function AgencyPage() {
           currentTierName={currentTierName}
           brandTitle={brandTitle}
           brandLogoURL={brandLogoURL}
+          materials={config?.materials || []}
           isLoading={isDashboardLoading}
           onReload={loadDashboard}
           onRequestUpgrade={(tier) => void handleJoin(tier)}
@@ -1297,52 +1361,33 @@ export default function AgencyPage() {
             </CardContent>
           </Card>
 
+
           <Card className="rounded-2xl border-border/80">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-lg">后台开通代理权限</CardTitle>
-              <Button variant="outline" onClick={() => void loadAdminUsers()} disabled={isLoadingAdminUsers}>{isLoadingAdminUsers ? <LoaderCircle className="size-4 animate-spin" /> : null}刷新</Button>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <table className="min-w-[980px] w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border/60 text-left text-muted-foreground">
-                      <th className="px-2 py-3 font-medium">用户名称</th>
-                      <th className="px-2 py-3 font-medium">注册邮箱</th>
-                      <th className="px-2 py-3 font-medium">当前代理</th>
-                      <th className="px-2 py-3 font-medium">当前角色</th>
-                      <th className="px-2 py-3 font-medium">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedAdminUsers.map((user) => {
-                      const currentTierKey = agencyTierByUserID.get(user.id) || "";
-                      return (
-                        <tr key={user.id} className="border-b border-border/40 align-top">
-                          <td className="px-2 py-3">{user.name || user.username || user.id}</td>
-                          <td className="px-2 py-3">{user.email || "-"}</td>
-                          <td className="px-2 py-3">{tierLabel(currentTierKey, tiers)}</td>
-                          <td className="px-2 py-3">{user.role_name || "普通用户"}</td>
-                          <td className="px-2 py-3">
-                            <div className="flex flex-wrap gap-2">
-                              {(["basic", "pro", "premium"] as const).map((tier) => {
-                                const pending = activatingUserID === `${user.id}:${tier}`;
-                                const isCurrent = currentTierKey === tier;
-                                return (
-                                  <Button key={tier} type="button" size="sm" variant={isCurrent ? "default" : "outline"} disabled={pending || isLoadingAdminUsers} onClick={() => void handleActivateAgency(user.id, tier)}>
-                                    {pending ? "处理中..." : `${tierLabel(tier, tiers)}${isCurrent ? "（当前）" : ""}`}
-                                  </Button>
-                                );
-                              })}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <CardHeader><CardTitle className="text-lg">推广素材配置</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 lg:grid-cols-3">
+                {materialDrafts.map((item, index) => (
+                  <div key={item.id || index} className="space-y-2 rounded-xl border border-border/60 p-3">
+                    <Field className="gap-1.5">
+                      <FieldLabel htmlFor={`agency-material-title-${index}`}>标题</FieldLabel>
+                      <Input id={`agency-material-title-${index}`} value={item.title || ""} onChange={(event) => setMaterialDrafts((current) => current.map((draft, i) => i === index ? { ...draft, title: event.target.value } : draft))} />
+                    </Field>
+                    <Field className="gap-1.5">
+                      <FieldLabel htmlFor={`agency-material-desc-${index}`}>简介</FieldLabel>
+                      <Input id={`agency-material-desc-${index}`} value={item.description || ""} onChange={(event) => setMaterialDrafts((current) => current.map((draft, i) => i === index ? { ...draft, description: event.target.value } : draft))} />
+                    </Field>
+                    <Field className="gap-1.5">
+                      <FieldLabel htmlFor={`agency-material-image-${index}`}>图片地址</FieldLabel>
+                      <Input id={`agency-material-image-${index}`} value={item.image_url || ""} onChange={(event) => setMaterialDrafts((current) => current.map((draft, i) => i === index ? { ...draft, image_url: event.target.value } : draft))} />
+                    </Field>
+                    <Field className="gap-1.5">
+                      <FieldLabel htmlFor={`agency-material-copy-${index}`}>文案内容</FieldLabel>
+                      <Input id={`agency-material-copy-${index}`} value={item.copy || ""} onChange={(event) => setMaterialDrafts((current) => current.map((draft, i) => i === index ? { ...draft, copy: event.target.value } : draft))} />
+                    </Field>
+                  </div>
+                ))}
               </div>
-              {!isLoadingAdminUsers && sortedAdminUsers.length === 0 ? <div className="py-8 text-center text-sm text-muted-foreground">暂无可配置代理的用户</div> : null}
+              <Button onClick={() => void handleSave()} disabled={isSaving}>{isSaving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}保存推广素材</Button>
             </CardContent>
           </Card>
         </>

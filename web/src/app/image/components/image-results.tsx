@@ -233,6 +233,7 @@ export function ImageResults({
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const [editingPreset, setEditingPreset] = useState<ImagePromptPreset | null>(null);
   const [editingPresetTitle, setEditingPresetTitle] = useState("");
+  const [editingPresetHint, setEditingPresetHint] = useState("");
   const [editingPresetPrompt, setEditingPresetPrompt] = useState("");
   const [editingPresetImageSrc, setEditingPresetImageSrc] = useState("");
   const pendingImageSizeIdsRef = useRef<Set<string>>(new Set());
@@ -240,6 +241,7 @@ export function ImageResults({
   const openPresetEditor = (preset: ImagePromptPreset) => {
     setEditingPreset(preset);
     setEditingPresetTitle(preset.title);
+    setEditingPresetHint(preset.hint);
     setEditingPresetPrompt(preset.prompt);
     setEditingPresetImageSrc(preset.imageSrc);
   };
@@ -251,6 +253,7 @@ export function ImageResults({
     return {
       ...editingPreset,
       title: editingPresetTitle.trim() || editingPreset.title,
+      hint: editingPresetHint.trim() || editingPreset.hint,
       prompt: editingPresetPrompt.trim() || editingPreset.prompt,
       imageSrc: editingPresetImageSrc.trim() || editingPreset.imageSrc,
     } satisfies ImagePromptPreset;
@@ -404,6 +407,11 @@ export function ImageResults({
                   value={editingPresetTitle}
                   onChange={(event) => setEditingPresetTitle(event.target.value)}
                   placeholder="模板标题"
+                />
+                <Input
+                  value={editingPresetHint}
+                  onChange={(event) => setEditingPresetHint(event.target.value)}
+                  placeholder="外部卡片简介"
                 />
                 <Input
                   value={editingPresetImageSrc}

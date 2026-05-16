@@ -267,9 +267,18 @@ export type AgencyTier = {
   role_name?: string;
 };
 
+export type AgencyMaterial = {
+  id: string;
+  title: string;
+  description?: string;
+  image_url?: string;
+  copy?: string;
+};
+
 export type AgencyConfig = {
   editable: boolean;
   tiers: AgencyTier[];
+  materials?: AgencyMaterial[];
 };
 
 export type AgencyCommissionOrder = {
@@ -1221,6 +1230,7 @@ export async function updateAgencyConfig(payload: {
   agency_tier_basic_discount_bp?: number;
   agency_tier_pro_discount_bp?: number;
   agency_tier_premium_discount_bp?: number;
+  agency_materials?: AgencyMaterial[];
 }) {
   return httpRequest<AgencyConfig>("/api/agency", {
     method: "POST",
@@ -1290,6 +1300,17 @@ export async function fetchAgencyAdminUsers() {
 
 export async function activateAgencyUser(payload: { user_id: string; tier: "basic" | "pro" | "premium" }) {
   return httpRequest<{ ok: boolean; wallet?: Record<string, unknown>; tier: string }>("/api/agency/admin/users", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function fetchAgencyAdminWithdrawals(limit = 500) {
+  return httpRequest<{ items: AgencyWithdrawalRequest[] }>(`/api/agency/admin/withdrawals?limit=${encodeURIComponent(String(limit))}`);
+}
+
+export async function updateAgencyAdminWithdrawal(payload: { id: string; status: "pending" | "approved" | "paid" | "rejected"; admin_note?: string }) {
+  return httpRequest<{ ok: boolean; item: AgencyWithdrawalRequest }>("/api/agency/admin/withdrawals", {
     method: "POST",
     body: payload,
   });
@@ -1372,9 +1393,10 @@ export async function deleteManagedImages(paths: string[]) {
 export async function uploadManagedImagesToR2(paths: string[]) {
   return httpRequest<{
     uploaded: number;
+    skipped?: number;
     missing: number;
     failed: number;
-    items: Array<{ path: string; key: string; url?: string }>;
+    items: Array<{ path: string; key: string; url?: string; skipped?: boolean }>;
     errors?: Array<{ path?: string; error: string }>;
   }>("/api/images/r2-upload", {
     method: "POST",
@@ -1621,9 +1643,25 @@ export async function deleteRedeemCode(code: string) {
   });
 }
 
-export async function fetchAdminBillingOrders(limit = 0) {
-  return httpRequest<{ items: PayOrder[]; stats: AdminBillingStats }>(
-    `/api/admin/billing/orders?limit=${encodeURIComponent(String(limit))}`,
+export async function fetchAdminBillingOrders(filters: {
+  limit?: number;
+  status?: "pending" | "paid" | "failed" | "all";
+  order_kind?: "recharge" | "agency_join" | "agency_upgrade" | "all";
+  page?: number;
+  page_size?: number;
+} | number = 0) {
+  const params = new URLSearchParams();
+  if (typeof filters === "number") {
+    params.set("limit", String(filters));
+  } else {
+    if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+    if (filters.status && filters.status !== "all") params.set("status", filters.status);
+    if (filters.order_kind && filters.order_kind !== "all") params.set("order_kind", filters.order_kind);
+    if (filters.page && filters.page > 0) params.set("page", String(filters.page));
+    if (filters.page_size && filters.page_size > 0) params.set("page_size", String(filters.page_size));
+  }
+  return httpRequest<{ items: PayOrder[]; stats: AdminBillingStats; total?: number; page?: number; page_size?: number; total_page?: number }>(
+    `/api/admin/billing/orders?${params.toString()}`,
   );
 }
 

@@ -33,7 +33,7 @@ type PermissionSet struct {
 var fullMenuPermissions = []MenuPermission{
 	{ID: "image", Label: "创作台", Path: "/image", Icon: "image", Order: 10},
 	{ID: "image-manager", Label: "图片库", Path: "/image-manager", Icon: "images", Order: 20},
-	{ID: "wallet", Label: "钱包充值", Path: "/wallet", Icon: "wallet", Order: 25},
+	{ID: "wallet", Label: "提现和收益明细", Path: "/wallet", Icon: "wallet", Order: 25},
 	{ID: "agency", Label: "代理加盟", Path: "/agency", Icon: "handshake", Order: 28},
 	{ID: "agency-commission", Label: "代理分成", Path: "/agency-commission", Icon: "chart-column-increasing", Order: 29},
 	{ID: "accounts", Label: "号池管理", Path: "/accounts", Icon: "wallet-cards", Order: 30},
@@ -71,6 +71,8 @@ var apiPermissionCatalog = []APIPermission{
 	apiPermission("GET", "/api/agency/withdraw-profile", "Agency withdrawal profile", "Agency", false),
 	apiPermission("POST", "/api/agency/withdraw-profile", "Save agency withdrawal profile", "Agency", false),
 	apiPermission("POST", "/api/agency/withdraw-profile/upload", "Upload agency payout QR code", "Agency", false),
+	apiPermission("GET", "/api/agency/admin/withdrawals", "Admin agency withdrawals", "Agency", false),
+	apiPermission("POST", "/api/agency/admin/withdrawals", "Update agency withdrawal", "Agency", false),
 	apiPermission("POST", "/api/agency/join", "开通代理", "代理加盟", false),
 	apiPermission("POST", "/api/agency/upgrade", "升级代理", "代理加盟", false),
 	apiPermission("GET", "/api/agency/admin/users", "查看代理用户", "代理加盟", false),

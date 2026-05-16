@@ -421,6 +421,19 @@ function taskDataToStoredImage(image: StoredImage, task: CreationTask, dataIndex
   };
   if (task.status === "success") {
     if (task.output_type === "text") {
+      if (task.mode !== "chat") {
+        return updateStoredImage(image, {
+          taskId: task.id,
+          status: "error",
+          text_response: undefined,
+          b64_json: undefined,
+          url: undefined,
+          path: undefined,
+          visibility: taskVisibility,
+          revised_prompt: undefined,
+          error: formatCreationTaskErrorMessage(task.data?.[dataIndex]?.text_response || task.error || "生成图片失败：上游返回了文字而不是图片"),
+        });
+      }
       return updateStoredImage(image, {
         taskId: task.id,
         status: "message",
@@ -453,6 +466,19 @@ function taskDataToStoredImage(image: StoredImage, task: CreationTask, dataIndex
 
   if (task.status === "error") {
     if (task.output_type === "text") {
+      if (task.mode !== "chat") {
+        return updateStoredImage(image, {
+          taskId: task.id,
+          status: "error",
+          text_response: undefined,
+          b64_json: undefined,
+          url: undefined,
+          path: undefined,
+          visibility: taskVisibility,
+          revised_prompt: undefined,
+          error: formatCreationTaskErrorMessage(task.data?.[dataIndex]?.text_response || task.error || "生成图片失败：上游返回了文字而不是图片"),
+        });
+      }
       return updateStoredImage(image, {
         taskId: task.id,
         status: "message",

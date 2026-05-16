@@ -56,6 +56,9 @@ func (a *App) handleAgency(w http.ResponseWriter, r *http.Request) {
 			"agency_tier_pro_discount_bp":       clampAgencyBasisPoint(body["agency_tier_pro_discount_bp"], 1000),
 			"agency_tier_premium_discount_bp":   clampAgencyBasisPoint(body["agency_tier_premium_discount_bp"], 1500),
 		}
+		if _, ok := body["agency_materials"]; ok {
+			updates["agency_materials"] = normalizeAgencyMaterials(body["agency_materials"])
+		}
 		if _, err := a.config.Update(updates); err != nil {
 			util.WriteError(w, http.StatusBadRequest, err.Error())
 			return
@@ -330,7 +333,7 @@ func (a *App) handleAgencyWithdrawProfileUpload(w http.ResponseWriter, r *http.R
 }
 
 func (a *App) handleAgencyAdminWithdrawals(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
@@ -341,6 +344,20 @@ func (a *App) handleAgencyAdminWithdrawals(w http.ResponseWriter, r *http.Reques
 	}
 	if identity.Role != service.AuthRoleAdmin {
 		util.WriteError(w, http.StatusForbidden, "admin permission required")
+		return
+	}
+	if r.Method == http.MethodPost {
+		body, _ := readJSONMap(r)
+		item, err := a.billing.UpdateAgencyWithdrawalRequestForAdmin(
+			util.Clean(body["id"]),
+			util.Clean(body["status"]),
+			util.Clean(body["admin_note"]),
+		)
+		if err != nil {
+			util.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "item": item})
 		return
 	}
 	limit := util.ToInt(r.URL.Query().Get("limit"), 500)
@@ -427,9 +444,76 @@ func agencyPayload(a *App, editable bool) map[string]any {
 		})
 	}
 	return map[string]any{
-		"editable": editable,
-		"tiers":    items,
+		"editable":  editable,
+		"tiers":     items,
+		"materials": agencyMaterials(a),
 	}
+}
+
+func agencyMaterials(a *App) []map[string]any {
+	settings := a.config.Get()
+	return normalizeAgencyMaterials(settings["agency_materials"])
+}
+
+func defaultAgencyMaterials() []map[string]any {
+	return []map[string]any{
+		{
+			"id":          "banner-a",
+			"title":       "横幅素材 A",
+			"description": "适合朋友圈、社群、落地页顶部宣传。",
+			"image_url":   "",
+			"copy":        "高质量 AI 生图，代理分成实时记录，扫码注册自动绑定邀请关系。",
+		},
+		{
+			"id":          "banner-b",
+			"title":       "横幅素材 B",
+			"description": "适合短视频封面、社群海报、推广页卡片。",
+			"image_url":   "",
+			"copy":        "开通代理后可查看专属渠道链接、团队数据、收益明细和提现记录。",
+		},
+		{
+			"id":          "copy-template",
+			"title":       "短文案模板",
+			"description": "可复制给客户的推广文案。",
+			"image_url":   "",
+			"copy":        "真实商业可用的 AI 图片生成平台，注册即可体验，充值消费自动计入代理收益。",
+		},
+	}
+}
+
+func normalizeAgencyMaterials(value any) []map[string]any {
+	rawItems := util.AsMapSlice(value)
+	if len(rawItems) == 0 {
+		return defaultAgencyMaterials()
+	}
+	out := make([]map[string]any, 0, 6)
+	for index, raw := range rawItems {
+		title := strings.TrimSpace(util.Clean(raw["title"]))
+		copyText := strings.TrimSpace(util.Clean(raw["copy"]))
+		description := strings.TrimSpace(util.Clean(raw["description"]))
+		imageURL := strings.TrimSpace(util.Clean(raw["image_url"]))
+		if title == "" && copyText == "" && description == "" && imageURL == "" {
+			continue
+		}
+		id := strings.TrimSpace(util.Clean(raw["id"]))
+		if id == "" {
+			id = fmt.Sprintf("material-%d", index+1)
+		}
+		out = append(out, map[string]any{
+			"id":          id,
+			"title":       title,
+			"description": description,
+			"image_url":   imageURL,
+			"copy":        copyText,
+		})
+		if len(out) >= 6 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return defaultAgencyMaterials()
+	}
+	return out
 }
 
 func (a *App) agencyTiers() []agencyTierRuntime {

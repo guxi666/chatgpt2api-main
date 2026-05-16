@@ -757,14 +757,61 @@ func (a *App) handleAdminBilling(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		limit := util.ToInt(r.URL.Query().Get("limit"), 0)
+		query := r.URL.Query()
+		limit := util.ToInt(query.Get("limit"), 0)
 		items, stats := a.billing.ListOrdersForAdmin(limit)
+		statusFilter := strings.ToLower(strings.TrimSpace(query.Get("status")))
+		kindFilter := strings.ToLower(strings.TrimSpace(query.Get("order_kind")))
+		filtered := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			if statusFilter != "" && statusFilter != "all" && strings.ToLower(strings.TrimSpace(util.Clean(item["status"]))) != statusFilter {
+				continue
+			}
+			if kindFilter != "" && kindFilter != "all" && strings.ToLower(strings.TrimSpace(util.Clean(item["order_kind"]))) != kindFilter {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		pageSize := util.ToInt(query.Get("page_size"), 10)
+		if pageSize < 1 {
+			pageSize = 10
+		}
+		if pageSize > 500 {
+			pageSize = 500
+		}
+		page := util.ToInt(query.Get("page"), 1)
+		if page < 1 {
+			page = 1
+		}
+		total := len(filtered)
+		totalPages := 1
+		if total > 0 {
+			totalPages = (total + pageSize - 1) / pageSize
+		}
+		if page > totalPages {
+			page = totalPages
+		}
+		start := (page - 1) * pageSize
+		if start < 0 {
+			start = 0
+		}
+		if start > total {
+			start = total
+		}
+		end := start + pageSize
+		if end > total {
+			end = total
+		}
 		util.WriteJSON(w, http.StatusOK, map[string]any{
-			"items":  items,
-			"stats":  stats,
-			"limit":  limit,
-			"scope":  "all_time",
-			"source": "billing_orders",
+			"items":      filtered[start:end],
+			"stats":      stats,
+			"limit":      limit,
+			"scope":      "all_time",
+			"source":     "billing_orders",
+			"total":      total,
+			"page":       page,
+			"page_size":  pageSize,
+			"total_page": totalPages,
 		})
 		return
 	}
