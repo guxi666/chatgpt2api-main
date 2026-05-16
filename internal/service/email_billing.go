@@ -144,6 +144,10 @@ type billingUser struct {
 	AgencyCommissionBP int
 	AgencyDiscountBP   int
 	AgencyJoinedAt     string
+	AgencyAlipayQRCode string
+	AgencyWeChatQRCode string
+	AgencyPhone        string
+	AgencyWeChatID     string
 	RegisterIP         string
 	RegisterDeviceID   string
 	CreatedAt          string
@@ -691,6 +695,34 @@ func (s *EmailBillingService) agencyDashboardLocked(user *billingUser, registerU
 	}
 }
 
+func (s *EmailBillingService) AgencyWithdrawProfileByIdentity(identity Identity) (map[string]any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.ensureUserByIdentityLocked(identity)
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	return publicBillingAgencyWithdrawProfile(user), nil
+}
+
+func (s *EmailBillingService) UpdateAgencyWithdrawProfile(identity Identity, alipayQRCode, weChatQRCode, phone, weChatID string) (map[string]any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.ensureUserByIdentityLocked(identity)
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	user.AgencyAlipayQRCode = strings.TrimSpace(alipayQRCode)
+	user.AgencyWeChatQRCode = strings.TrimSpace(weChatQRCode)
+	user.AgencyPhone = strings.TrimSpace(phone)
+	user.AgencyWeChatID = strings.TrimSpace(weChatID)
+	user.UpdatedAt = util.NowISO()
+	if err := s.saveLocked(); err != nil {
+		return nil, err
+	}
+	return publicBillingAgencyWithdrawProfile(user), nil
+}
+
 func (s *EmailBillingService) CreateAgencyWithdrawalRequest(identity Identity, amountCents int, alipayQRCode, weChatQRCode, phone, weChatID string) (map[string]any, error) {
 	if amountCents <= 0 {
 		return nil, fmt.Errorf("withdraw amount must be greater than 0")
@@ -715,6 +747,10 @@ func (s *EmailBillingService) CreateAgencyWithdrawalRequest(identity Identity, a
 	if amountCents > available {
 		return nil, fmt.Errorf("withdraw amount exceeds available balance")
 	}
+	alipayQRCode = strings.TrimSpace(firstNonEmpty(alipayQRCode, user.AgencyAlipayQRCode))
+	weChatQRCode = strings.TrimSpace(firstNonEmpty(weChatQRCode, user.AgencyWeChatQRCode))
+	phone = strings.TrimSpace(firstNonEmpty(phone, user.AgencyPhone))
+	weChatID = strings.TrimSpace(firstNonEmpty(weChatID, user.AgencyWeChatID))
 
 	item := &billingWithdrawalRequest{
 		ID:           "wd_" + util.NewHex(18),
@@ -734,6 +770,11 @@ func (s *EmailBillingService) CreateAgencyWithdrawalRequest(identity Identity, a
 	if item.AlipayQRCode == "" && item.WeChatQRCode == "" && item.Phone == "" && item.WeChatID == "" {
 		return nil, fmt.Errorf("at least one payout contact is required")
 	}
+	user.AgencyAlipayQRCode = item.AlipayQRCode
+	user.AgencyWeChatQRCode = item.WeChatQRCode
+	user.AgencyPhone = item.Phone
+	user.AgencyWeChatID = item.WeChatID
+	user.UpdatedAt = item.UpdatedAt
 	s.withdrawals = append(s.withdrawals, item)
 	if err := s.saveLocked(); err != nil {
 		if len(s.withdrawals) > 0 {
@@ -2328,6 +2369,10 @@ func normalizeBillingUser(raw map[string]any) *billingUser {
 		AgencyCommissionBP: normalizeAgencyBasisPoint(raw["agency_commission_bp"]),
 		AgencyDiscountBP:   normalizeAgencyBasisPoint(raw["agency_discount_bp"]),
 		AgencyJoinedAt:     util.Clean(raw["agency_joined_at"]),
+		AgencyAlipayQRCode: strings.TrimSpace(util.Clean(raw["agency_alipay_qr_code"])),
+		AgencyWeChatQRCode: strings.TrimSpace(util.Clean(raw["agency_wechat_qr_code"])),
+		AgencyPhone:        strings.TrimSpace(util.Clean(raw["agency_phone"])),
+		AgencyWeChatID:     strings.TrimSpace(util.Clean(raw["agency_wechat_id"])),
 		RegisterIP:         strings.TrimSpace(util.Clean(raw["register_ip"])),
 		RegisterDeviceID:   strings.TrimSpace(util.Clean(raw["register_device_id"])),
 		CreatedAt:          firstNonEmpty(util.Clean(raw["created_at"]), util.NowISO()),
@@ -2338,28 +2383,32 @@ func normalizeBillingUser(raw map[string]any) *billingUser {
 
 func billingUserToMap(user *billingUser) map[string]any {
 	return map[string]any{
-		"id":                   user.ID,
-		"email":                user.Email,
-		"provider":             user.Provider,
-		"name":                 user.Name,
-		"invite_code":          user.InviteCode,
-		"invited_by":           user.InvitedBy,
-		"password_hash":        user.PasswordHash,
-		"auth_key_id":          user.AuthKeyID,
-		"enabled":              user.Enabled,
-		"balance_cents":        user.BalanceCents,
-		"total_recharge_cents": user.TotalRechargeCents,
-		"total_consume_cents":  user.TotalConsumeCents,
-		"agency_tier":          user.AgencyTier,
-		"agency_enabled":       user.AgencyEnabled,
-		"agency_commission_bp": user.AgencyCommissionBP,
-		"agency_discount_bp":   user.AgencyDiscountBP,
-		"agency_joined_at":     user.AgencyJoinedAt,
-		"register_ip":          user.RegisterIP,
-		"register_device_id":   user.RegisterDeviceID,
-		"created_at":           user.CreatedAt,
-		"updated_at":           user.UpdatedAt,
-		"last_login_at":        user.LastLoginAt,
+		"id":                    user.ID,
+		"email":                 user.Email,
+		"provider":              user.Provider,
+		"name":                  user.Name,
+		"invite_code":           user.InviteCode,
+		"invited_by":            user.InvitedBy,
+		"password_hash":         user.PasswordHash,
+		"auth_key_id":           user.AuthKeyID,
+		"enabled":               user.Enabled,
+		"balance_cents":         user.BalanceCents,
+		"total_recharge_cents":  user.TotalRechargeCents,
+		"total_consume_cents":   user.TotalConsumeCents,
+		"agency_tier":           user.AgencyTier,
+		"agency_enabled":        user.AgencyEnabled,
+		"agency_commission_bp":  user.AgencyCommissionBP,
+		"agency_discount_bp":    user.AgencyDiscountBP,
+		"agency_joined_at":      user.AgencyJoinedAt,
+		"agency_alipay_qr_code": user.AgencyAlipayQRCode,
+		"agency_wechat_qr_code": user.AgencyWeChatQRCode,
+		"agency_phone":          user.AgencyPhone,
+		"agency_wechat_id":      user.AgencyWeChatID,
+		"register_ip":           user.RegisterIP,
+		"register_device_id":    user.RegisterDeviceID,
+		"created_at":            user.CreatedAt,
+		"updated_at":            user.UpdatedAt,
+		"last_login_at":         user.LastLoginAt,
 	}
 }
 
@@ -2388,6 +2437,18 @@ func publicBillingUser(user *billingUser) map[string]any {
 		"created_at":           user.CreatedAt,
 		"updated_at":           user.UpdatedAt,
 		"last_login_at":        user.LastLoginAt,
+	}
+}
+
+func publicBillingAgencyWithdrawProfile(user *billingUser) map[string]any {
+	if user == nil {
+		return map[string]any{}
+	}
+	return map[string]any{
+		"alipay_qr_code": user.AgencyAlipayQRCode,
+		"wechat_qr_code": user.AgencyWeChatQRCode,
+		"phone":          user.AgencyPhone,
+		"wechat_id":      user.AgencyWeChatID,
 	}
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BadgeCheck,
   CheckCircle2,
@@ -29,11 +29,14 @@ import {
   fetchAgencyAdminUsers,
   fetchAgencyCommissionDashboard,
   fetchAgencyConfig,
+  fetchAgencyWithdrawProfile,
   fetchAgencyWithdrawals,
   fetchManagedUsers,
   fetchWallet,
   joinAgencyTier,
   updateAgencyConfig,
+  updateAgencyWithdrawProfile,
+  uploadAgencyWithdrawQRCode,
   upgradeAgencyTier,
   verifySession,
   type AgencyAdminUser,
@@ -343,6 +346,9 @@ function AgencyCommissionCenter({
   const [withdrawals, setWithdrawals] = useState<AgencyWithdrawalRequest[]>([]);
   const [isLoadingWithdrawals, setIsLoadingWithdrawals] = useState(false);
   const [isSubmittingWithdraw, setIsSubmittingWithdraw] = useState(false);
+  const [uploadingQRCodeKind, setUploadingQRCodeKind] = useState<"" | "alipay" | "wechat">("");
+  const alipayQRCodeInputRef = useRef<HTMLInputElement | null>(null);
+  const wechatQRCodeInputRef = useRef<HTMLInputElement | null>(null);
 
   const summary = dashboard?.summary;
   const agent = dashboard?.agent;
@@ -399,10 +405,47 @@ function AgencyCommissionCenter({
     }
   }, []);
 
+  const applyWithdrawProfile = useCallback((profile?: { alipay_qr_code?: string; wechat_qr_code?: string; phone?: string; wechat_id?: string }) => {
+    setWithdrawAlipayQRCode(String(profile?.alipay_qr_code || ""));
+    setWithdrawWechatQRCode(String(profile?.wechat_qr_code || ""));
+    setWithdrawPhone(String(profile?.phone || ""));
+    setWithdrawWechatID(String(profile?.wechat_id || ""));
+  }, []);
+
+  const loadWithdrawProfile = useCallback(async () => {
+    try {
+      const data = await fetchAgencyWithdrawProfile();
+      applyWithdrawProfile(data.profile);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "提现资料加载失败");
+    }
+  }, [applyWithdrawProfile]);
+
+  useEffect(() => {
+    void loadWithdrawProfile();
+  }, [loadWithdrawProfile]);
+
   const openWithdrawDetails = useCallback(() => {
     setActiveMenu("withdraw");
     void loadWithdrawals();
-  }, [loadWithdrawals]);
+    void loadWithdrawProfile();
+  }, [loadWithdrawProfile, loadWithdrawals]);
+
+  const handleQRCodeUpload = async (kind: "alipay" | "wechat", file?: File | null) => {
+    if (!file) return;
+    setUploadingQRCodeKind(kind);
+    try {
+      const data = await uploadAgencyWithdrawQRCode(kind, file);
+      applyWithdrawProfile(data.profile);
+      toast.success(kind === "alipay" ? "支付宝收款码已上传" : "微信收款码已上传");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "收款码上传失败");
+    } finally {
+      setUploadingQRCodeKind("");
+      if (kind === "alipay" && alipayQRCodeInputRef.current) alipayQRCodeInputRef.current.value = "";
+      if (kind === "wechat" && wechatQRCodeInputRef.current) wechatQRCodeInputRef.current.value = "";
+    }
+  };
 
   const handleWithdrawApply = async () => {
     const amount = Number(withdrawAmount);
@@ -427,6 +470,7 @@ function AgencyCommissionCenter({
     }
     setIsSubmittingWithdraw(true);
     try {
+      await updateAgencyWithdrawProfile(payload);
       const data = await createAgencyWithdrawal(payload);
       toast.success("提现申请已提交，等待管理员审核");
       setWithdrawAmount("");
@@ -751,8 +795,26 @@ function AgencyCommissionCenter({
             <Input value={withdrawAmount} onChange={(event) => setWithdrawAmount(event.target.value)} inputMode="decimal" placeholder="提现金额（元）" className="h-10 rounded-lg border-[#c9d8ff]" />
             <Input value={withdrawPhone} onChange={(event) => setWithdrawPhone(event.target.value)} placeholder="手机号" className="h-10 rounded-lg border-[#c9d8ff]" />
             <Input value={withdrawWechatID} onChange={(event) => setWithdrawWechatID(event.target.value)} placeholder="微信号" className="h-10 rounded-lg border-[#c9d8ff]" />
-            <Input value={withdrawAlipayQRCode} onChange={(event) => setWithdrawAlipayQRCode(event.target.value)} placeholder="支付宝收款码链接或备注" className="h-10 rounded-lg border-[#c9d8ff]" />
-            <Input value={withdrawWechatQRCode} onChange={(event) => setWithdrawWechatQRCode(event.target.value)} placeholder="微信收款码链接或备注" className="h-10 rounded-lg border-[#c9d8ff] md:col-span-2" />
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <Input value={withdrawAlipayQRCode} onChange={(event) => setWithdrawAlipayQRCode(event.target.value)} placeholder={"\u652f\u4ed8\u5b9d\u6536\u6b3e\u7801\u94fe\u63a5\u6216\u5907\u6ce8"} className="h-10 rounded-lg border-[#c9d8ff]" />
+                <Button type="button" variant="outline" className="h-10 shrink-0 rounded-lg border-[#c9d8ff] bg-white text-[#3d56d8]" onClick={() => alipayQRCodeInputRef.current?.click()} disabled={uploadingQRCodeKind === "alipay"}>
+                  {uploadingQRCodeKind === "alipay" ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                  {"\u4e0a\u4f20\u652f\u4ed8\u5b9d\u7801"}
+                </Button>
+              </div>
+              <input ref={alipayQRCodeInputRef} type="file" accept="image/*" className="hidden" onChange={(event) => void handleQRCodeUpload("alipay", event.target.files?.[0])} />
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <div className="flex gap-2">
+                <Input value={withdrawWechatQRCode} onChange={(event) => setWithdrawWechatQRCode(event.target.value)} placeholder={"\u5fae\u4fe1\u6536\u6b3e\u7801\u94fe\u63a5\u6216\u5907\u6ce8"} className="h-10 rounded-lg border-[#c9d8ff]" />
+                <Button type="button" variant="outline" className="h-10 shrink-0 rounded-lg border-[#c9d8ff] bg-white text-[#3d56d8]" onClick={() => wechatQRCodeInputRef.current?.click()} disabled={uploadingQRCodeKind === "wechat"}>
+                  {uploadingQRCodeKind === "wechat" ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                  {"\u4e0a\u4f20\u5fae\u4fe1\u7801"}
+                </Button>
+              </div>
+              <input ref={wechatQRCodeInputRef} type="file" accept="image/*" className="hidden" onChange={(event) => void handleQRCodeUpload("wechat", event.target.files?.[0])} />
+            </div>
           </div>
           <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div className="text-xs text-[#6d89b6]">至少填写一种收款联系方式；提交后进入管理员审核，不会自动打款。</div>

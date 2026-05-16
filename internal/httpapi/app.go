@@ -1306,6 +1306,12 @@ func isPermissionCheckSkipped(path string) bool {
 		return true
 	case "/api/profile/prompt-favorites":
 		return true
+	case "/api/agency/withdrawals":
+		return true
+	case "/api/agency/withdraw-profile":
+		return true
+	case "/api/agency/withdraw-profile/upload":
+		return true
 	default:
 		return strings.HasPrefix(path, "/api/profile/api-key/") || strings.HasPrefix(path, "/api/profile/prompt-favorites/")
 	}

@@ -2,13 +2,19 @@ package httpapi
 
 import (
 	"fmt"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"chatgpt2api/internal/service"
 	"chatgpt2api/internal/util"
 )
+
+const maxAgencyWithdrawQRCodeSize = 5 << 20
 
 type agencyTierRuntime struct {
 	Key          string
@@ -223,6 +229,106 @@ func (a *App) handleAgencyWithdrawals(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (a *App) handleAgencyWithdrawProfile(w http.ResponseWriter, r *http.Request) {
+	identity, ok := a.requireIdentity(w, r, "")
+	if !ok {
+		return
+	}
+	if identity.Role == service.AuthRoleAdmin {
+		util.WriteError(w, http.StatusForbidden, "admin permission required")
+		return
+	}
+	a.syncAgencyByIdentityRole(identity)
+
+	switch r.Method {
+	case http.MethodGet:
+		profile, err := a.billing.AgencyWithdrawProfileByIdentity(identity)
+		if err != nil {
+			util.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, map[string]any{"profile": profile})
+	case http.MethodPost:
+		body, _ := readJSONMap(r)
+		profile, err := a.billing.UpdateAgencyWithdrawProfile(
+			identity,
+			util.Clean(body["alipay_qr_code"]),
+			firstNonEmpty(util.Clean(body["wechat_qr_code"]), util.Clean(body["wx_qr_code"])),
+			util.Clean(body["phone"]),
+			firstNonEmpty(util.Clean(body["wechat_id"]), util.Clean(body["wx_id"])),
+		)
+		if err != nil {
+			util.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profile})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *App) handleAgencyWithdrawProfileUpload(w http.ResponseWriter, r *http.Request) {
+	identity, ok := a.requireIdentity(w, r, "")
+	if !ok {
+		return
+	}
+	if identity.Role == service.AuthRoleAdmin {
+		util.WriteError(w, http.StatusForbidden, "admin permission required")
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	a.syncAgencyByIdentityRole(identity)
+	if err := r.ParseMultipartForm(maxAgencyWithdrawQRCodeSize + (1 << 20)); err != nil {
+		util.WriteError(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+	kind := strings.ToLower(strings.TrimSpace(r.FormValue("kind")))
+	if kind != "alipay" && kind != "wechat" {
+		util.WriteError(w, http.StatusBadRequest, "invalid payout qr code kind")
+		return
+	}
+	fileHeader := firstMultipartFile(r.MultipartForm, "file")
+	if fileHeader == nil {
+		fileHeader = firstMultipartFile(r.MultipartForm, "qr_code")
+	}
+	if fileHeader == nil {
+		util.WriteError(w, http.StatusBadRequest, "qr code image file is required")
+		return
+	}
+	userID := strings.TrimSpace(identity.OwnerID)
+	if userID == "" {
+		userID = strings.TrimSpace(identity.ID)
+	}
+	urlValue, err := a.storeAgencyWithdrawQRCode(userID, kind, fileHeader)
+	if err != nil {
+		util.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	current, _ := a.billing.AgencyWithdrawProfileByIdentity(identity)
+	alipayQRCode := util.Clean(current["alipay_qr_code"])
+	weChatQRCode := util.Clean(current["wechat_qr_code"])
+	if kind == "alipay" {
+		alipayQRCode = urlValue
+	} else {
+		weChatQRCode = urlValue
+	}
+	profile, err := a.billing.UpdateAgencyWithdrawProfile(
+		identity,
+		alipayQRCode,
+		weChatQRCode,
+		util.Clean(current["phone"]),
+		util.Clean(current["wechat_id"]),
+	)
+	if err != nil {
+		util.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	util.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "url": urlValue, "profile": profile})
+}
+
 func (a *App) handleAgencyAdminWithdrawals(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -404,6 +510,9 @@ func (a *App) ensureAgencyTierRoles() {
 			service.APIPermissionKey("GET", "/api/agency/commission"),
 			service.APIPermissionKey("GET", "/api/agency/withdrawals"),
 			service.APIPermissionKey("POST", "/api/agency/withdrawals"),
+			service.APIPermissionKey("GET", "/api/agency/withdraw-profile"),
+			service.APIPermissionKey("POST", "/api/agency/withdraw-profile"),
+			service.APIPermissionKey("POST", "/api/agency/withdraw-profile/upload"),
 			service.APIPermissionKey("POST", "/api/agency/join"),
 			service.APIPermissionKey("POST", "/api/agency/upgrade"),
 		}
@@ -518,4 +627,44 @@ func (a *App) agencyTierByRoleID(roleID string) (agencyTierRuntime, bool) {
 		}
 	}
 	return agencyTierRuntime{}, false
+}
+
+func (a *App) agencyWithdrawQRCodeDir() string {
+	dir := filepath.Join(a.config.DataDir, "agency_withdraw_qrcodes")
+	_ = os.MkdirAll(dir, 0o755)
+	return dir
+}
+
+func (a *App) storeAgencyWithdrawQRCode(userID, kind string, header *multipart.FileHeader) (string, error) {
+	if header == nil {
+		return "", fmt.Errorf("qr code image file is required")
+	}
+	if header.Size > maxAgencyWithdrawQRCodeSize {
+		return "", fmt.Errorf("qr code image cannot exceed 5MB")
+	}
+	data, ext, err := readLoginPageImageFile(header)
+	if err != nil {
+		return "", err
+	}
+	if len(data) > maxAgencyWithdrawQRCodeSize {
+		return "", fmt.Errorf("qr code image cannot exceed 5MB")
+	}
+	safeUserID := safeUploadStem(strings.NewReplacer(":", "-", "/", "-", "\\", "-").Replace(userID))
+	if safeUserID == "" {
+		safeUserID = "user"
+	}
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if kind != "alipay" && kind != "wechat" {
+		return "", fmt.Errorf("invalid payout qr code kind")
+	}
+	dir := filepath.Join(a.agencyWithdrawQRCodeDir(), safeUserID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	filename := fmt.Sprintf("%s-%d%s", kind, time.Now().UnixNano(), ext)
+	target := filepath.Join(dir, filename)
+	if err := os.WriteFile(target, data, 0o644); err != nil {
+		return "", err
+	}
+	return "/agency-withdraw-qrcodes/" + safeUserID + "/" + filename, nil
 }

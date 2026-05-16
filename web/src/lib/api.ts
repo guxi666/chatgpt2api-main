@@ -303,6 +303,13 @@ export type AgencyWithdrawalRequest = {
   processed_at?: string;
 };
 
+export type AgencyWithdrawProfile = {
+  alipay_qr_code?: string;
+  wechat_qr_code?: string;
+  phone?: string;
+  wechat_id?: string;
+};
+
 export type AgencyCommissionDashboard = {
   agent: {
     user_id: string;
@@ -1239,6 +1246,27 @@ export async function createAgencyWithdrawal(payload: {
   return httpRequest<{ ok: boolean; item: AgencyWithdrawalRequest }>("/api/agency/withdrawals", {
     method: "POST",
     body: payload,
+  });
+}
+
+export async function fetchAgencyWithdrawProfile() {
+  return httpRequest<{ profile: AgencyWithdrawProfile }>("/api/agency/withdraw-profile");
+}
+
+export async function updateAgencyWithdrawProfile(payload: AgencyWithdrawProfile) {
+  return httpRequest<{ ok: boolean; profile: AgencyWithdrawProfile }>("/api/agency/withdraw-profile", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function uploadAgencyWithdrawQRCode(kind: "alipay" | "wechat", file: File) {
+  const formData = new FormData();
+  formData.append("kind", kind);
+  formData.append("file", file);
+  return httpRequest<{ ok: boolean; url: string; profile: AgencyWithdrawProfile }>("/api/agency/withdraw-profile/upload", {
+    method: "POST",
+    body: formData,
   });
 }
 

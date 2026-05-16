@@ -78,6 +78,8 @@ func (a *App) routes() []appRoute {
 		exact("", "/api/agency", a.handleAgency),
 		exact("", "/api/agency/commission", a.handleAgencyCommission),
 		exact("", "/api/agency/withdrawals", a.handleAgencyWithdrawals),
+		exact("", "/api/agency/withdraw-profile", a.handleAgencyWithdrawProfile),
+		exact(http.MethodPost, "/api/agency/withdraw-profile/upload", a.handleAgencyWithdrawProfileUpload),
 		exact("", "/api/agency/join", a.handleAgencyJoin),
 		exact("", "/api/agency/upgrade", a.handleAgencyUpgrade),
 		exact("", "/api/agency/admin/users", a.handleAgencyAdminUsers),
@@ -98,6 +100,7 @@ func (a *App) routes() []appRoute {
 		prefix("/images/", a.handleImageFile),
 		prefix("/image-thumbnails/", a.handleImageThumbnail),
 		prefix("/login-page-images/", http.StripPrefix("/login-page-images/", http.FileServer(http.Dir(a.config.LoginPageImagesDir()))).ServeHTTP),
+		prefix("/agency-withdraw-qrcodes/", http.StripPrefix("/agency-withdraw-qrcodes/", http.FileServer(http.Dir(a.agencyWithdrawQRCodeDir()))).ServeHTTP),
 	}
 }
 
