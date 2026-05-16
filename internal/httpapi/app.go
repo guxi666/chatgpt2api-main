@@ -720,12 +720,14 @@ func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleAppMeta(w http.ResponseWriter, r *http.Request) {
+	presetsJSON := strings.TrimSpace(fmt.Sprint(util.ValueOr(a.config.Get()["image_prompt_presets_json"], "")))
 	util.WriteJSON(w, http.StatusOK, map[string]any{
 		"app_title":                   a.config.BrandTopLeftName(),
 		"project_name":                a.config.BrandSiteName(),
 		"top_left_logo_url":           a.config.BrandTopLeftLogoURL(),
 		"site_logo_url":               a.config.BrandSiteLogoURL(),
 		"image_single_count_limit":    a.config.ImageSingleCountLimit(),
+		"image_prompt_presets_json":   presetsJSON,
 		"login_page_image_url":        a.config.LoginPageImageURL(),
 		"login_page_image_mode":       a.config.LoginPageImageMode(),
 		"login_page_image_zoom":       a.config.LoginPageImageZoom(),

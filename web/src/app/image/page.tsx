@@ -66,7 +66,6 @@ import {
   DEFAULT_CHAT_MODEL,
   DEFAULT_IMAGE_MODEL,
   fetchCreationTasks,
-  fetchSettingsConfig,
   IMAGE_CREATION_MODEL_OPTIONS,
   IMAGE_OUTPUT_FORMAT_OPTIONS,
   isChatModel,
@@ -88,6 +87,7 @@ import {
 } from "@/lib/api";
 import { clearImageManagerCache } from "@/lib/image-manager-cache";
 import { getManagedImagePathFromUrl } from "@/lib/image-path";
+import { dispatchAppMetaUpdated } from "@/lib/app-meta";
 import { useAppMeta } from "@/lib/use-app-meta";
 import { cn } from "@/lib/utils";
 import { useAuthGuard } from "@/lib/use-auth-guard";
@@ -966,6 +966,9 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
         await updateSettingsConfig({
           [IMAGE_PROMPT_PRESETS_SETTINGS_KEY]: JSON.stringify(next),
         });
+        dispatchAppMetaUpdated({
+          image_prompt_presets_json: JSON.stringify(next),
+        });
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "模板保存失败");
       }
@@ -1159,33 +1162,13 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
   }, [activeTaskCount, progressByTurnKey]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const loadPromptPresets = async () => {
-      try {
-        const data = await fetchSettingsConfig();
-        if (cancelled) {
-          return;
-        }
-        setPromptPresets(
-          parseImagePromptPresetsFromConfig(
-            data.config[IMAGE_PROMPT_PRESETS_SETTINGS_KEY],
-            IMAGE_PROMPT_PRESETS,
-          ),
-        );
-      } catch {
-        if (cancelled) {
-          return;
-        }
-        setPromptPresets([...IMAGE_PROMPT_PRESETS]);
-      }
-    };
-
-    void loadPromptPresets();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    setPromptPresets(
+      parseImagePromptPresetsFromConfig(
+        appMeta.image_prompt_presets_json,
+        IMAGE_PROMPT_PRESETS,
+      ),
+    );
+  }, [appMeta.image_prompt_presets_json]);
 
   useEffect(() => {
     let cancelled = false;
