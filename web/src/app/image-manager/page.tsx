@@ -18,6 +18,7 @@ import { formatImageFileSize } from "@/lib/image-size";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
+const R2_UPLOAD_BATCH_SIZE = 25;
 
 type DeleteImageTarget = {
   paths: string[];
@@ -264,14 +265,29 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
     const paths = Array.from(new Set(selectedItems.map((item) => item.path)));
     setIsUploadingR2(true);
     try {
-      const data = await uploadManagedImagesToR2(paths);
-      const skipped = Number(data.skipped || 0);
-      const message = data.failed > 0
-        ? `已上传 ${data.uploaded} 张，跳过已在 R2 的 ${skipped} 张，${data.failed} 张失败`
-        : `已上传 ${data.uploaded} 张到 R2，跳过已在 R2 的 ${skipped} 张，并清理本地原图`;
+      let uploaded = 0;
+      let skipped = 0;
+      let failed = 0;
+      let missing = 0;
+      for (let index = 0; index < paths.length; index += R2_UPLOAD_BATCH_SIZE) {
+        const batch = paths.slice(index, index + R2_UPLOAD_BATCH_SIZE);
+        const batchNumber = Math.floor(index / R2_UPLOAD_BATCH_SIZE) + 1;
+        const batchTotal = Math.ceil(paths.length / R2_UPLOAD_BATCH_SIZE);
+        toast.loading(`正在上传 R2：第 ${batchNumber}/${batchTotal} 批`, { id: "image-r2-upload" });
+        const data = await uploadManagedImagesToR2(batch);
+        uploaded += Number(data.uploaded || 0);
+        skipped += Number(data.skipped || 0);
+        failed += Number(data.failed || 0);
+        missing += Number(data.missing || 0);
+      }
+      toast.dismiss("image-r2-upload");
+      const message = failed > 0 || missing > 0
+        ? `已上传 ${uploaded} 张，跳过已在 R2 的 ${skipped} 张，失败 ${failed} 张，不存在 ${missing} 张`
+        : `已上传 ${uploaded} 张到 R2，跳过已在 R2 的 ${skipped} 张，并清理本地原图`;
       toast.success(message);
       await loadImages();
     } catch (error) {
+      toast.dismiss("image-r2-upload");
       toast.error(error instanceof Error ? error.message : "上传到 R2 失败");
     } finally {
       setIsUploadingR2(false);
