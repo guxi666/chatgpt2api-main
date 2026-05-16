@@ -50,3 +50,77 @@ export const IMAGE_PROMPT_PRESETS: ImagePromptPreset[] = [
     size: "16:9",
   },
 ];
+
+const PRESET_ID_PREFIX = "preset";
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asPositiveInteger(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(1, Math.round(parsed));
+}
+
+function normalizePresetItem(value: unknown, index: number): ImagePromptPreset | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Partial<ImagePromptPreset>;
+  const title = asString(candidate.title);
+  const prompt = asString(candidate.prompt);
+  const hint = asString(candidate.hint);
+  const imageSrc = asString(candidate.imageSrc);
+  const size = asString(candidate.size);
+  const id = asString(candidate.id) || `${PRESET_ID_PREFIX}-${index + 1}`;
+  if (!title || !prompt || !hint || !imageSrc || !size) {
+    return null;
+  }
+  return {
+    id,
+    title,
+    prompt,
+    hint,
+    imageSrc,
+    count: asPositiveInteger(candidate.count, 1),
+    size,
+  };
+}
+
+export function normalizeImagePromptPresets(
+  value: unknown,
+  fallback: readonly ImagePromptPreset[] = IMAGE_PROMPT_PRESETS,
+): ImagePromptPreset[] {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+  const normalized = value
+    .map((item, index) => normalizePresetItem(item, index))
+    .filter((item): item is ImagePromptPreset => item !== null);
+  return normalized.length > 0 ? normalized : [...fallback];
+}
+
+export function parseImagePromptPresetsFromConfig(
+  value: unknown,
+  fallback: readonly ImagePromptPreset[] = IMAGE_PROMPT_PRESETS,
+): ImagePromptPreset[] {
+  if (Array.isArray(value)) {
+    return normalizeImagePromptPresets(value, fallback);
+  }
+  if (typeof value !== "string") {
+    return [...fallback];
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return [...fallback];
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return normalizeImagePromptPresets(parsed, fallback);
+  } catch {
+    return [...fallback];
+  }
+}

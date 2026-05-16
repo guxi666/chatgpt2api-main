@@ -275,10 +275,19 @@ export type AgencyMaterial = {
   copy?: string;
 };
 
+export type AgencyMaterialQRConfig = {
+  enabled?: boolean;
+  x_percent?: number;
+  y_percent?: number;
+  size_percent?: number;
+  logo_percent?: number;
+};
+
 export type AgencyConfig = {
   editable: boolean;
   tiers: AgencyTier[];
   materials?: AgencyMaterial[];
+  material_qr?: AgencyMaterialQRConfig;
 };
 
 export type AgencyCommissionOrder = {
@@ -1231,6 +1240,11 @@ export async function updateAgencyConfig(payload: {
   agency_tier_pro_discount_bp?: number;
   agency_tier_premium_discount_bp?: number;
   agency_materials?: AgencyMaterial[];
+  agency_material_qr_enabled?: boolean;
+  agency_material_qr_x_percent?: number;
+  agency_material_qr_y_percent?: number;
+  agency_material_qr_size_percent?: number;
+  agency_material_qr_logo_percent?: number;
 }) {
   return httpRequest<AgencyConfig>("/api/agency", {
     method: "POST",
@@ -1316,7 +1330,7 @@ export async function updateAgencyAdminWithdrawal(payload: { id: string; status:
   });
 }
 
-export async function updateSettingsConfig(settings: SettingsConfig) {
+export async function updateSettingsConfig(settings: Partial<SettingsConfig>) {
   return httpRequest<{ config: SettingsConfig }>("/api/settings", {
     method: "POST",
     body: settings,

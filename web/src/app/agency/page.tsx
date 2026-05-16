@@ -46,6 +46,7 @@ import {
   type AgencyCommissionOrder,
   type AgencyConfig,
   type AgencyMaterial,
+  type AgencyMaterialQRConfig,
   type AgencyTier,
   type AgencyWithdrawalRequest,
   type ManagedUser,
@@ -205,6 +206,106 @@ function calcTrendRows(orders: AgencyCommissionOrder[]) {
   return out;
 }
 
+function normalizeAgencyMaterialQRConfig(
+  value?: AgencyMaterialQRConfig | null,
+): Required<AgencyMaterialQRConfig> {
+  const normalizePercent = (raw: unknown, fallback: number) => {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(100, Math.max(0, Math.round(n)));
+  };
+  return {
+    enabled: value?.enabled !== false,
+    x_percent: normalizePercent(value?.x_percent, 72),
+    y_percent: normalizePercent(value?.y_percent, 72),
+    size_percent: normalizePercent(value?.size_percent, 26),
+    logo_percent: normalizePercent(value?.logo_percent, 24),
+  };
+}
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`image_load_failed:${src}`));
+    image.src = src;
+  });
+}
+
+function drawRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  const r = Math.max(0, Math.min(radius, Math.min(width, height) / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+async function buildPromotionMaterialPreview(
+  baseImageURL: string,
+  qrImageURL: string,
+  brandLogoURL: string,
+  config: Required<AgencyMaterialQRConfig>,
+): Promise<string> {
+  const [baseImage, qrImage] = await Promise.all([loadImageElement(baseImageURL), loadImageElement(qrImageURL)]);
+  const brandLogo = brandLogoURL ? await loadImageElement(brandLogoURL).catch(() => null) : null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, baseImage.naturalWidth || baseImage.width || 1);
+  canvas.height = Math.max(1, baseImage.naturalHeight || baseImage.height || 1);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return baseImageURL;
+  }
+
+  ctx.drawImage(baseImage, 0, 0, canvas.width, canvas.height);
+
+  const shorterSide = Math.min(canvas.width, canvas.height);
+  const qrSize = Math.max(40, Math.round((shorterSide * config.size_percent) / 100));
+  const qrX = Math.round(((canvas.width - qrSize) * config.x_percent) / 100);
+  const qrY = Math.round(((canvas.height - qrSize) * config.y_percent) / 100);
+  const radius = Math.max(8, Math.round(qrSize * 0.08));
+
+  ctx.save();
+  drawRoundedRect(ctx, qrX, qrY, qrSize, qrSize, radius);
+  ctx.fillStyle = "rgba(255,255,255,0.96)";
+  ctx.fill();
+  ctx.restore();
+
+  const qrPadding = Math.max(4, Math.round(qrSize * 0.08));
+  ctx.drawImage(qrImage, qrX + qrPadding, qrY + qrPadding, qrSize - qrPadding * 2, qrSize - qrPadding * 2);
+
+  if (brandLogo) {
+    const logoSize = Math.max(10, Math.round((qrSize * config.logo_percent) / 100));
+    const logoX = qrX + Math.round((qrSize - logoSize) / 2);
+    const logoY = qrY + Math.round((qrSize - logoSize) / 2);
+    const logoRadius = Math.max(4, Math.round(logoSize * 0.2));
+    ctx.save();
+    drawRoundedRect(ctx, logoX, logoY, logoSize, logoSize, logoRadius);
+    ctx.clip();
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(logoX, logoY, logoSize, logoSize);
+    ctx.drawImage(brandLogo, logoX, logoY, logoSize, logoSize);
+    ctx.restore();
+  }
+
+  return canvas.toDataURL("image/png");
+}
+
 function AgencyPackageShowcase({
   tiers,
   currentTier,
@@ -326,6 +427,7 @@ function AgencyCommissionCenter({
   brandTitle,
   brandLogoURL,
   materials,
+  materialQRConfig,
   isLoading,
   onReload,
   onRequestUpgrade,
@@ -337,6 +439,7 @@ function AgencyCommissionCenter({
   brandTitle: string;
   brandLogoURL: string;
   materials: AgencyMaterial[];
+  materialQRConfig: Required<AgencyMaterialQRConfig>;
   isLoading: boolean;
   onReload: () => Promise<boolean>;
   onRequestUpgrade: (tier: TierKey) => void;
@@ -349,6 +452,7 @@ function AgencyCommissionCenter({
   const [withdrawPhone, setWithdrawPhone] = useState("");
   const [withdrawWechatID, setWithdrawWechatID] = useState("");
   const [withdrawals, setWithdrawals] = useState<AgencyWithdrawalRequest[]>([]);
+  const [materialPreviewByID, setMaterialPreviewByID] = useState<Record<string, string>>({});
   const [isLoadingWithdrawals, setIsLoadingWithdrawals] = useState(false);
   const [isSubmittingWithdraw, setIsSubmittingWithdraw] = useState(false);
   const [uploadingQRCodeKind, setUploadingQRCodeKind] = useState<"" | "alipay" | "wechat">("");
@@ -380,6 +484,41 @@ function AgencyCommissionCenter({
     if (!link) return "";
     return `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=${encodeURIComponent(link)}`;
   }, [link]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const buildPreviews = async () => {
+      if (!materialQRConfig.enabled || !qrURL) {
+        setMaterialPreviewByID({});
+        return;
+      }
+      const next: Record<string, string> = {};
+      for (const item of materials) {
+        const id = String(item.id || "").trim();
+        const imageURL = String(item.image_url || "").trim();
+        if (!id || !imageURL) continue;
+        try {
+          next[id] = await buildPromotionMaterialPreview(
+            imageURL,
+            qrURL,
+            brandLogoURL,
+            materialQRConfig,
+          );
+        } catch {
+          next[id] = imageURL;
+        }
+      }
+      if (!cancelled) {
+        setMaterialPreviewByID(next);
+      }
+    };
+
+    void buildPreviews();
+    return () => {
+      cancelled = true;
+    };
+  }, [brandLogoURL, materialQRConfig, materials, qrURL]);
 
   const invitedCount = Number(agent?.invited_count || agent?.invited_users?.length || 0);
   const registeredCount = Number(agent?.invited_users?.length || 0);
@@ -880,7 +1019,7 @@ function AgencyCommissionCenter({
             <div key={item.id} className="rounded-xl border border-[#d4e0fa] bg-white p-3">
               <div className="mb-2 text-sm font-semibold text-[#274a7c]">{item.title || "推广素材"}</div>
               {item.image_url ? (
-                <img src={item.image_url} alt={item.title || "推广素材"} className="h-28 w-full rounded-lg object-cover" />
+                <img src={materialPreviewByID[item.id] || item.image_url} alt={item.title || "推广素材"} className="h-28 w-full rounded-lg object-cover" />
               ) : (
                 <div className="h-28 rounded-lg bg-[linear-gradient(120deg,#f8edd8,#eef4ff)]" />
               )}
@@ -1007,6 +1146,9 @@ export default function AgencyPage() {
   const [commissionBPs, setCommissionBPs] = useState<Record<string, string>>({});
   const [discountBPs, setDiscountBPs] = useState<Record<string, string>>({});
   const [materialDrafts, setMaterialDrafts] = useState<AgencyMaterial[]>([]);
+  const [materialQRConfig, setMaterialQRConfig] = useState<Required<AgencyMaterialQRConfig>>(
+    normalizeAgencyMaterialQRConfig(),
+  );
 
   const [currentTier, setCurrentTier] = useState("");
   const [agencyEnabled, setAgencyEnabled] = useState(false);
@@ -1104,6 +1246,7 @@ export default function AgencyPage() {
       setCommissionBPs(nextCommissionBPs);
       setDiscountBPs(nextDiscountBPs);
       setMaterialDrafts((data.materials || []).map((item) => ({ ...item })));
+      setMaterialQRConfig(normalizeAgencyMaterialQRConfig(data.material_qr));
 
       if (isAdmin) {
         setAgencyEnabled(false);
@@ -1220,6 +1363,11 @@ export default function AgencyPage() {
         agency_tier_pro_discount_bp: parsePositiveInt(discountBPs.pro),
         agency_tier_premium_discount_bp: parsePositiveInt(discountBPs.premium),
         agency_materials: materialDrafts,
+        agency_material_qr_enabled: materialQRConfig.enabled,
+        agency_material_qr_x_percent: materialQRConfig.x_percent,
+        agency_material_qr_y_percent: materialQRConfig.y_percent,
+        agency_material_qr_size_percent: materialQRConfig.size_percent,
+        agency_material_qr_logo_percent: materialQRConfig.logo_percent,
       });
       toast.success("代理配置已更新");
       await load();
@@ -1300,6 +1448,7 @@ export default function AgencyPage() {
           brandTitle={brandTitle}
           brandLogoURL={brandLogoURL}
           materials={config?.materials || []}
+          materialQRConfig={materialQRConfig}
           isLoading={isDashboardLoading}
           onReload={loadDashboard}
           onRequestUpgrade={(tier) => void handleJoin(tier)}
@@ -1386,6 +1535,83 @@ export default function AgencyPage() {
                     </Field>
                   </div>
                 ))}
+              </div>
+              <div className="rounded-xl border border-border/60 p-3">
+                <div className="mb-3 text-sm font-semibold">二维码叠加设置</div>
+                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+                  <Field className="gap-1.5">
+                    <FieldLabel htmlFor="agency-material-qr-enabled">启用叠加</FieldLabel>
+                    <Select
+                      value={materialQRConfig.enabled ? "on" : "off"}
+                      onValueChange={(value) =>
+                        setMaterialQRConfig((current) => ({ ...current, enabled: value === "on" }))
+                      }
+                    >
+                      <SelectTrigger id="agency-material-qr-enabled">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="on">开启</SelectItem>
+                        <SelectItem value="off">关闭</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field className="gap-1.5">
+                    <FieldLabel htmlFor="agency-material-qr-x">横向位置 (%)</FieldLabel>
+                    <Input
+                      id="agency-material-qr-x"
+                      value={String(materialQRConfig.x_percent)}
+                      onChange={(event) =>
+                        setMaterialQRConfig((current) => ({
+                          ...current,
+                          x_percent: Math.min(100, Math.max(0, parsePositiveInt(event.target.value))),
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field className="gap-1.5">
+                    <FieldLabel htmlFor="agency-material-qr-y">纵向位置 (%)</FieldLabel>
+                    <Input
+                      id="agency-material-qr-y"
+                      value={String(materialQRConfig.y_percent)}
+                      onChange={(event) =>
+                        setMaterialQRConfig((current) => ({
+                          ...current,
+                          y_percent: Math.min(100, Math.max(0, parsePositiveInt(event.target.value))),
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field className="gap-1.5">
+                    <FieldLabel htmlFor="agency-material-qr-size">二维码大小 (%)</FieldLabel>
+                    <Input
+                      id="agency-material-qr-size"
+                      value={String(materialQRConfig.size_percent)}
+                      onChange={(event) =>
+                        setMaterialQRConfig((current) => ({
+                          ...current,
+                          size_percent: Math.min(100, Math.max(0, parsePositiveInt(event.target.value))),
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field className="gap-1.5">
+                    <FieldLabel htmlFor="agency-material-qr-logo">Logo比例 (%)</FieldLabel>
+                    <Input
+                      id="agency-material-qr-logo"
+                      value={String(materialQRConfig.logo_percent)}
+                      onChange={(event) =>
+                        setMaterialQRConfig((current) => ({
+                          ...current,
+                          logo_percent: Math.min(100, Math.max(0, parsePositiveInt(event.target.value))),
+                        }))
+                      }
+                    />
+                  </Field>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  保存后，代理端“推广素材”中的图片会自动叠加专属二维码，二维码中心自动使用后台站点 Logo。
+                </p>
               </div>
               <Button onClick={() => void handleSave()} disabled={isSaving}>{isSaving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}保存推广素材</Button>
             </CardContent>

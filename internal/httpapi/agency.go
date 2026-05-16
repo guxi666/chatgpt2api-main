@@ -59,6 +59,21 @@ func (a *App) handleAgency(w http.ResponseWriter, r *http.Request) {
 		if _, ok := body["agency_materials"]; ok {
 			updates["agency_materials"] = normalizeAgencyMaterials(body["agency_materials"])
 		}
+		if _, ok := body["agency_material_qr_enabled"]; ok {
+			updates["agency_material_qr_enabled"] = util.ToBool(body["agency_material_qr_enabled"])
+		}
+		if _, ok := body["agency_material_qr_x_percent"]; ok {
+			updates["agency_material_qr_x_percent"] = clampAgencyMaterialPercent(body["agency_material_qr_x_percent"], 72)
+		}
+		if _, ok := body["agency_material_qr_y_percent"]; ok {
+			updates["agency_material_qr_y_percent"] = clampAgencyMaterialPercent(body["agency_material_qr_y_percent"], 72)
+		}
+		if _, ok := body["agency_material_qr_size_percent"]; ok {
+			updates["agency_material_qr_size_percent"] = clampAgencyMaterialPercent(body["agency_material_qr_size_percent"], 26)
+		}
+		if _, ok := body["agency_material_qr_logo_percent"]; ok {
+			updates["agency_material_qr_logo_percent"] = clampAgencyMaterialPercent(body["agency_material_qr_logo_percent"], 24)
+		}
 		if _, err := a.config.Update(updates); err != nil {
 			util.WriteError(w, http.StatusBadRequest, err.Error())
 			return
@@ -444,15 +459,27 @@ func agencyPayload(a *App, editable bool) map[string]any {
 		})
 	}
 	return map[string]any{
-		"editable":  editable,
-		"tiers":     items,
-		"materials": agencyMaterials(a),
+		"editable":    editable,
+		"tiers":       items,
+		"materials":   agencyMaterials(a),
+		"material_qr": agencyMaterialQRConfig(a),
 	}
 }
 
 func agencyMaterials(a *App) []map[string]any {
 	settings := a.config.Get()
 	return normalizeAgencyMaterials(settings["agency_materials"])
+}
+
+func agencyMaterialQRConfig(a *App) map[string]any {
+	settings := a.config.Get()
+	return map[string]any{
+		"enabled":      util.ToBool(util.ValueOr(settings["agency_material_qr_enabled"], true)),
+		"x_percent":    clampAgencyMaterialPercent(util.ValueOr(settings["agency_material_qr_x_percent"], 72), 72),
+		"y_percent":    clampAgencyMaterialPercent(util.ValueOr(settings["agency_material_qr_y_percent"], 72), 72),
+		"size_percent": clampAgencyMaterialPercent(util.ValueOr(settings["agency_material_qr_size_percent"], 26), 26),
+		"logo_percent": clampAgencyMaterialPercent(util.ValueOr(settings["agency_material_qr_logo_percent"], 24), 24),
+	}
 }
 
 func defaultAgencyMaterials() []map[string]any {
@@ -646,6 +673,17 @@ func maxZeroInt(value any) int {
 		return 0
 	}
 	return n
+}
+
+func clampAgencyMaterialPercent(value any, fallback int) int {
+	percent := util.ToInt(value, fallback)
+	if percent < 0 {
+		return 0
+	}
+	if percent > 100 {
+		return 100
+	}
+	return percent
 }
 
 func clampAgencyBasisPoint(value any, fallback int) int {

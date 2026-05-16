@@ -29,7 +29,12 @@ import {
   type ImageSizeMode,
   type ImageSizeSelection,
 } from "@/app/image/image-options";
-import { IMAGE_PROMPT_PRESETS, type ImagePromptPreset } from "@/app/image/image-presets";
+import {
+  IMAGE_PROMPT_PRESETS,
+  normalizeImagePromptPresets,
+  parseImagePromptPresetsFromConfig,
+  type ImagePromptPreset,
+} from "@/app/image/image-presets";
 import { ImageSidebar } from "@/app/image/components/image-sidebar";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Button } from "@/components/ui/button";
@@ -61,6 +66,7 @@ import {
   DEFAULT_CHAT_MODEL,
   DEFAULT_IMAGE_MODEL,
   fetchCreationTasks,
+  fetchSettingsConfig,
   IMAGE_CREATION_MODEL_OPTIONS,
   IMAGE_OUTPUT_FORMAT_OPTIONS,
   isChatModel,
@@ -71,6 +77,7 @@ import {
   isImageTaskModel,
   isResponseImageToolModel,
   supportsImageQuality,
+  updateSettingsConfig,
   updateManagedImageVisibility,
   type ImageModel,
   type ImageOutputFormat,
@@ -123,7 +130,7 @@ const IMAGE_CUSTOM_HEIGHT_STORAGE_KEY = "chatgpt2api:image_last_custom_height";
 const IMAGE_QUALITY_STORAGE_KEY = "chatgpt2api:image_last_quality";
 const IMAGE_OUTPUT_FORMAT_STORAGE_KEY = "chatgpt2api:image_last_output_format";
 const IMAGE_OUTPUT_COMPRESSION_STORAGE_KEY = "chatgpt2api:image_last_output_compression";
-const IMAGE_PRESETS_STORAGE_KEY = "chatgpt2api:image_prompt_presets_v1";
+const IMAGE_PROMPT_PRESETS_SETTINGS_KEY = "image_prompt_presets_json";
 const QUOTA_REFRESH_EVENT = "chatgpt2api:quota-refresh";
 const DEFAULT_IMAGE_QUALITY: ImageQuality = "high";
 const DEFAULT_IMAGE_OUTPUT_FORMAT: ImageOutputFormat = "png";
@@ -154,51 +161,6 @@ type EditingTurnDraft = {
 };
 
 type CreationTaskDataItem = NonNullable<CreationTask["data"]>[number];
-
-function loadStoredImagePromptPresets() {
-  if (typeof window === "undefined") {
-    return IMAGE_PROMPT_PRESETS;
-  }
-  try {
-    const raw = window.localStorage.getItem(IMAGE_PRESETS_STORAGE_KEY);
-    if (!raw) {
-      return IMAGE_PROMPT_PRESETS;
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return IMAGE_PROMPT_PRESETS;
-    }
-    const byID = new Map<string, ImagePromptPreset>();
-    IMAGE_PROMPT_PRESETS.forEach((item) => {
-      byID.set(item.id, item);
-    });
-    parsed.forEach((item) => {
-      if (!item || typeof item !== "object") return;
-      const id = String((item as { id?: unknown }).id || "").trim();
-      if (!id || !byID.has(id)) return;
-      const current = byID.get(id)!;
-      byID.set(id, {
-        ...current,
-        title: String((item as { title?: unknown }).title ?? current.title),
-        prompt: String((item as { prompt?: unknown }).prompt ?? current.prompt),
-        hint: String((item as { hint?: unknown }).hint ?? current.hint),
-        imageSrc: String((item as { imageSrc?: unknown }).imageSrc ?? current.imageSrc),
-        count: Math.max(1, Number((item as { count?: unknown }).count ?? current.count) || current.count),
-        size: String((item as { size?: unknown }).size ?? current.size),
-      });
-    });
-    return IMAGE_PROMPT_PRESETS.map((item) => byID.get(item.id) || item);
-  } catch {
-    return IMAGE_PROMPT_PRESETS;
-  }
-}
-
-function persistImagePromptPresets(presets: ImagePromptPreset[]) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(IMAGE_PRESETS_STORAGE_KEY, JSON.stringify(presets));
-}
 
 function buildConversationTitle(prompt: string) {
   const trimmed = prompt.trim();
@@ -981,20 +943,35 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
   const [progressNow, setProgressNow] = useState(Date.now());
   const [composerDockHeight, setComposerDockHeight] = useState(0);
   const [visibilityMutatingImageKey, setVisibilityMutatingImageKey] = useState("");
-  const [promptPresets, setPromptPresets] = useState<ImagePromptPreset[]>(loadStoredImagePromptPresets);
+  const [promptPresets, setPromptPresets] = useState<ImagePromptPreset[]>(() => [...IMAGE_PROMPT_PRESETS]);
   const appMeta = useAppMeta();
   const imageSingleCountLimit = useMemo(
     () => Math.max(1, Math.min(10, Number(appMeta.image_single_count_limit) || 10)),
     [appMeta.image_single_count_limit],
   );
 
-  const handleUpdatePromptPreset = useCallback((preset: ImagePromptPreset) => {
-    setPromptPresets((current) => {
-      const next = current.map((item) => (item.id === preset.id ? { ...item, ...preset } : item));
-      persistImagePromptPresets(next);
-      return next;
-    });
-  }, []);
+  const handleUpdatePromptPreset = useCallback(
+    async (preset: ImagePromptPreset) => {
+      if (!canEditPromptTemplates) {
+        return;
+      }
+
+      const next = normalizeImagePromptPresets(
+        promptPresets.map((item) => (item.id === preset.id ? { ...item, ...preset } : item)),
+        IMAGE_PROMPT_PRESETS,
+      );
+      setPromptPresets(next);
+
+      try {
+        await updateSettingsConfig({
+          [IMAGE_PROMPT_PRESETS_SETTINGS_KEY]: JSON.stringify(next),
+        });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "模板保存失败");
+      }
+    },
+    [canEditPromptTemplates, promptPresets],
+  );
 
   const parsedCount = useMemo(
     () => normalizeRequestedImageCount(imageCount, imageSingleCountLimit),
@@ -1184,6 +1161,35 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
   useEffect(() => {
     let cancelled = false;
 
+    const loadPromptPresets = async () => {
+      try {
+        const data = await fetchSettingsConfig();
+        if (cancelled) {
+          return;
+        }
+        setPromptPresets(
+          parseImagePromptPresetsFromConfig(
+            data.config[IMAGE_PROMPT_PRESETS_SETTINGS_KEY],
+            IMAGE_PROMPT_PRESETS,
+          ),
+        );
+      } catch {
+        if (cancelled) {
+          return;
+        }
+        setPromptPresets([...IMAGE_PROMPT_PRESETS]);
+      }
+    };
+
+    void loadPromptPresets();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
     const loadHistory = async () => {
       try {
         const storedSelection = getStoredImageSizeSelection();
@@ -1277,19 +1283,13 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
       if (!isChatModel(imageModel)) {
         setImageModel(DEFAULT_CHAT_MODEL);
       }
-      if (referenceImages.length > 0) {
-        setReferenceImages([]);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
-      }
       return;
     }
 
     if (!isImageCreationModel(imageModel)) {
       setImageModel(DEFAULT_IMAGE_MODEL);
     }
-  }, [composerMode, imageModel, referenceImages.length]);
+  }, [composerMode, imageModel]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
