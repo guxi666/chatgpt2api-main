@@ -535,7 +535,7 @@ function UsersContent() {
                           <Button type="button" variant="outline" className="h-8 rounded-lg px-3" onClick={() => { setAdjustMode("delta"); setAdjustValue("1.00"); setAdjustNote(""); setAdjustingUser(user); }} disabled={pending}>
                             调整余额
                           </Button>
-                          {user.provider === "local" ? (
+                          {user.provider !== "linuxdo" && Boolean(user.has_password) ? (
                             <Button
                               type="button"
                               variant="outline"
