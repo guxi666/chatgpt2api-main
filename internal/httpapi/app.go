@@ -934,15 +934,23 @@ func (a *App) handleImages(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		startDate := strings.TrimSpace(query.Get("start_date"))
 		endDate := strings.TrimSpace(query.Get("end_date"))
+		ownerQuery := strings.TrimSpace(firstNonEmpty(query.Get("owner_query"), query.Get("owner"), query.Get("user")))
 		page := util.ToInt(query.Get("page"), 0)
 		pageSize := util.ToInt(query.Get("page_size"), 0)
 		var payload map[string]any
-		if page > 0 || pageSize > 0 {
+		// owner_query 需要先整体过滤再分页，否则会出现“本页匹配不到但下一页有”的错位结果。
+		if ownerQuery != "" {
+			payload = a.images.ListImages(a.resolveImageBaseURL(r), startDate, endDate, scope)
+		} else if page > 0 || pageSize > 0 {
 			payload = a.images.ListImagesPage(a.resolveImageBaseURL(r), startDate, endDate, scope, page, pageSize)
 		} else {
 			payload = a.images.ListImages(a.resolveImageBaseURL(r), startDate, endDate, scope)
 		}
 		a.decorateImageList(payload)
+		if ownerQuery != "" {
+			filtered := filterImageItemsByOwnerQuery(util.AsMapSlice(payload["items"]), ownerQuery, a.imageOwnerSearchIndex())
+			payload = paginateImageItemsPayload(filtered, page, pageSize)
+		}
 		util.WriteJSON(w, http.StatusOK, payload)
 	case http.MethodDelete:
 		body, err := readJSONMap(r)
@@ -950,7 +958,12 @@ func (a *App) handleImages(w http.ResponseWriter, r *http.Request) {
 			util.WriteError(w, http.StatusBadRequest, "invalid json body")
 			return
 		}
-		result, err := a.images.DeleteImages(util.AsStringSlice(body["paths"]), service.ImageAccessScope{All: true})
+		deleteScope := service.ImageAccessScope{OwnerID: identityScope(identity)}
+		// 管理员与被授予自定义角色（非默认用户角色）的成员，允许执行全局删除。
+		if identity.Role == service.AuthRoleAdmin || (identity.RoleID != "" && identity.RoleID != service.DefaultManagedRoleID) {
+			deleteScope = service.ImageAccessScope{All: true}
+		}
+		result, err := a.images.DeleteImages(util.AsStringSlice(body["paths"]), deleteScope)
 		if err != nil {
 			util.WriteError(w, http.StatusBadRequest, err.Error())
 			return
@@ -1590,6 +1603,96 @@ func (a *App) decorateImageList(payload map[string]any) {
 	}
 }
 
+func filterImageItemsByOwnerQuery(items []map[string]any, rawQuery string, ownerSearch map[string]string) []map[string]any {
+	query := strings.ToLower(strings.TrimSpace(rawQuery))
+	if query == "" {
+		return items
+	}
+	filtered := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		ownerID := util.Clean(item["owner_id"])
+		ownerName := util.Clean(item["owner_name"])
+		searchText := strings.ToLower(strings.Join([]string{
+			ownerID,
+			ownerName,
+			ownerSearch[ownerID],
+		}, " "))
+		if strings.Contains(searchText, query) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func paginateImageItemsPayload(items []map[string]any, page, pageSize int) map[string]any {
+	if page <= 0 && pageSize <= 0 {
+		groupMap := map[string][]map[string]any{}
+		order := make([]string, 0)
+		for _, item := range items {
+			day := util.Clean(item["date"])
+			if _, ok := groupMap[day]; !ok {
+				order = append(order, day)
+			}
+			groupMap[day] = append(groupMap[day], item)
+		}
+		groups := make([]map[string]any, 0, len(order))
+		for _, day := range order {
+			groups = append(groups, map[string]any{"date": day, "items": groupMap[day]})
+		}
+		return map[string]any{"items": items, "groups": groups}
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 500 {
+		pageSize = 500
+	}
+	if page <= 0 {
+		page = 1
+	}
+	total := len(items)
+	totalPages := 1
+	if total > 0 {
+		totalPages = (total + pageSize - 1) / pageSize
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start := (page - 1) * pageSize
+	if start < 0 {
+		start = 0
+	}
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	pagedItems := items[start:end]
+	groupMap := map[string][]map[string]any{}
+	order := make([]string, 0)
+	for _, item := range pagedItems {
+		day := util.Clean(item["date"])
+		if _, ok := groupMap[day]; !ok {
+			order = append(order, day)
+		}
+		groupMap[day] = append(groupMap[day], item)
+	}
+	groups := make([]map[string]any, 0, len(order))
+	for _, day := range order {
+		groups = append(groups, map[string]any{"date": day, "items": groupMap[day]})
+	}
+	return map[string]any{
+		"items":      pagedItems,
+		"groups":     groups,
+		"total":      total,
+		"page":       page,
+		"page_size":  pageSize,
+		"total_page": totalPages,
+	}
+}
+
 func (a *App) decorateImageItem(item map[string]any, ownerNames map[string]string) {
 	if item == nil || util.Clean(item["owner_name"]) != "" {
 		return
@@ -1621,6 +1724,25 @@ func (a *App) imageOwnerDisplayNames() map[string]string {
 		}
 	}
 	return names
+}
+
+func (a *App) imageOwnerSearchIndex() map[string]string {
+	index := map[string]string{"admin": "admin 管理员"}
+	for _, item := range a.auth.ListUsers() {
+		userID := util.Clean(item["id"])
+		ownerID := util.Clean(item["owner_id"])
+		name := util.Clean(item["name"])
+		username := util.Clean(item["username"])
+		email := util.Clean(item["email"])
+		joined := strings.ToLower(strings.TrimSpace(strings.Join([]string{name, username, email}, " ")))
+		if userID != "" && joined != "" {
+			index[userID] = firstNonEmpty(index[userID], joined)
+		}
+		if ownerID != "" && joined != "" {
+			index[ownerID] = firstNonEmpty(index[ownerID], joined)
+		}
+	}
+	return index
 }
 
 func (a *App) runLoggedImageTask(ctx context.Context, identity service.Identity, payload map[string]any, endpoint, summary string, run func(context.Context, map[string]any) (map[string]any, error)) (map[string]any, error) {

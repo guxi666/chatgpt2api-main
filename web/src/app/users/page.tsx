@@ -37,6 +37,7 @@ import {
   createManagedUser,
   deleteManagedUser,
   fetchManagedUsers,
+  resetManagedUserPassword,
   resetManagedUserKey,
   revealManagedUserKey,
   updateManagedUser,
@@ -71,6 +72,7 @@ function providerLabel(provider?: string) {
 function displayEmail(email?: string | null) {
   const raw = String(email || "").trim();
   if (!raw) return "-";
+  if (raw.toLowerCase().endsWith("@local.invalid")) return "-";
   const match = raw.match(/^local[a-z0-9-]*_(.+@.+)$/i);
   return match?.[1] || raw;
 }
@@ -145,6 +147,8 @@ function UsersContent() {
 
   const [resettingUser, setResettingUser] = useState<ManagedUser | null>(null);
   const [resetName, setResetName] = useState("");
+  const [passwordResetUser, setPasswordResetUser] = useState<ManagedUser | null>(null);
+  const [nextPassword, setNextPassword] = useState("");
 
   const [deletingUser, setDeletingUser] = useState<ManagedUser | null>(null);
 
@@ -291,6 +295,27 @@ function UsersContent() {
       toast.error(error instanceof Error ? error.message : "重置密钥失败");
     } finally {
       setUserPending(resettingUser.id, false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!passwordResetUser) return;
+    const password = nextPassword.trim();
+    if (!password) {
+      toast.error("请输入新密码");
+      return;
+    }
+    setUserPending(passwordResetUser.id, true);
+    try {
+      const data = await resetManagedUserPassword(passwordResetUser.id, password);
+      setItems(Array.isArray(data.items) ? data.items : []);
+      setPasswordResetUser(null);
+      setNextPassword("");
+      toast.success("用户密码已重置");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "重置密码失败");
+    } finally {
+      setUserPending(passwordResetUser.id, false);
     }
   };
 
@@ -452,6 +477,9 @@ function UsersContent() {
                         <div className="space-y-1">
                           <div className="truncate font-medium text-foreground">{user.name || user.username || "用户"}</div>
                           <div className="truncate text-xs text-muted-foreground">{`Email: ${displayEmail(user.email)}`}</div>
+                          <div className="truncate text-xs text-muted-foreground">
+                            密码状态: {user.has_password ? "已设置" : "未设置"}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell><Badge variant="secondary" className="rounded-md">{providerLabel(user.provider)}</Badge></TableCell>
@@ -507,6 +535,20 @@ function UsersContent() {
                           <Button type="button" variant="outline" className="h-8 rounded-lg px-3" onClick={() => { setAdjustMode("delta"); setAdjustValue("1.00"); setAdjustNote(""); setAdjustingUser(user); }} disabled={pending}>
                             调整余额
                           </Button>
+                          {user.provider === "local" ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-8 rounded-lg px-3"
+                              onClick={() => {
+                                setPasswordResetUser(user);
+                                setNextPassword("");
+                              }}
+                              disabled={pending}
+                            >
+                              重置密码
+                            </Button>
+                          ) : null}
                           <Button type="button" variant="outline" className="h-8 rounded-lg px-3" onClick={() => void handleToggle(user)} disabled={pending}>
                             {pending ? <LoaderCircle className="size-4 animate-spin" /> : user.enabled ? <Ban className="size-4" /> : <CheckCircle2 className="size-4" />}
                             {user.enabled ? "禁用" : "启用"}
@@ -596,6 +638,44 @@ function UsersContent() {
           <DialogFooter>
             <Button type="button" variant="secondary" className="h-10 rounded-xl px-5" onClick={() => setDeletingUser(null)} disabled={deletingUser ? pendingIDs.has(deletingUser.id) : false}>取消</Button>
             <Button type="button" className="h-10 rounded-xl bg-rose-600 px-5 text-white hover:bg-rose-700" onClick={() => void handleDelete()} disabled={deletingUser ? pendingIDs.has(deletingUser.id) : false}>{deletingUser && pendingIDs.has(deletingUser.id) ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}删除</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(passwordResetUser)} onOpenChange={(open) => (!open ? setPasswordResetUser(null) : null)}>
+        <DialogContent className="rounded-2xl p-6">
+          <DialogHeader className="gap-2">
+            <DialogTitle>重置用户密码</DialogTitle>
+            <DialogDescription className="text-sm leading-6">
+              输入新密码后保存，用户会被强制下线并需要重新登录。
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            type="password"
+            value={nextPassword}
+            onChange={(event) => setNextPassword(event.target.value)}
+            placeholder="请输入新密码（至少 8 位）"
+            className="h-11 rounded-xl"
+          />
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              className="h-10 rounded-xl px-5"
+              onClick={() => setPasswordResetUser(null)}
+              disabled={passwordResetUser ? pendingIDs.has(passwordResetUser.id) : false}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              className="h-10 rounded-xl px-5"
+              onClick={() => void handleResetPassword()}
+              disabled={passwordResetUser ? pendingIDs.has(passwordResetUser.id) : false}
+            >
+              {passwordResetUser && pendingIDs.has(passwordResetUser.id) ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              保存
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

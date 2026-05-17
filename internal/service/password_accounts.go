@@ -271,6 +271,21 @@ func (s *AuthService) LoginPassword(username, password string) (*Identity, strin
 	return identityForAuthItem(item), raw, nil
 }
 
+func (s *AuthService) HasPasswordAccountByUserID(userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, account := range s.accounts {
+		if account.ID == userID && account.Role == AuthRoleUser {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *AuthService) UpdateProfileName(identity Identity, name string) (*Identity, error) {
 	ownerID := util.Clean(identity.OwnerID)
 	if ownerID == "" {
@@ -428,6 +443,51 @@ func (s *AuthService) ResetPasswordByEmail(email, nextPassword string) error {
 		return s.saveLocked()
 	}
 	return authError("该邮箱未注册")
+}
+
+func (s *AuthService) AdminResetPasswordByUserID(userID, nextPassword string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return authError("user id is required")
+	}
+	if err := validateAccountPassword(nextPassword); err != nil {
+		return err
+	}
+	now := util.NowISO()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index, account := range s.accounts {
+		if account.ID != userID || account.Role != AuthRoleUser {
+			continue
+		}
+		hash, err := hashAccountPassword(nextPassword)
+		if err != nil {
+			return err
+		}
+		account.PasswordHash = hash
+		account.UpdatedAt = now
+		s.accounts[index] = account
+
+		// 管理员重置密码后，强制该账号重新登录。
+		nextItems := make([]map[string]any, 0, len(s.items))
+		for _, item := range s.items {
+			if util.Clean(item["kind"]) == AuthKindSession &&
+				util.Clean(item["provider"]) == AuthProviderLocal &&
+				util.Clean(item["owner_id"]) == account.ID {
+				continue
+			}
+			nextItems = append(nextItems, item)
+		}
+		s.items = nextItems
+
+		if err := s.savePasswordAccountsLocked(); err != nil {
+			return err
+		}
+		return s.saveLocked()
+	}
+	return authError("user not found")
 }
 
 func (s *AuthService) issuePasswordSessionLocked(account PasswordAccount, now string) (map[string]any, string) {
@@ -600,8 +660,12 @@ func passwordAccountIndexByUsernameLocked(accounts []PasswordAccount, username s
 	if err != nil {
 		return -1, PasswordAccount{}, false
 	}
+	isEmail := strings.Contains(username, "@")
 	for index, account := range accounts {
 		if account.Username == username {
+			return index, account, true
+		}
+		if isEmail && account.Email == username {
 			return index, account, true
 		}
 	}

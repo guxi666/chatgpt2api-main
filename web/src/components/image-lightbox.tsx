@@ -3,6 +3,7 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ChevronLeft, ChevronRight, Download, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 
@@ -99,12 +100,29 @@ export function ImageLightbox({
     }
   }, [current?.id, open, resetZoom]);
 
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     if (!current) return;
-    const link = document.createElement("a");
-    link.href = current.src;
-    link.download = `image-${current.id}.png`;
-    link.click();
+    let objectUrl = "";
+    try {
+      const response = await fetch(current.src, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error(`download failed: ${response.status}`);
+      }
+      const blob = await response.blob();
+      objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = `image-${current.id}.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch {
+      toast.error("下载失败，图片源不支持跨域下载");
+    } finally {
+      if (objectUrl) {
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      }
+    }
   }, [current]);
 
   const handleImagePointerDown = useCallback(

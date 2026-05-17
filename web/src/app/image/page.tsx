@@ -223,12 +223,21 @@ function buildReferenceImageFromResult(image: StoredImage, fileName: string): St
 }
 
 async function fetchImageAsFile(url: string, fileName: string) {
-  const response = await fetch(url);
+  const response = await fetch(url, { credentials: "include" });
   if (!response.ok) {
     throw new Error("读取结果图失败");
   }
   const blob = await response.blob();
   return new File([blob], fileName, { type: blob.type || "image/png" });
+}
+
+function buildManagedImageURL(path: string) {
+  const normalized = path
+    .split("/")
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return normalized ? `/images/${normalized}` : "";
 }
 
 function buildReferenceFileName(url: string, index: number, fallbackPrefix: string) {
@@ -274,18 +283,45 @@ async function buildReferenceImageFromStoredImage(image: StoredImage, fileName: 
     };
   }
 
-  if (!image.url) {
+  const candidates: string[] = [];
+  if (image.path) {
+    const managedURL = buildManagedImageURL(image.path);
+    if (managedURL) {
+      candidates.push(managedURL);
+    }
+  }
+  if (image.url) {
+    candidates.push(image.url);
+    const parsedPath = getManagedImagePathFromUrl(image.url);
+    if (parsedPath && parsedPath !== image.path) {
+      const managedURL = buildManagedImageURL(parsedPath);
+      if (managedURL) {
+        candidates.push(managedURL);
+      }
+    }
+  }
+
+  if (candidates.length === 0) {
     return null;
   }
-  const file = await fetchImageAsFile(image.url, fileName);
-  return {
-    referenceImage: {
-      name: file.name,
-      type: file.type || "image/png",
-      dataUrl: await readFileAsDataUrl(file),
-    },
-    file,
-  };
+  let lastError: unknown = null;
+  for (const candidate of Array.from(new Set(candidates))) {
+    try {
+      const file = await fetchImageAsFile(candidate, fileName);
+      return {
+        referenceImage: {
+          name: file.name,
+          type: file.type || "image/png",
+          dataUrl: await readFileAsDataUrl(file),
+        },
+        file,
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("读取结果图失败");
 }
 
 const IMAGE_TASK_IMAGE_COUNT = 1;

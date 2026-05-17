@@ -77,14 +77,16 @@ function formatOwner(item: ManagedImage) {
   return ownerID || "-";
 }
 
-function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages: boolean; canUploadR2: boolean }) {
+function ImageManagerContent({ canDeleteImages, canUploadR2, isAdmin }: { canDeleteImages: boolean; canUploadR2: boolean; isAdmin: boolean }) {
   const activeLoadRef = useRef<AbortController | null>(null);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [ownerQuery, setOwnerQuery] = useState("");
   const [items, setItems] = useState<ManagedImage[]>([]);
   const [total, setTotal] = useState(0);
   const [pageSize, setPageSize] = useState<number>(20);
   const [page, setPage] = useState(1);
+  const [pageInput, setPageInput] = useState("1");
   const [selectedImageIds, setSelectedImageIds] = useState<Record<string, boolean>>({});
   const [selectedAllItems, setSelectedAllItems] = useState<ManagedImage[]>([]);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
@@ -104,16 +106,11 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
       setPage(totalPages);
     }
   }, [page, totalPages]);
+  useEffect(() => {
+    setPageInput(String(page));
+  }, [page]);
 
-  const sortedItems = useMemo(
-    () =>
-      [...items].sort((a, b) => {
-        const left = new Date(a.created_at || 0).getTime();
-        const right = new Date(b.created_at || 0).getTime();
-        return right - left;
-      }),
-    [items],
-  );
+  const sortedItems = items;
 
   const lightboxImages = useMemo(
     () =>
@@ -160,7 +157,7 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
     setLoadError("");
     try {
       const data = await fetchManagedImages(
-        { start_date: startDate, end_date: endDate, page, page_size: pageSize },
+        { start_date: startDate, end_date: endDate, owner_query: ownerQuery, page, page_size: pageSize },
         { signal: controller.signal },
       );
       setItems(Array.isArray(data.items) ? data.items : []);
@@ -178,7 +175,7 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
         setIsLoading(false);
       }
     }
-  }, [endDate, page, pageSize, startDate]);
+  }, [endDate, ownerQuery, page, pageSize, startDate]);
 
   useEffect(() => {
     void loadImages();
@@ -189,7 +186,14 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
   const clearFilters = () => {
     setStartDate("");
     setEndDate("");
+    setOwnerQuery("");
     setPage(1);
+  };
+
+  const jumpToPage = () => {
+    const next = Number(pageInput.trim());
+    if (!Number.isFinite(next)) return;
+    setPage(Math.max(1, Math.min(totalPages, Math.trunc(next))));
   };
 
   const toggleImageSelection = (item: ManagedImage) => {
@@ -198,11 +202,11 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
   };
 
   const loadAllImagesForSelection = async () => {
-    const first = await fetchManagedImages({ start_date: startDate, end_date: endDate, page: 1, page_size: 500 });
+    const first = await fetchManagedImages({ start_date: startDate, end_date: endDate, owner_query: ownerQuery, page: 1, page_size: 500 });
     const allItems = [...first.items];
     const pageCount = Math.max(1, Number(first.total_page || 1));
     for (let nextPage = 2; nextPage <= pageCount; nextPage += 1) {
-      const data = await fetchManagedImages({ start_date: startDate, end_date: endDate, page: nextPage, page_size: 500 });
+      const data = await fetchManagedImages({ start_date: startDate, end_date: endDate, owner_query: ownerQuery, page: nextPage, page_size: 500 });
       allItems.push(...data.items);
     }
     return allItems;
@@ -335,6 +339,17 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
                 setPage(1);
               }}
             />
+            {isAdmin ? (
+              <Input
+                value={ownerQuery}
+                onChange={(event) => {
+                  setOwnerQuery(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="筛选用户：邮箱/用户名/ID"
+                className="h-10 w-[240px] rounded-lg"
+              />
+            ) : null}
             <Button variant="outline" onClick={clearFilters} className="h-10 rounded-lg">
               清除筛选
             </Button>
@@ -374,16 +389,26 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
                 </SelectContent>
               </Select>
               <Input
-                value={String(page)}
-                onChange={(event) => {
-                  const next = Number(event.target.value);
-                  if (!Number.isFinite(next)) return;
-                  setPage(Math.max(1, Math.min(totalPages, Math.trunc(next))));
+                value={pageInput}
+                onChange={(event) => setPageInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    jumpToPage();
+                  }
                 }}
                 inputMode="numeric"
                 className="h-8 w-[120px] rounded-lg"
                 placeholder={`页码 1-${totalPages}`}
               />
+              <Button
+                type="button"
+                variant="outline"
+                className="h-8 rounded-lg px-3 text-xs"
+                onClick={jumpToPage}
+              >
+                跳转
+              </Button>
               <Button
                 type="button"
                 variant="outline"
@@ -458,7 +483,7 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
             </div>
           ) : null}
 
-          {!isLoading && loadError ? (
+          {loadError ? (
             <div className="px-6 py-14 text-center text-sm text-rose-600">{loadError}</div>
           ) : null}
 
@@ -466,7 +491,7 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
             <div className="px-6 py-14 text-center text-sm text-muted-foreground">暂无图片</div>
           ) : null}
 
-          {!isLoading && !loadError && sortedItems.length > 0 ? (
+          {!loadError && sortedItems.length > 0 ? (
             <div className="grid gap-3 px-5 py-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {sortedItems.map((item) => {
                 const globalIndex = itemIndexByPath.get(item.path) ?? 0;
@@ -548,7 +573,7 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
             </div>
           ) : null}
 
-          {!isLoading && !loadError && total > 0 ? (
+          {!loadError && total > 0 ? (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-3 text-sm">
               <span>
                 第 {page} / {totalPages} 页，共 {total} 条
@@ -573,16 +598,26 @@ function ImageManagerContent({ canDeleteImages, canUploadR2 }: { canDeleteImages
                   下一页
                 </Button>
                 <Input
-                  value={String(page)}
-                  onChange={(event) => {
-                    const next = Number(event.target.value);
-                    if (!Number.isFinite(next)) return;
-                    setPage(Math.max(1, Math.min(totalPages, Math.trunc(next))));
+                  value={pageInput}
+                  onChange={(event) => setPageInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      jumpToPage();
+                    }
                   }}
                   inputMode="numeric"
                   className="h-8 w-[120px] rounded-lg"
                   placeholder={`页码 1-${totalPages}`}
                 />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 rounded-lg px-3"
+                  onClick={jumpToPage}
+                >
+                  跳转
+                </Button>
               </div>
             </div>
           ) : null}
@@ -631,7 +666,7 @@ export default function ImageManagerPage() {
       </div>
     );
   }
-  const canDeleteImages = session.role === "admin" || session.provider !== "linuxdo";
-  return <ImageManagerContent canDeleteImages={canDeleteImages} canUploadR2={session.role === "admin"} />;
+  const canDeleteImages = true;
+  return <ImageManagerContent canDeleteImages={canDeleteImages} canUploadR2={session.role === "admin"} isAdmin={session.role === "admin"} />;
 }
 

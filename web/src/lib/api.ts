@@ -720,6 +720,7 @@ export type ManagedUser = {
   total_consume_cents?: number;
   billing_user?: boolean;
   image_price_cents?: number;
+  has_password?: boolean;
   menu_paths?: string[];
   api_permissions?: string[];
 };
@@ -1361,6 +1362,7 @@ export async function fetchManagedImages(
   filters: {
     start_date?: string;
     end_date?: string;
+    owner_query?: string;
     scope?: "mine" | "public" | "all";
     page?: number;
     page_size?: number;
@@ -1371,6 +1373,7 @@ export async function fetchManagedImages(
   if (filters.scope) params.set("scope", filters.scope);
   if (filters.start_date) params.set("start_date", filters.start_date);
   if (filters.end_date) params.set("end_date", filters.end_date);
+  if (filters.owner_query) params.set("owner_query", filters.owner_query);
   if (filters.page && filters.page > 0) params.set("page", String(filters.page));
   if (filters.page_size && filters.page_size > 0) params.set("page_size", String(filters.page_size));
   const data = await httpRequest<{ items?: ManagedImage[] | null; groups?: Array<{ date: string; items: ManagedImage[] }> | null }>(
@@ -1696,6 +1699,13 @@ export async function resetManagedUserKey(userId: string, name?: string) {
 export async function deleteManagedUser(userId: string) {
   return httpRequest<{ items: ManagedUser[] }>(managedUserPath(userId), {
     method: "DELETE",
+  });
+}
+
+export async function resetManagedUserPassword(userId: string, password: string) {
+  return httpRequest<{ ok: boolean; items: ManagedUser[] }>(`${managedUserPath(userId)}/password`, {
+    method: "POST",
+    body: { password },
   });
 }
 

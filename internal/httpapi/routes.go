@@ -13,6 +13,51 @@ import (
 	"chatgpt2api/internal/util"
 )
 
+func looksLikeEmail(value string) bool {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" || strings.Contains(value, " ") {
+		return false
+	}
+	at := strings.LastIndex(value, "@")
+	if at <= 0 || at >= len(value)-1 {
+		return false
+	}
+	domain := value[at+1:]
+	return strings.Contains(domain, ".")
+}
+
+func isLocalInvalidEmail(value string) bool {
+	value = strings.TrimSpace(strings.ToLower(value))
+	return strings.HasSuffix(value, "@local.invalid")
+}
+
+func managedUserEmailCandidate(values ...string) string {
+	for _, value := range values {
+		email := strings.TrimSpace(value)
+		if !looksLikeEmail(email) || isLocalInvalidEmail(email) {
+			continue
+		}
+		return email
+	}
+	return ""
+}
+
+func inferManagedUserProvider(authProvider, username, accountEmail, billingProvider, billingEmail string) string {
+	if strings.TrimSpace(authProvider) == service.AuthProviderLinuxDo {
+		return service.AuthProviderLinuxDo
+	}
+	if strings.TrimSpace(billingProvider) == service.AuthProviderEmail && managedUserEmailCandidate(billingEmail) != "" {
+		return service.AuthProviderEmail
+	}
+	if managedUserEmailCandidate(username, accountEmail, billingEmail) != "" {
+		return service.AuthProviderEmail
+	}
+	if strings.TrimSpace(authProvider) == "" {
+		return service.AuthProviderLocal
+	}
+	return strings.TrimSpace(authProvider)
+}
+
 func (a *App) handleUserKeys(w http.ResponseWriter, r *http.Request) {
 	identity, ok := a.requireIdentity(w, r, "")
 	if !ok {
@@ -476,6 +521,27 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		util.WriteJSON(w, http.StatusOK, map[string]any{"item": item, "api_key": apiKey, "key": raw, "items": items})
 		return
 	}
+	if len(parts) == 5 && parts[4] == "password" {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := readJSONMap(r)
+		if err != nil {
+			util.WriteError(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		if err := a.auth.AdminResetPasswordByUserID(userID, util.Clean(body["password"])); err != nil {
+			status := http.StatusBadRequest
+			if err.Error() == "user not found" {
+				status = http.StatusNotFound
+			}
+			util.WriteError(w, status, err.Error())
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": a.managedUsers()})
+		return
+	}
 	if len(parts) != 4 {
 		http.NotFound(w, r)
 		return
@@ -537,12 +603,20 @@ func (a *App) managedUsers() []map[string]any {
 	stats := a.logs.UserUsageStats(14)
 	for _, item := range items {
 		userID := util.Clean(item["id"])
+		item["has_password"] = a.auth.HasPasswordAccountByUserID(userID)
 		if userID != "" && util.Clean(item["provider"]) == service.AuthProviderLocal {
+			providerHint := inferManagedUserProvider(
+				util.Clean(item["provider"]),
+				util.Clean(item["username"]),
+				util.Clean(item["email"]),
+				"",
+				"",
+			)
 			if wallet := a.billing.EnsureWalletUserWithEmail(
 				userID,
 				util.Clean(item["email"]),
 				util.Clean(item["name"]),
-				service.AuthProviderLocal,
+				providerHint,
 			); wallet != nil {
 				billingUsers[userID] = wallet
 			}
@@ -555,9 +629,23 @@ func (a *App) managedUsers() []map[string]any {
 			item[key] = value
 		}
 		if billing, exists := billingUsers[userID]; exists {
-			if email := strings.TrimSpace(util.Clean(billing["email"])); email != "" {
+			email := managedUserEmailCandidate(
+				util.Clean(billing["email"]),
+				util.Clean(item["email"]),
+				util.Clean(item["username"]),
+			)
+			if email != "" {
 				item["email"] = email
+			} else if isLocalInvalidEmail(util.Clean(item["email"])) {
+				item["email"] = ""
 			}
+			item["provider"] = inferManagedUserProvider(
+				util.Clean(item["provider"]),
+				util.Clean(item["username"]),
+				util.Clean(item["email"]),
+				util.Clean(billing["provider"]),
+				util.Clean(billing["email"]),
+			)
 			item["balance_cents"] = util.ToInt(billing["balance_cents"], 0)
 			item["total_recharge_cents"] = util.ToInt(billing["total_recharge_cents"], 0)
 			item["total_consume_cents"] = util.ToInt(billing["total_consume_cents"], 0)
@@ -565,6 +653,18 @@ func (a *App) managedUsers() []map[string]any {
 			item["image_price_cents"] = a.config.ImagePriceCents()
 			continue
 		}
+		if email := managedUserEmailCandidate(util.Clean(item["email"]), util.Clean(item["username"])); email != "" {
+			item["email"] = email
+		} else if isLocalInvalidEmail(util.Clean(item["email"])) {
+			item["email"] = ""
+		}
+		item["provider"] = inferManagedUserProvider(
+			util.Clean(item["provider"]),
+			util.Clean(item["username"]),
+			util.Clean(item["email"]),
+			"",
+			"",
+		)
 		item["balance_cents"] = 0
 		item["total_recharge_cents"] = 0
 		item["total_consume_cents"] = 0
