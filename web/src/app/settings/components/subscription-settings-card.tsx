@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Gem, LoaderCircle, Save } from "lucide-react";
 
@@ -10,27 +10,149 @@ import { Textarea } from "@/components/ui/textarea";
 import { useSettingsStore } from "../store";
 import { SettingsCard, settingsInputClassName } from "./settings-ui";
 
-function NumberInput({
+function centsToYuanText(value: unknown) {
+  const cents = Number(value || 0);
+  const safe = Number.isFinite(cents) ? Math.max(0, cents) : 0;
+  return (safe / 100).toFixed(2);
+}
+
+function yuanToCents(value: string) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+  return Math.round(parsed * 100);
+}
+
+function PlanPriceInput({
   id,
-  label,
   value,
   onChange,
 }: {
   id: string;
-  label: string;
   value: unknown;
-  onChange: (value: string) => void;
+  onChange: (cents: number) => void;
 }) {
   return (
     <Field className="gap-1.5">
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <FieldLabel htmlFor={id}>价格（元）</FieldLabel>
       <Input
         id={id}
-        value={String(value || "")}
-        onChange={(event) => onChange(event.target.value)}
+        type="number"
+        min="0"
+        step="0.01"
+        value={centsToYuanText(value)}
+        onChange={(event) => onChange(yuanToCents(event.target.value))}
         className={settingsInputClassName}
       />
     </Field>
+  );
+}
+
+function PlanBlock({
+  title,
+  nameKey,
+  badgeKey,
+  descKey,
+  priceCentsKey,
+  priceNoteKey,
+  featuresKey,
+}: {
+  title: string;
+  nameKey:
+    | "subscription_monthly_name"
+    | "subscription_quarterly_name"
+    | "subscription_yearly_name";
+  badgeKey:
+    | "subscription_monthly_badge"
+    | "subscription_quarterly_badge"
+    | "subscription_yearly_badge";
+  descKey:
+    | "subscription_monthly_desc"
+    | "subscription_quarterly_desc"
+    | "subscription_yearly_desc";
+  priceCentsKey:
+    | "subscription_monthly_price_cents"
+    | "subscription_quarterly_price_cents"
+    | "subscription_yearly_price_cents";
+  priceNoteKey:
+    | "subscription_monthly_price_note"
+    | "subscription_quarterly_price_note"
+    | "subscription_yearly_price_note";
+  featuresKey:
+    | "subscription_monthly_features"
+    | "subscription_quarterly_features"
+    | "subscription_yearly_features";
+}) {
+  const config = useSettingsStore((state) => state.config);
+  const setConfigField = useSettingsStore((state) => state.setConfigField);
+
+  return (
+    <div className="rounded-[14px] border border-border/80 p-4">
+      <div className="mb-3 text-sm font-semibold">{title}</div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <PlanPriceInput
+          id={`${priceCentsKey}-yuan`}
+          value={config?.[priceCentsKey]}
+          onChange={(cents) => setConfigField(priceCentsKey, cents)}
+        />
+
+        <Field className="gap-1.5">
+          <FieldLabel htmlFor={badgeKey}>角标</FieldLabel>
+          <Input
+            id={badgeKey}
+            value={String(config?.[badgeKey] || "")}
+            onChange={(event) => setConfigField(badgeKey, event.target.value)}
+            className={settingsInputClassName}
+          />
+        </Field>
+
+        <Field className="gap-1.5">
+          <FieldLabel htmlFor={nameKey}>套餐名称</FieldLabel>
+          <Input
+            id={nameKey}
+            value={String(config?.[nameKey] || "")}
+            onChange={(event) => setConfigField(nameKey, event.target.value)}
+            className={settingsInputClassName}
+          />
+        </Field>
+
+        <Field className="gap-1.5">
+          <FieldLabel htmlFor={priceNoteKey}>价格说明（可选）</FieldLabel>
+          <Input
+            id={priceNoteKey}
+            value={String(config?.[priceNoteKey] || "")}
+            onChange={(event) =>
+              setConfigField(priceNoteKey, event.target.value)
+            }
+            className={settingsInputClassName}
+          />
+        </Field>
+
+        <Field className="gap-1.5 sm:col-span-2">
+          <FieldLabel htmlFor={descKey}>套餐描述</FieldLabel>
+          <Input
+            id={descKey}
+            value={String(config?.[descKey] || "")}
+            onChange={(event) => setConfigField(descKey, event.target.value)}
+            className={settingsInputClassName}
+          />
+        </Field>
+
+        <Field className="gap-1.5 sm:col-span-2">
+          <FieldLabel htmlFor={featuresKey}>权益文案（每行一条）</FieldLabel>
+          <Textarea
+            id={featuresKey}
+            value={String(config?.[featuresKey] || "")}
+            onChange={(event) =>
+              setConfigField(featuresKey, event.target.value)
+            }
+            className={settingsInputClassName}
+            rows={3}
+          />
+        </Field>
+      </div>
+    </div>
   );
 }
 
@@ -55,7 +177,7 @@ export function SubscriptionSettingsCard() {
     <SettingsCard
       icon={Gem}
       title="套餐订阅配置"
-      description="配置前台套餐页展示文案、三档价格与权益文案。"
+      description="在这里可以直接自定义包月/包季/包年金额（单位：元）、文案和权益。"
       action={
         <Button
           size="lg"
@@ -84,6 +206,7 @@ export function SubscriptionSettingsCard() {
               className={settingsInputClassName}
             />
           </Field>
+
           <Field className="gap-1.5 sm:col-span-2">
             <FieldLabel htmlFor="subscription-subheading">副标题</FieldLabel>
             <Input
@@ -95,10 +218,9 @@ export function SubscriptionSettingsCard() {
               className={settingsInputClassName}
             />
           </Field>
+
           <Field className="gap-1.5 sm:col-span-2">
-            <FieldLabel htmlFor="subscription-agent-hint">
-              优惠提示文案
-            </FieldLabel>
+            <FieldLabel htmlFor="subscription-agent-hint">代理提示文案</FieldLabel>
             <Input
               id="subscription-agent-hint"
               value={String(config?.subscription_agent_hint || "")}
@@ -108,8 +230,9 @@ export function SubscriptionSettingsCard() {
               className={settingsInputClassName}
             />
           </Field>
+
           <Field className="gap-1.5 sm:col-span-2">
-            <FieldLabel htmlFor="subscription-safety-text">安全文案</FieldLabel>
+            <FieldLabel htmlFor="subscription-safety-text">底部安全文案</FieldLabel>
             <Input
               id="subscription-safety-text"
               value={String(config?.subscription_safety_text || "")}
@@ -121,272 +244,35 @@ export function SubscriptionSettingsCard() {
           </Field>
         </div>
 
-        <div className="rounded-[14px] border border-border/80 p-4">
-          <div className="mb-3 text-sm font-semibold">包月套餐</div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <NumberInput
-              id="subscription-monthly-price"
-              label="价格（分）"
-              value={config?.subscription_monthly_price_cents}
-              onChange={(value) =>
-                setConfigField("subscription_monthly_price_cents", value)
-              }
-            />
-            <Field className="gap-1.5">
-              <FieldLabel htmlFor="subscription-monthly-badge">角标</FieldLabel>
-              <Input
-                id="subscription-monthly-badge"
-                value={String(config?.subscription_monthly_badge || "")}
-                onChange={(event) =>
-                  setConfigField(
-                    "subscription_monthly_badge",
-                    event.target.value,
-                  )
-                }
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className="gap-1.5">
-              <FieldLabel htmlFor="subscription-monthly-name">名称</FieldLabel>
-              <Input
-                id="subscription-monthly-name"
-                value={String(config?.subscription_monthly_name || "")}
-                onChange={(event) =>
-                  setConfigField(
-                    "subscription_monthly_name",
-                    event.target.value,
-                  )
-                }
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className="gap-1.5">
-              <FieldLabel htmlFor="subscription-monthly-price-note">
-                价格说明
-              </FieldLabel>
-              <Input
-                id="subscription-monthly-price-note"
-                value={String(config?.subscription_monthly_price_note || "")}
-                onChange={(event) =>
-                  setConfigField(
-                    "subscription_monthly_price_note",
-                    event.target.value,
-                  )
-                }
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className="gap-1.5 sm:col-span-2">
-              <FieldLabel htmlFor="subscription-monthly-desc">描述</FieldLabel>
-              <Input
-                id="subscription-monthly-desc"
-                value={String(config?.subscription_monthly_desc || "")}
-                onChange={(event) =>
-                  setConfigField(
-                    "subscription_monthly_desc",
-                    event.target.value,
-                  )
-                }
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className="gap-1.5 sm:col-span-2">
-              <FieldLabel htmlFor="subscription-monthly-features">
-                权益文案（每行一条）
-              </FieldLabel>
-              <Textarea
-                id="subscription-monthly-features"
-                value={String(config?.subscription_monthly_features || "")}
-                onChange={(event) =>
-                  setConfigField(
-                    "subscription_monthly_features",
-                    event.target.value,
-                  )
-                }
-                className={settingsInputClassName}
-                rows={3}
-              />
-            </Field>
-          </div>
-        </div>
+        <PlanBlock
+          title="包月套餐"
+          nameKey="subscription_monthly_name"
+          badgeKey="subscription_monthly_badge"
+          descKey="subscription_monthly_desc"
+          priceCentsKey="subscription_monthly_price_cents"
+          priceNoteKey="subscription_monthly_price_note"
+          featuresKey="subscription_monthly_features"
+        />
 
-        <div className="rounded-[14px] border border-border/80 p-4">
-          <div className="mb-3 text-sm font-semibold">包季套餐</div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <NumberInput
-              id="subscription-quarterly-price"
-              label="价格（分）"
-              value={config?.subscription_quarterly_price_cents}
-              onChange={(value) =>
-                setConfigField("subscription_quarterly_price_cents", value)
-              }
-            />
-            <Field className="gap-1.5">
-              <FieldLabel htmlFor="subscription-quarterly-badge">
-                角标
-              </FieldLabel>
-              <Input
-                id="subscription-quarterly-badge"
-                value={String(config?.subscription_quarterly_badge || "")}
-                onChange={(event) =>
-                  setConfigField(
-                    "subscription_quarterly_badge",
-                    event.target.value,
-                  )
-                }
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className="gap-1.5">
-              <FieldLabel htmlFor="subscription-quarterly-name">
-                名称
-              </FieldLabel>
-              <Input
-                id="subscription-quarterly-name"
-                value={String(config?.subscription_quarterly_name || "")}
-                onChange={(event) =>
-                  setConfigField(
-                    "subscription_quarterly_name",
-                    event.target.value,
-                  )
-                }
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className="gap-1.5">
-              <FieldLabel htmlFor="subscription-quarterly-price-note">
-                价格说明
-              </FieldLabel>
-              <Input
-                id="subscription-quarterly-price-note"
-                value={String(config?.subscription_quarterly_price_note || "")}
-                onChange={(event) =>
-                  setConfigField(
-                    "subscription_quarterly_price_note",
-                    event.target.value,
-                  )
-                }
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className="gap-1.5 sm:col-span-2">
-              <FieldLabel htmlFor="subscription-quarterly-desc">
-                描述
-              </FieldLabel>
-              <Input
-                id="subscription-quarterly-desc"
-                value={String(config?.subscription_quarterly_desc || "")}
-                onChange={(event) =>
-                  setConfigField(
-                    "subscription_quarterly_desc",
-                    event.target.value,
-                  )
-                }
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className="gap-1.5 sm:col-span-2">
-              <FieldLabel htmlFor="subscription-quarterly-features">
-                权益文案（每行一条）
-              </FieldLabel>
-              <Textarea
-                id="subscription-quarterly-features"
-                value={String(config?.subscription_quarterly_features || "")}
-                onChange={(event) =>
-                  setConfigField(
-                    "subscription_quarterly_features",
-                    event.target.value,
-                  )
-                }
-                className={settingsInputClassName}
-                rows={3}
-              />
-            </Field>
-          </div>
-        </div>
+        <PlanBlock
+          title="包季套餐"
+          nameKey="subscription_quarterly_name"
+          badgeKey="subscription_quarterly_badge"
+          descKey="subscription_quarterly_desc"
+          priceCentsKey="subscription_quarterly_price_cents"
+          priceNoteKey="subscription_quarterly_price_note"
+          featuresKey="subscription_quarterly_features"
+        />
 
-        <div className="rounded-[14px] border border-border/80 p-4">
-          <div className="mb-3 text-sm font-semibold">包年套餐</div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <NumberInput
-              id="subscription-yearly-price"
-              label="价格（分）"
-              value={config?.subscription_yearly_price_cents}
-              onChange={(value) =>
-                setConfigField("subscription_yearly_price_cents", value)
-              }
-            />
-            <Field className="gap-1.5">
-              <FieldLabel htmlFor="subscription-yearly-badge">角标</FieldLabel>
-              <Input
-                id="subscription-yearly-badge"
-                value={String(config?.subscription_yearly_badge || "")}
-                onChange={(event) =>
-                  setConfigField(
-                    "subscription_yearly_badge",
-                    event.target.value,
-                  )
-                }
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className="gap-1.5">
-              <FieldLabel htmlFor="subscription-yearly-name">名称</FieldLabel>
-              <Input
-                id="subscription-yearly-name"
-                value={String(config?.subscription_yearly_name || "")}
-                onChange={(event) =>
-                  setConfigField("subscription_yearly_name", event.target.value)
-                }
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className="gap-1.5">
-              <FieldLabel htmlFor="subscription-yearly-price-note">
-                价格说明
-              </FieldLabel>
-              <Input
-                id="subscription-yearly-price-note"
-                value={String(config?.subscription_yearly_price_note || "")}
-                onChange={(event) =>
-                  setConfigField(
-                    "subscription_yearly_price_note",
-                    event.target.value,
-                  )
-                }
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className="gap-1.5 sm:col-span-2">
-              <FieldLabel htmlFor="subscription-yearly-desc">描述</FieldLabel>
-              <Input
-                id="subscription-yearly-desc"
-                value={String(config?.subscription_yearly_desc || "")}
-                onChange={(event) =>
-                  setConfigField("subscription_yearly_desc", event.target.value)
-                }
-                className={settingsInputClassName}
-              />
-            </Field>
-            <Field className="gap-1.5 sm:col-span-2">
-              <FieldLabel htmlFor="subscription-yearly-features">
-                权益文案（每行一条）
-              </FieldLabel>
-              <Textarea
-                id="subscription-yearly-features"
-                value={String(config?.subscription_yearly_features || "")}
-                onChange={(event) =>
-                  setConfigField(
-                    "subscription_yearly_features",
-                    event.target.value,
-                  )
-                }
-                className={settingsInputClassName}
-                rows={3}
-              />
-            </Field>
-          </div>
-        </div>
+        <PlanBlock
+          title="包年套餐"
+          nameKey="subscription_yearly_name"
+          badgeKey="subscription_yearly_badge"
+          descKey="subscription_yearly_desc"
+          priceCentsKey="subscription_yearly_price_cents"
+          priceNoteKey="subscription_yearly_price_note"
+          featuresKey="subscription_yearly_features"
+        />
       </div>
     </SettingsCard>
   );

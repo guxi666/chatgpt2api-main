@@ -464,7 +464,7 @@ export function TopNav() {
           id={PRIMARY_NAV_ID}
           aria-label="主导航"
           className={cn(
-            "hide-scrollbar -mx-1 min-w-0 gap-1 overflow-x-auto overscroll-x-contain px-1 pb-0.5 scroll-px-1 touch-pan-x [-webkit-overflow-scrolling:touch] lg:mx-0 lg:flex-1 lg:justify-start lg:gap-1 lg:px-1 lg:pb-0",
+            "hide-scrollbar -mx-1 min-w-0 gap-1 overflow-x-auto overscroll-x-contain px-1 pb-0.5 scroll-px-1 touch-pan-x [-webkit-overflow-scrolling:touch] lg:mx-0 lg:flex-1 lg:justify-center lg:gap-1 lg:px-1 lg:pb-0",
             navCollapsed ? "hidden" : "flex",
           )}
         >

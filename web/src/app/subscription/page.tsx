@@ -293,7 +293,7 @@ function SubscriptionPageContent() {
         </CardHeader>
 
         <CardContent className="space-y-5 pt-3">
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="mx-auto grid w-full max-w-[1120px] gap-4 lg:grid-cols-3">
             {displayPlans.map((plan) => {
                 const active = selectedTier === plan.key;
                 return (
