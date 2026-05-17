@@ -223,7 +223,20 @@ function buildReferenceImageFromResult(image: StoredImage, fileName: string): St
 }
 
 async function fetchImageAsFile(url: string, fileName: string) {
-  const response = await fetch(url, { credentials: "include" });
+  const sourceURL = String(url || "").trim();
+  const needsProxy =
+    /^https?:\/\//i.test(sourceURL) &&
+    (() => {
+      try {
+        return new URL(sourceURL, window.location.origin).origin !== window.location.origin;
+      } catch {
+        return false;
+      }
+    })();
+  const requestURL = needsProxy
+    ? `/api/images/fetch?url=${encodeURIComponent(sourceURL)}&name=${encodeURIComponent(fileName)}`
+    : sourceURL;
+  const response = await fetch(requestURL, { credentials: "include" });
   if (!response.ok) {
     throw new Error("读取结果图失败");
   }

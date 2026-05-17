@@ -104,7 +104,20 @@ export function ImageLightbox({
     if (!current) return;
     let objectUrl = "";
     try {
-      const response = await fetch(current.src, { credentials: "include" });
+      const sourceURL = String(current.src || "").trim();
+      const needsProxy =
+        /^https?:\/\//i.test(sourceURL) &&
+        (() => {
+          try {
+            return new URL(sourceURL, window.location.origin).origin !== window.location.origin;
+          } catch {
+            return false;
+          }
+        })();
+      const requestURL = needsProxy
+        ? `/api/images/fetch?url=${encodeURIComponent(sourceURL)}&name=${encodeURIComponent(`image-${current.id}.png`)}`
+        : sourceURL;
+      const response = await fetch(requestURL, { credentials: "include" });
       if (!response.ok) {
         throw new Error(`download failed: ${response.status}`);
       }
@@ -117,7 +130,7 @@ export function ImageLightbox({
       link.click();
       link.remove();
     } catch {
-      toast.error("下载失败，图片源不支持跨域下载");
+      toast.error("下载失败，请检查图片访问配置");
     } finally {
       if (objectUrl) {
         window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);

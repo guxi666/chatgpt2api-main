@@ -91,6 +91,7 @@ func (a *App) routes() []appRoute {
 		exact(http.MethodPost, "/api/images/r2-upload", a.handleImageR2Upload),
 		exact("", "/api/images/visibility", a.handleImageVisibility),
 		exact("", "/api/images", a.handleImages),
+		exact(http.MethodGet, "/api/images/fetch", a.handleImageFetch),
 		exact("", "/api/logs/governance", a.handleLogGovernance),
 		exact(http.MethodGet, "/api/logs", a.handleLogs),
 		exact("", "/api/proxy", a.handleProxy),

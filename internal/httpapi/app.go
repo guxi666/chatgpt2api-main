@@ -12,6 +12,7 @@ import (
 	_ "image/png"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -1052,6 +1053,111 @@ func (a *App) handleImageFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.ServeFile(w, r, ref.Path)
+}
+
+func (a *App) handleImageFetch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if _, ok := a.requireIdentity(w, r, ""); !ok {
+		return
+	}
+
+	rawURL := strings.TrimSpace(r.URL.Query().Get("url"))
+	if rawURL == "" {
+		util.WriteError(w, http.StatusBadRequest, "url is required")
+		return
+	}
+	targetURL, err := url.Parse(rawURL)
+	if err != nil || !targetURL.IsAbs() {
+		util.WriteError(w, http.StatusBadRequest, "invalid url")
+		return
+	}
+	if targetURL.Scheme != "http" && targetURL.Scheme != "https" {
+		util.WriteError(w, http.StatusBadRequest, "unsupported url scheme")
+		return
+	}
+	if !a.isAllowedImageFetchHost(targetURL, r.Host) {
+		util.WriteError(w, http.StatusForbidden, "image host is not allowed")
+		return
+	}
+
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL.String(), nil)
+	if err != nil {
+		util.WriteError(w, http.StatusBadRequest, "invalid url")
+		return
+	}
+	request.Header.Set("User-Agent", "chatgpt2api-image-fetch/1.0")
+	response, err := a.proxy.HTTPClient(30 * time.Second).Do(request)
+	if err != nil {
+		util.WriteError(w, http.StatusBadGateway, "failed to fetch image")
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		util.WriteError(w, http.StatusBadGateway, fmt.Sprintf("upstream status %d", response.StatusCode))
+		return
+	}
+
+	contentType := strings.TrimSpace(response.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	filename := strings.TrimSpace(r.URL.Query().Get("name"))
+	if filename == "" {
+		filename = path.Base(strings.TrimSpace(targetURL.Path))
+	}
+	if filename == "." || filename == "/" || filename == "" {
+		filename = "image"
+	}
+	filename = strings.ReplaceAll(filename, "\"", "")
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	if _, copyErr := io.Copy(w, io.LimitReader(response.Body, 64<<20)); copyErr != nil {
+		return
+	}
+}
+
+func (a *App) isAllowedImageFetchHost(targetURL *url.URL, requestHost string) bool {
+	targetHost := normalizedHostname(targetURL.Host)
+	if targetHost == "" {
+		return false
+	}
+
+	allowedHosts := map[string]struct{}{}
+	for _, candidate := range []string{
+		requestHost,
+		a.config.BaseURL(),
+		a.config.ImageObjectStorage().PublicBaseURL,
+	} {
+		host := normalizedHostname(candidate)
+		if host != "" {
+			allowedHosts[host] = struct{}{}
+		}
+	}
+	_, ok := allowedHosts[targetHost]
+	return ok
+}
+
+func normalizedHostname(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.Contains(raw, "://") {
+		parsed, err := url.Parse(raw)
+		if err != nil {
+			return ""
+		}
+		raw = parsed.Host
+	}
+	if host, _, err := net.SplitHostPort(raw); err == nil {
+		return strings.ToLower(strings.TrimSpace(host))
+	}
+	return strings.ToLower(strings.TrimSpace(raw))
 }
 
 func (a *App) authorizeImageFileRequest(w http.ResponseWriter, r *http.Request, rel string) (service.ImageFileAccess, bool) {

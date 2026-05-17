@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Check, CircleStop, Clock3, Download, Eye, Globe2, LoaderCircle, Lock, PencilLine, Plus, RotateCcw, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -165,14 +166,28 @@ async function downloadImage(image: DownloadableImage) {
 
   if (!image.src.startsWith("data:")) {
     try {
-      const response = await fetch(image.src);
-      if (response.ok) {
-        const blob = await response.blob();
-        objectUrl = URL.createObjectURL(blob);
-        href = objectUrl;
+      const sourceURL = String(image.src || "").trim();
+      const needsProxy =
+        /^https?:\/\//i.test(sourceURL) &&
+        (() => {
+          try {
+            return new URL(sourceURL, window.location.origin).origin !== window.location.origin;
+          } catch {
+            return false;
+          }
+        })();
+      const requestURL = needsProxy
+        ? `/api/images/fetch?url=${encodeURIComponent(sourceURL)}&name=${encodeURIComponent(image.fileName)}`
+        : sourceURL;
+      const response = await fetch(requestURL, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error(`download failed: ${response.status}`);
       }
-    } catch {
-      href = image.src;
+      const blob = await response.blob();
+      objectUrl = URL.createObjectURL(blob);
+      href = objectUrl;
+    } catch (error) {
+      throw error instanceof Error ? error : new Error("download failed");
     }
   }
 
@@ -326,6 +341,9 @@ export function ImageResults({
           await sleep(120);
         }
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "下载失败";
+      toast.error(message.includes("download failed") ? "下载失败，请检查图片访问配置" : message);
     } finally {
       setDownloadingKey(null);
     }

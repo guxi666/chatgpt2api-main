@@ -535,7 +535,7 @@ function UsersContent() {
                           <Button type="button" variant="outline" className="h-8 rounded-lg px-3" onClick={() => { setAdjustMode("delta"); setAdjustValue("1.00"); setAdjustNote(""); setAdjustingUser(user); }} disabled={pending}>
                             调整余额
                           </Button>
-                          {user.provider !== "linuxdo" && Boolean(user.has_password) ? (
+                          {user.provider !== "linuxdo" ? (
                             <Button
                               type="button"
                               variant="outline"
@@ -546,7 +546,7 @@ function UsersContent() {
                               }}
                               disabled={pending}
                             >
-                              重置密码
+                              {user.has_password ? "重置密码" : "设置密码"}
                             </Button>
                           ) : null}
                           <Button type="button" variant="outline" className="h-8 rounded-lg px-3" onClick={() => void handleToggle(user)} disabled={pending}>

@@ -14,7 +14,7 @@ import (
 
 const (
 	passwordAccountsDocumentName = "auth_users.json"
-	passwordSessionName          = "登录会话"
+	passwordSessionName          = "鐧诲綍浼氳瘽"
 )
 
 var accountUsernameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{2,31}$`)
@@ -43,7 +43,7 @@ func (a PasswordAccount) DisplayName() string {
 	if username := util.Clean(a.Username); username != "" {
 		return username
 	}
-	return "用户"
+	return "鐢ㄦ埛"
 }
 
 func (a PasswordAccount) ManagedRoleID() string {
@@ -246,16 +246,16 @@ func (s *AuthService) CreatePasswordUser(username, password, name, roleID string
 func (s *AuthService) LoginPassword(username, password string) (*Identity, string, error) {
 	username, err := normalizeAccountIdentifier(username)
 	if err != nil {
-		return nil, "", authError("用户名或密码错误")
+		return nil, "", authError("鐢ㄦ埛鍚嶆垨瀵嗙爜閿欒")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	index, account, ok := passwordAccountIndexByUsernameLocked(s.accounts, username)
 	if !ok || !verifyAccountPassword(password, account.PasswordHash) {
-		return nil, "", authError("用户名或密码错误")
+		return nil, "", authError("鐢ㄦ埛鍚嶆垨瀵嗙爜閿欒")
 	}
 	if !account.Enabled {
-		return nil, "", authError("用户已被禁用")
+		return nil, "", authError("鐢ㄦ埛宸茶绂佺敤")
 	}
 	now := util.NowISO()
 	account.LastLoginAt = now
@@ -371,7 +371,7 @@ func (s *AuthService) ChangeProfilePassword(identity Identity, currentPassword, 
 			continue
 		}
 		if !verifyAccountPassword(currentPassword, account.PasswordHash) {
-			return authError("当前密码错误")
+			return authError("褰撳墠瀵嗙爜閿欒")
 		}
 		hash, err := hashAccountPassword(nextPassword)
 		if err != nil {
@@ -442,7 +442,7 @@ func (s *AuthService) ResetPasswordByEmail(email, nextPassword string) error {
 		}
 		return s.saveLocked()
 	}
-	return authError("该邮箱未注册")
+	return authError("璇ラ偖绠辨湭娉ㄥ唽")
 }
 
 func (s *AuthService) AdminResetPasswordByUserID(userID, nextPassword string) error {
@@ -470,7 +470,6 @@ func (s *AuthService) AdminResetPasswordByUserID(userID, nextPassword string) er
 		account.UpdatedAt = now
 		s.accounts[index] = account
 
-		// 管理员重置密码后，强制该账号重新登录。
 		nextItems := make([]map[string]any, 0, len(s.items))
 		for _, item := range s.items {
 			if util.Clean(item["kind"]) == AuthKindSession &&
@@ -487,7 +486,84 @@ func (s *AuthService) AdminResetPasswordByUserID(userID, nextPassword string) er
 		}
 		return s.saveLocked()
 	}
-	return authError("user not found")
+
+	user := managedAuthUserByIDLocked(s.items, s.roles, s.accounts, userID)
+	if user == nil {
+		return authError("user not found")
+	}
+	if normalizeAuthProvider(util.Clean(user["provider"])) == AuthProviderLinuxDo {
+		return authError("linuxdo user does not support password reset")
+	}
+
+	username, email := passwordAccountCredentialsFromManagedUser(user)
+	if username == "" {
+		username = s.nextGeneratedPasswordUsernameLocked()
+	}
+	if _, exists := passwordAccountByUsernameLocked(s.accounts, username); exists {
+		username = s.nextGeneratedPasswordUsernameLocked()
+	}
+	if email == "" {
+		email = firstNonEmptyLocalEmail(username)
+	}
+	roleID := managedAuthRoleID(user)
+	if roleID == "" {
+		roleID = DefaultManagedRoleID
+	}
+	if _, ok := managedRoleByIDLocked(s.roles, roleID); !ok {
+		roleID = DefaultManagedRoleID
+	}
+	hash, err := hashAccountPassword(nextPassword)
+	if err != nil {
+		return err
+	}
+	account := PasswordAccount{
+		ID:           userID,
+		Username:     username,
+		Email:        email,
+		Name:         normalizeAccountDisplayName(firstNonEmpty(util.Clean(user["owner_name"]), util.Clean(user["name"])), username),
+		PasswordHash: hash,
+		Role:         AuthRoleUser,
+		RoleID:       roleID,
+		Enabled:      util.ToBool(util.ValueOr(user["enabled"], true)),
+		CreatedAt:    firstNonEmpty(util.Clean(user["created_at"]), now),
+		UpdatedAt:    now,
+		LastLoginAt:  util.Clean(user["last_used_at"]),
+	}
+	s.accounts = append(s.accounts, account)
+	s.syncPasswordAccountsToItems()
+	if err := s.savePasswordAccountsLocked(); err != nil {
+		return err
+	}
+	return s.saveLocked()
+}
+
+func passwordAccountCredentialsFromManagedUser(user map[string]any) (string, string) {
+	email := strings.ToLower(strings.TrimSpace(util.Clean(user["email"])))
+	if normalizedEmail, err := normalizeAccountEmail(email); err == nil {
+		return normalizedEmail, normalizedEmail
+	}
+
+	username := strings.ToLower(strings.TrimSpace(util.Clean(user["username"])))
+	if normalizedUsername, err := normalizeAccountUsername(username); err == nil {
+		return normalizedUsername, firstNonEmptyLocalEmail(normalizedUsername)
+	}
+	if normalized, err := normalizeAccountIdentifier(username); err == nil {
+		if strings.Contains(normalized, "@") {
+			return normalized, normalized
+		}
+		return normalized, firstNonEmptyLocalEmail(normalized)
+	}
+	return "", ""
+}
+
+func (s *AuthService) nextGeneratedPasswordUsernameLocked() string {
+	for attempts := 0; attempts < 64; attempts += 1 {
+		candidate := "local_" + util.NewHex(10)
+		if _, exists := passwordAccountByUsernameLocked(s.accounts, candidate); !exists {
+			return candidate
+		}
+	}
+	return "local_" + util.NewHex(12)
 }
 
 func (s *AuthService) issuePasswordSessionLocked(account PasswordAccount, now string) (map[string]any, string) {
