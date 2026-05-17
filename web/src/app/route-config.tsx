@@ -12,6 +12,7 @@ import ProfilePage from "@/app/profile/page";
 import RBACPage from "@/app/rbac/page";
 import RegisterPage from "@/app/register/page";
 import SettingsPage from "@/app/settings/page";
+import SubscriptionPage from "@/app/subscription/page";
 import UsersPage from "@/app/users/page";
 import WalletPage from "@/app/wallet/page";
 
@@ -26,12 +27,25 @@ export const appRoutes: AppRouteConfig[] = [
   { path: "/login", element: <LoginPage /> },
   { path: "/accounts", element: <AccountsPage />, requiredPath: "/accounts" },
   { path: "/register", element: <RegisterPage />, requiredPath: "/register" },
-  { path: "/image-manager", element: <ImageManagerPage />, requiredPath: "/image-manager" },
+  {
+    path: "/image-manager",
+    element: <ImageManagerPage />,
+    requiredPath: "/image-manager",
+  },
   { path: "/users", element: <UsersPage />, requiredPath: "/users" },
   { path: "/profile", element: <ProfilePage />, requiredPath: "/profile" },
   { path: "/wallet", element: <WalletPage />, requiredPath: "/wallet" },
+  {
+    path: "/subscription",
+    element: <SubscriptionPage />,
+    requiredPath: "/subscription",
+  },
   { path: "/agency", element: <AgencyPage />, requiredPath: "/agency" },
-  { path: "/agency-commission", element: <AgencyCommissionPage />, requiredPath: "/agency-commission" },
+  {
+    path: "/agency-commission",
+    element: <AgencyCommissionPage />,
+    requiredPath: "/agency-commission",
+  },
   { path: "/rbac", element: <RBACPage />, requiredPath: "/rbac" },
   { path: "/logs", element: <LogsPage />, requiredPath: "/logs" },
   { path: "/settings", element: <SettingsPage />, requiredPath: "/settings" },

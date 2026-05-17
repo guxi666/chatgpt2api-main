@@ -42,7 +42,9 @@ export type PageSizeOption = (typeof PAGE_SIZE_OPTIONS)[number];
 
 function centsToYuanInput(value: unknown, fallbackCents: number) {
   const cents = Number(value || fallbackCents);
-  const safe = Number.isFinite(cents) ? Math.max(0, cents) : Math.max(0, fallbackCents);
+  const safe = Number.isFinite(cents)
+    ? Math.max(0, cents)
+    : Math.max(0, fallbackCents);
   return (safe / 100).toFixed(2);
 }
 
@@ -60,88 +62,283 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     positionX: Number(config.login_page_image_position_x),
     positionY: Number(config.login_page_image_position_y),
   });
-  const registrationBonusImageTimes = Number(config.registration_bonus_image_times);
+  const registrationBonusImageTimes = Number(
+    config.registration_bonus_image_times,
+  );
   return {
     ...config,
-    refresh_account_interval_minute: Number(config.refresh_account_interval_minute || 5),
+    refresh_account_interval_minute: Number(
+      config.refresh_account_interval_minute || 5,
+    ),
     image_concurrent_limit: Number(config.image_concurrent_limit || 4),
     image_single_count_limit: Number(config.image_single_count_limit || 10),
-    image_task_timeout_seconds: Number(config.image_task_timeout_seconds || 300),
-    user_default_concurrent_limit: Number(config.user_default_concurrent_limit || 0),
+    image_task_timeout_seconds: Number(
+      config.image_task_timeout_seconds || 300,
+    ),
+    user_default_concurrent_limit: Number(
+      config.user_default_concurrent_limit || 0,
+    ),
     user_default_rpm_limit: Number(config.user_default_rpm_limit || 0),
     image_retention_days: Number(config.image_retention_days || 30),
     log_retention_days: Number(config.log_retention_days || 7),
     auto_remove_invalid_accounts: Boolean(config.auto_remove_invalid_accounts),
-    auto_remove_rate_limited_accounts: Boolean(config.auto_remove_rate_limited_accounts),
+    auto_remove_rate_limited_accounts: Boolean(
+      config.auto_remove_rate_limited_accounts,
+    ),
     log_levels: Array.isArray(config.log_levels) ? config.log_levels : [],
     proxy: typeof config.proxy === "string" ? config.proxy : "",
     base_url: typeof config.base_url === "string" ? config.base_url : "",
-    brand_top_left_name: typeof config.brand_top_left_name === "string" ? config.brand_top_left_name : "chatgpt2api",
-    brand_site_name: typeof config.brand_site_name === "string" ? config.brand_site_name : "chatgpt2api",
+    brand_top_left_name:
+      typeof config.brand_top_left_name === "string"
+        ? config.brand_top_left_name
+        : "chatgpt2api",
+    brand_site_name:
+      typeof config.brand_site_name === "string"
+        ? config.brand_site_name
+        : "chatgpt2api",
     brand_top_left_logo_url:
-      typeof config.brand_top_left_logo_url === "string" ? config.brand_top_left_logo_url : "/logo-mark.svg",
+      typeof config.brand_top_left_logo_url === "string"
+        ? config.brand_top_left_logo_url
+        : "/logo-mark.svg",
     brand_site_logo_url:
-      typeof config.brand_site_logo_url === "string" ? config.brand_site_logo_url : "/logo-mark.svg",
+      typeof config.brand_site_logo_url === "string"
+        ? config.brand_site_logo_url
+        : "/logo-mark.svg",
     registration_enabled: Boolean(config.registration_enabled),
     registration_allowed_email_domains:
       typeof config.registration_allowed_email_domains === "string"
         ? config.registration_allowed_email_domains
         : "qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,icloud.com,yahoo.com,foxmail.com,sina.com",
-    registration_bonus_image_times: Number.isFinite(registrationBonusImageTimes) ? registrationBonusImageTimes : 20,
-    cf_turnstile_site_key: typeof config.cf_turnstile_site_key === "string" ? config.cf_turnstile_site_key : "",
+    registration_bonus_image_times: Number.isFinite(registrationBonusImageTimes)
+      ? registrationBonusImageTimes
+      : 20,
+    cf_turnstile_site_key:
+      typeof config.cf_turnstile_site_key === "string"
+        ? config.cf_turnstile_site_key
+        : "",
     cf_turnstile_secret_key: "",
-    cf_turnstile_secret_key_configured: Boolean(config.cf_turnstile_secret_key_configured),
+    cf_turnstile_secret_key_configured: Boolean(
+      config.cf_turnstile_secret_key_configured,
+    ),
     email_smtp_enabled: Boolean(config.email_smtp_enabled),
-    email_smtp_host: typeof config.email_smtp_host === "string" ? config.email_smtp_host : "smtp.qq.com",
+    email_smtp_host:
+      typeof config.email_smtp_host === "string"
+        ? config.email_smtp_host
+        : "smtp.qq.com",
     email_smtp_port: Number(config.email_smtp_port || 465),
     email_smtp_use_ssl: Boolean(config.email_smtp_use_ssl ?? true),
-    email_smtp_username: typeof config.email_smtp_username === "string" ? config.email_smtp_username : "",
+    email_smtp_username:
+      typeof config.email_smtp_username === "string"
+        ? config.email_smtp_username
+        : "",
     email_smtp_auth_code: "",
-    email_smtp_auth_code_configured: Boolean(config.email_smtp_auth_code_configured),
-    email_smtp_from_email: typeof config.email_smtp_from_email === "string" ? config.email_smtp_from_email : "",
-    email_smtp_from_name: typeof config.email_smtp_from_name === "string" ? config.email_smtp_from_name : "chatgpt2api",
+    email_smtp_auth_code_configured: Boolean(
+      config.email_smtp_auth_code_configured,
+    ),
+    email_smtp_from_email:
+      typeof config.email_smtp_from_email === "string"
+        ? config.email_smtp_from_email
+        : "",
+    email_smtp_from_name:
+      typeof config.email_smtp_from_name === "string"
+        ? config.email_smtp_from_name
+        : "chatgpt2api",
     image_price_cents: Number(config.image_price_cents || 8),
-    image_price_1k_cents: centsToYuanInput(config.image_price_1k_cents || config.image_price_cents || 8, 8),
-    image_price_2k_cents: centsToYuanInput(config.image_price_2k_cents || 16, 16),
-    image_price_4k_cents: centsToYuanInput(config.image_price_4k_cents || 32, 32),
+    image_price_1k_cents: centsToYuanInput(
+      config.image_price_1k_cents || config.image_price_cents || 8,
+      8,
+    ),
+    image_price_2k_cents: centsToYuanInput(
+      config.image_price_2k_cents || 16,
+      16,
+    ),
+    image_price_4k_cents: centsToYuanInput(
+      config.image_price_4k_cents || 32,
+      32,
+    ),
     agency_tier_basic_cents: Number(config.agency_tier_basic_cents || 19900),
     agency_tier_pro_cents: Number(config.agency_tier_pro_cents || 49900),
-    agency_tier_premium_cents: Number(config.agency_tier_premium_cents || 99900),
+    agency_tier_premium_cents: Number(
+      config.agency_tier_premium_cents || 99900,
+    ),
+    subscription_heading:
+      typeof config.subscription_heading === "string"
+        ? config.subscription_heading
+        : "选择适合你的订阅套餐",
+    subscription_subheading:
+      typeof config.subscription_subheading === "string"
+        ? config.subscription_subheading
+        : "在有效期内无限生图，不扣余额",
+    subscription_safety_text:
+      typeof config.subscription_safety_text === "string"
+        ? config.subscription_safety_text
+        : "安全支付保障·随时可取消·无隐藏费用",
+    subscription_agent_hint:
+      typeof config.subscription_agent_hint === "string"
+        ? config.subscription_agent_hint
+        : "购买代理充值更优惠",
+    subscription_monthly_name:
+      typeof config.subscription_monthly_name === "string"
+        ? config.subscription_monthly_name
+        : "包月套餐",
+    subscription_monthly_desc:
+      typeof config.subscription_monthly_desc === "string"
+        ? config.subscription_monthly_desc
+        : "",
+    subscription_monthly_badge:
+      typeof config.subscription_monthly_badge === "string"
+        ? config.subscription_monthly_badge
+        : "",
+    subscription_monthly_price_cents: Number(
+      config.subscription_monthly_price_cents || 2990,
+    ),
+    subscription_monthly_price_note:
+      typeof config.subscription_monthly_price_note === "string"
+        ? config.subscription_monthly_price_note
+        : "",
+    subscription_monthly_features:
+      typeof config.subscription_monthly_features === "string"
+        ? config.subscription_monthly_features
+        : "无限生图\n高峰稳定排队\n专属客服支持",
+    subscription_quarterly_name:
+      typeof config.subscription_quarterly_name === "string"
+        ? config.subscription_quarterly_name
+        : "包季套餐",
+    subscription_quarterly_desc:
+      typeof config.subscription_quarterly_desc === "string"
+        ? config.subscription_quarterly_desc
+        : "",
+    subscription_quarterly_badge:
+      typeof config.subscription_quarterly_badge === "string"
+        ? config.subscription_quarterly_badge
+        : "推荐",
+    subscription_quarterly_price_cents: Number(
+      config.subscription_quarterly_price_cents || 7990,
+    ),
+    subscription_quarterly_price_note:
+      typeof config.subscription_quarterly_price_note === "string"
+        ? config.subscription_quarterly_price_note
+        : "",
+    subscription_quarterly_features:
+      typeof config.subscription_quarterly_features === "string"
+        ? config.subscription_quarterly_features
+        : "无限生图\n优先出图通道\n专属客服支持",
+    subscription_yearly_name:
+      typeof config.subscription_yearly_name === "string"
+        ? config.subscription_yearly_name
+        : "包年套餐",
+    subscription_yearly_desc:
+      typeof config.subscription_yearly_desc === "string"
+        ? config.subscription_yearly_desc
+        : "",
+    subscription_yearly_badge:
+      typeof config.subscription_yearly_badge === "string"
+        ? config.subscription_yearly_badge
+        : "最划算",
+    subscription_yearly_price_cents: Number(
+      config.subscription_yearly_price_cents || 27990,
+    ),
+    subscription_yearly_price_note:
+      typeof config.subscription_yearly_price_note === "string"
+        ? config.subscription_yearly_price_note
+        : "",
+    subscription_yearly_features:
+      typeof config.subscription_yearly_features === "string"
+        ? config.subscription_yearly_features
+        : "无限生图\n全年优先保障\n专属客服支持",
     yipay_enabled: Boolean(config.yipay_enabled),
     yipay_pid: typeof config.yipay_pid === "string" ? config.yipay_pid : "",
     yipay_key: "",
     yipay_key_configured: Boolean(config.yipay_key_configured),
-    yipay_submit_url: typeof config.yipay_submit_url === "string" ? config.yipay_submit_url : "",
-    yipay_notify_url: typeof config.yipay_notify_url === "string" ? config.yipay_notify_url : "",
-    yipay_return_url: typeof config.yipay_return_url === "string" ? config.yipay_return_url : "",
-    yipay_site_name: typeof config.yipay_site_name === "string" ? config.yipay_site_name : "chatgpt2api",
+    yipay_submit_url:
+      typeof config.yipay_submit_url === "string"
+        ? config.yipay_submit_url
+        : "",
+    yipay_notify_url:
+      typeof config.yipay_notify_url === "string"
+        ? config.yipay_notify_url
+        : "",
+    yipay_return_url:
+      typeof config.yipay_return_url === "string"
+        ? config.yipay_return_url
+        : "",
+    yipay_site_name:
+      typeof config.yipay_site_name === "string"
+        ? config.yipay_site_name
+        : "chatgpt2api",
     paypal_enabled: Boolean(config.paypal_enabled),
-    paypal_checkout_url: typeof config.paypal_checkout_url === "string" ? config.paypal_checkout_url : "",
+    paypal_checkout_url:
+      typeof config.paypal_checkout_url === "string"
+        ? config.paypal_checkout_url
+        : "",
     usdt_enabled: Boolean(config.usdt_enabled),
-    usdt_network: typeof config.usdt_network === "string" ? config.usdt_network : "TRC20",
-    usdt_address: typeof config.usdt_address === "string" ? config.usdt_address : "",
-    usdt_payment_url: typeof config.usdt_payment_url === "string" ? config.usdt_payment_url : "",
+    usdt_network:
+      typeof config.usdt_network === "string" ? config.usdt_network : "TRC20",
+    usdt_address:
+      typeof config.usdt_address === "string" ? config.usdt_address : "",
+    usdt_payment_url:
+      typeof config.usdt_payment_url === "string"
+        ? config.usdt_payment_url
+        : "",
     image_r2_enabled: Boolean(config.image_r2_enabled),
-    image_r2_endpoint: typeof config.image_r2_endpoint === "string" ? config.image_r2_endpoint : "",
-    image_r2_bucket: typeof config.image_r2_bucket === "string" ? config.image_r2_bucket : "",
-    image_r2_region: typeof config.image_r2_region === "string" ? config.image_r2_region : "auto",
-    image_r2_access_key_id: typeof config.image_r2_access_key_id === "string" ? config.image_r2_access_key_id : "",
+    image_r2_endpoint:
+      typeof config.image_r2_endpoint === "string"
+        ? config.image_r2_endpoint
+        : "",
+    image_r2_bucket:
+      typeof config.image_r2_bucket === "string" ? config.image_r2_bucket : "",
+    image_r2_region:
+      typeof config.image_r2_region === "string"
+        ? config.image_r2_region
+        : "auto",
+    image_r2_access_key_id:
+      typeof config.image_r2_access_key_id === "string"
+        ? config.image_r2_access_key_id
+        : "",
     image_r2_secret_access_key: "",
-    image_r2_secret_access_key_configured: Boolean(config.image_r2_secret_access_key_configured),
-    image_r2_public_base_url: typeof config.image_r2_public_base_url === "string" ? config.image_r2_public_base_url : "",
-    image_r2_prefix: typeof config.image_r2_prefix === "string" ? config.image_r2_prefix : "images",
+    image_r2_secret_access_key_configured: Boolean(
+      config.image_r2_secret_access_key_configured,
+    ),
+    image_r2_public_base_url:
+      typeof config.image_r2_public_base_url === "string"
+        ? config.image_r2_public_base_url
+        : "",
+    image_r2_prefix:
+      typeof config.image_r2_prefix === "string"
+        ? config.image_r2_prefix
+        : "images",
     linuxdo_enabled: Boolean(config.linuxdo_enabled),
-    linuxdo_client_id: typeof config.linuxdo_client_id === "string" ? config.linuxdo_client_id : "",
+    linuxdo_client_id:
+      typeof config.linuxdo_client_id === "string"
+        ? config.linuxdo_client_id
+        : "",
     linuxdo_client_secret: "",
-    linuxdo_client_secret_configured: Boolean(config.linuxdo_client_secret_configured),
-    linuxdo_redirect_url: typeof config.linuxdo_redirect_url === "string" ? config.linuxdo_redirect_url : "",
+    linuxdo_client_secret_configured: Boolean(
+      config.linuxdo_client_secret_configured,
+    ),
+    linuxdo_redirect_url:
+      typeof config.linuxdo_redirect_url === "string"
+        ? config.linuxdo_redirect_url
+        : "",
     linuxdo_frontend_redirect_url:
-      typeof config.linuxdo_frontend_redirect_url === "string" ? config.linuxdo_frontend_redirect_url : "/auth/linuxdo/callback",
-    update_repo: typeof config.update_repo === "string" ? config.update_repo : "ZyphrZero/chatgpt2api",
+      typeof config.linuxdo_frontend_redirect_url === "string"
+        ? config.linuxdo_frontend_redirect_url
+        : "/auth/linuxdo/callback",
+    update_repo:
+      typeof config.update_repo === "string"
+        ? config.update_repo
+        : "ZyphrZero/chatgpt2api",
     update_github_token: "",
-    update_github_token_configured: Boolean(config.update_github_token_configured),
-    login_page_image_url: typeof config.login_page_image_url === "string" ? config.login_page_image_url : "",
-    login_page_image_mode: normalizeLoginPageImageMode(config.login_page_image_mode),
+    update_github_token_configured: Boolean(
+      config.update_github_token_configured,
+    ),
+    login_page_image_url:
+      typeof config.login_page_image_url === "string"
+        ? config.login_page_image_url
+        : "",
+    login_page_image_mode: normalizeLoginPageImageMode(
+      config.login_page_image_mode,
+    ),
     login_page_image_zoom: loginImageTransform.zoom,
     login_page_image_position_x: loginImageTransform.positionX,
     login_page_image_position_y: loginImageTransform.positionY,
@@ -258,11 +455,22 @@ type SettingsStore = {
   setLinuxDoFrontendRedirectUrl: (value: string) => void;
   setUpdateRepo: (value: string) => void;
   setUpdateGitHubToken: (value: string) => void;
+  setConfigField: <K extends keyof SettingsConfig>(
+    key: K,
+    value: SettingsConfig[K],
+  ) => void;
   setLoginPageImageUrl: (value: string) => void;
   setLoginPageImageMode: (value: LoginPageImageMode) => void;
-  setLoginPageImageTransform: (transform: { zoom: number; positionX: number; positionY: number }) => void;
+  setLoginPageImageTransform: (transform: {
+    zoom: number;
+    positionX: number;
+    positionY: number;
+  }) => void;
   restoreDefaultLoginPageImage: () => void;
-  saveLoginPageImage: (options: { file?: File | null; action: "keep" | "replace" | "remove" }) => Promise<boolean>;
+  saveLoginPageImage: (options: {
+    file?: File | null;
+    action: "keep" | "replace" | "remove";
+  }) => Promise<boolean>;
   loadLogGovernance: (silent?: boolean) => Promise<void>;
   cleanupLogsByRetention: () => Promise<void>;
 
@@ -275,9 +483,15 @@ type SettingsStore = {
   setRegisterTargetQuota: (value: string) => void;
   setRegisterTargetAvailable: (value: string) => void;
   setRegisterCheckInterval: (value: string) => void;
-  setRegisterMailField: (key: "request_timeout" | "wait_timeout" | "wait_interval", value: string) => void;
+  setRegisterMailField: (
+    key: "request_timeout" | "wait_timeout" | "wait_interval",
+    value: string,
+  ) => void;
   addRegisterProvider: () => void;
-  updateRegisterProvider: (index: number, updates: Record<string, unknown>) => void;
+  updateRegisterProvider: (
+    index: number,
+    updates: Record<string, unknown>,
+  ) => void;
   deleteRegisterProvider: (index: number) => void;
   saveRegister: () => Promise<void>;
   toggleRegister: () => Promise<void>;
@@ -340,7 +554,11 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   isStartingImport: false,
 
   initialize: async () => {
-    await Promise.allSettled([get().loadConfig(), get().loadPools(), get().loadLogGovernance()]);
+    await Promise.allSettled([
+      get().loadConfig(),
+      get().loadPools(),
+      get().loadLogGovernance(),
+    ]);
   },
 
   loadConfig: async () => {
@@ -365,34 +583,79 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
     set({ isSavingConfig: true });
     try {
-      const linuxDoClientSecret = String(config.linuxdo_client_secret || "").trim();
+      const linuxDoClientSecret = String(
+        config.linuxdo_client_secret || "",
+      ).trim();
       const updateGitHubToken = String(config.update_github_token || "").trim();
-      const cfTurnstileSecretKey = String(config.cf_turnstile_secret_key || "").trim();
-      const emailSMTPAuthCode = String(config.email_smtp_auth_code || "").trim();
+      const cfTurnstileSecretKey = String(
+        config.cf_turnstile_secret_key || "",
+      ).trim();
+      const emailSMTPAuthCode = String(
+        config.email_smtp_auth_code || "",
+      ).trim();
       const yiPayKey = String(config.yipay_key || "").trim();
-      const imageR2SecretAccessKey = String(config.image_r2_secret_access_key || "").trim();
+      const imageR2SecretAccessKey = String(
+        config.image_r2_secret_access_key || "",
+      ).trim();
       const payload: SettingsConfig = {
         ...config,
-        refresh_account_interval_minute: Math.max(1, Number(config.refresh_account_interval_minute) || 1),
-        image_concurrent_limit: Math.max(1, Number(config.image_concurrent_limit) || 4),
-        image_single_count_limit: Math.min(10, Math.max(1, Number(config.image_single_count_limit) || 10)),
-        image_task_timeout_seconds: Math.min(3600, Math.max(30, Number(config.image_task_timeout_seconds) || 300)),
-        user_default_concurrent_limit: Math.max(0, Number(config.user_default_concurrent_limit) || 0),
-        user_default_rpm_limit: Math.max(0, Number(config.user_default_rpm_limit) || 0),
-        image_retention_days: Math.max(1, Number(config.image_retention_days) || 30),
-        log_retention_days: Math.min(3650, Math.max(1, Number(config.log_retention_days) || 7)),
-        auto_remove_invalid_accounts: Boolean(config.auto_remove_invalid_accounts),
-        auto_remove_rate_limited_accounts: Boolean(config.auto_remove_rate_limited_accounts),
+        refresh_account_interval_minute: Math.max(
+          1,
+          Number(config.refresh_account_interval_minute) || 1,
+        ),
+        image_concurrent_limit: Math.max(
+          1,
+          Number(config.image_concurrent_limit) || 4,
+        ),
+        image_single_count_limit: Math.min(
+          10,
+          Math.max(1, Number(config.image_single_count_limit) || 10),
+        ),
+        image_task_timeout_seconds: Math.min(
+          3600,
+          Math.max(30, Number(config.image_task_timeout_seconds) || 300),
+        ),
+        user_default_concurrent_limit: Math.max(
+          0,
+          Number(config.user_default_concurrent_limit) || 0,
+        ),
+        user_default_rpm_limit: Math.max(
+          0,
+          Number(config.user_default_rpm_limit) || 0,
+        ),
+        image_retention_days: Math.max(
+          1,
+          Number(config.image_retention_days) || 30,
+        ),
+        log_retention_days: Math.min(
+          3650,
+          Math.max(1, Number(config.log_retention_days) || 7),
+        ),
+        auto_remove_invalid_accounts: Boolean(
+          config.auto_remove_invalid_accounts,
+        ),
+        auto_remove_rate_limited_accounts: Boolean(
+          config.auto_remove_rate_limited_accounts,
+        ),
         proxy: config.proxy.trim(),
         base_url: String(config.base_url || "").trim(),
         brand_top_left_name: String(config.brand_top_left_name || "").trim(),
         brand_site_name: String(config.brand_site_name || "").trim(),
-        brand_top_left_logo_url: String(config.brand_top_left_logo_url || "").trim(),
+        brand_top_left_logo_url: String(
+          config.brand_top_left_logo_url || "",
+        ).trim(),
         brand_site_logo_url: String(config.brand_site_logo_url || "").trim(),
         registration_enabled: Boolean(config.registration_enabled),
-        registration_allowed_email_domains: String(config.registration_allowed_email_domains || "").trim(),
-        registration_bonus_image_times: Math.max(0, Number(config.registration_bonus_image_times) || 0),
-        cf_turnstile_site_key: String(config.cf_turnstile_site_key || "").trim(),
+        registration_allowed_email_domains: String(
+          config.registration_allowed_email_domains || "",
+        ).trim(),
+        registration_bonus_image_times: Math.max(
+          0,
+          Number(config.registration_bonus_image_times) || 0,
+        ),
+        cf_turnstile_site_key: String(
+          config.cf_turnstile_site_key || "",
+        ).trim(),
         cf_turnstile_secret_key: cfTurnstileSecretKey,
         email_smtp_enabled: Boolean(config.email_smtp_enabled),
         email_smtp_host: String(config.email_smtp_host || "").trim(),
@@ -400,15 +663,96 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         email_smtp_use_ssl: Boolean(config.email_smtp_use_ssl),
         email_smtp_username: String(config.email_smtp_username || "").trim(),
         email_smtp_auth_code: emailSMTPAuthCode,
-        email_smtp_from_email: String(config.email_smtp_from_email || "").trim(),
+        email_smtp_from_email: String(
+          config.email_smtp_from_email || "",
+        ).trim(),
         email_smtp_from_name: String(config.email_smtp_from_name || "").trim(),
         image_price_cents: Math.max(1, Number(config.image_price_cents) || 8),
-        image_price_1k_cents: yuanInputToCents(config.image_price_1k_cents, Number(config.image_price_cents) || 8),
+        image_price_1k_cents: yuanInputToCents(
+          config.image_price_1k_cents,
+          Number(config.image_price_cents) || 8,
+        ),
         image_price_2k_cents: yuanInputToCents(config.image_price_2k_cents, 16),
         image_price_4k_cents: yuanInputToCents(config.image_price_4k_cents, 32),
-        agency_tier_basic_cents: Math.max(0, Number(config.agency_tier_basic_cents) || 19900),
-        agency_tier_pro_cents: Math.max(0, Number(config.agency_tier_pro_cents) || 49900),
-        agency_tier_premium_cents: Math.max(0, Number(config.agency_tier_premium_cents) || 99900),
+        agency_tier_basic_cents: Math.max(
+          0,
+          Number(config.agency_tier_basic_cents) || 19900,
+        ),
+        agency_tier_pro_cents: Math.max(
+          0,
+          Number(config.agency_tier_pro_cents) || 49900,
+        ),
+        agency_tier_premium_cents: Math.max(
+          0,
+          Number(config.agency_tier_premium_cents) || 99900,
+        ),
+        subscription_heading: String(config.subscription_heading || "").trim(),
+        subscription_subheading: String(
+          config.subscription_subheading || "",
+        ).trim(),
+        subscription_safety_text: String(
+          config.subscription_safety_text || "",
+        ).trim(),
+        subscription_agent_hint: String(
+          config.subscription_agent_hint || "",
+        ).trim(),
+        subscription_monthly_name: String(
+          config.subscription_monthly_name || "",
+        ).trim(),
+        subscription_monthly_desc: String(
+          config.subscription_monthly_desc || "",
+        ).trim(),
+        subscription_monthly_badge: String(
+          config.subscription_monthly_badge || "",
+        ).trim(),
+        subscription_monthly_price_cents: Math.max(
+          0,
+          Number(config.subscription_monthly_price_cents) || 0,
+        ),
+        subscription_monthly_price_note: String(
+          config.subscription_monthly_price_note || "",
+        ).trim(),
+        subscription_monthly_features: String(
+          config.subscription_monthly_features || "",
+        ).trim(),
+        subscription_quarterly_name: String(
+          config.subscription_quarterly_name || "",
+        ).trim(),
+        subscription_quarterly_desc: String(
+          config.subscription_quarterly_desc || "",
+        ).trim(),
+        subscription_quarterly_badge: String(
+          config.subscription_quarterly_badge || "",
+        ).trim(),
+        subscription_quarterly_price_cents: Math.max(
+          0,
+          Number(config.subscription_quarterly_price_cents) || 0,
+        ),
+        subscription_quarterly_price_note: String(
+          config.subscription_quarterly_price_note || "",
+        ).trim(),
+        subscription_quarterly_features: String(
+          config.subscription_quarterly_features || "",
+        ).trim(),
+        subscription_yearly_name: String(
+          config.subscription_yearly_name || "",
+        ).trim(),
+        subscription_yearly_desc: String(
+          config.subscription_yearly_desc || "",
+        ).trim(),
+        subscription_yearly_badge: String(
+          config.subscription_yearly_badge || "",
+        ).trim(),
+        subscription_yearly_price_cents: Math.max(
+          0,
+          Number(config.subscription_yearly_price_cents) || 0,
+        ),
+        subscription_yearly_price_note: String(
+          config.subscription_yearly_price_note || "",
+        ).trim(),
+        subscription_yearly_features: String(
+          config.subscription_yearly_features || "",
+        ).trim(),
         yipay_enabled: Boolean(config.yipay_enabled),
         yipay_pid: String(config.yipay_pid || "").trim(),
         yipay_key: yiPayKey,
@@ -426,16 +770,24 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         image_r2_endpoint: String(config.image_r2_endpoint || "").trim(),
         image_r2_bucket: String(config.image_r2_bucket || "").trim(),
         image_r2_region: String(config.image_r2_region || "auto").trim(),
-        image_r2_access_key_id: String(config.image_r2_access_key_id || "").trim(),
+        image_r2_access_key_id: String(
+          config.image_r2_access_key_id || "",
+        ).trim(),
         image_r2_secret_access_key: imageR2SecretAccessKey,
-        image_r2_public_base_url: String(config.image_r2_public_base_url || "").trim(),
+        image_r2_public_base_url: String(
+          config.image_r2_public_base_url || "",
+        ).trim(),
         image_r2_prefix: String(config.image_r2_prefix || "images").trim(),
         linuxdo_enabled: Boolean(config.linuxdo_enabled),
         linuxdo_client_id: String(config.linuxdo_client_id || "").trim(),
         linuxdo_client_secret: linuxDoClientSecret,
         linuxdo_redirect_url: String(config.linuxdo_redirect_url || "").trim(),
-        linuxdo_frontend_redirect_url: String(config.linuxdo_frontend_redirect_url || "").trim(),
-        update_repo: String(config.update_repo ?? "ZyphrZero/chatgpt2api").trim(),
+        linuxdo_frontend_redirect_url: String(
+          config.linuxdo_frontend_redirect_url || "",
+        ).trim(),
+        update_repo: String(
+          config.update_repo ?? "ZyphrZero/chatgpt2api",
+        ).trim(),
         update_github_token: updateGitHubToken,
       };
       if (!linuxDoClientSecret) {
@@ -469,8 +821,12 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       dispatchAppMetaUpdated({
         app_title: String(nextConfig.brand_top_left_name || "chatgpt2api"),
         project_name: String(nextConfig.brand_site_name || "chatgpt2api"),
-        top_left_logo_url: String(nextConfig.brand_top_left_logo_url || "/logo-mark.svg"),
-        site_logo_url: String(nextConfig.brand_site_logo_url || "/logo-mark.svg"),
+        top_left_logo_url: String(
+          nextConfig.brand_top_left_logo_url || "/logo-mark.svg",
+        ),
+        site_logo_url: String(
+          nextConfig.brand_site_logo_url || "/logo-mark.svg",
+        ),
       });
       toast.success("配置已保存");
     } catch (error) {
@@ -495,39 +851,80 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   setImageRetentionDays: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_retention_days: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_retention_days: value } }
+        : {},
+    );
   },
 
   setLogRetentionDays: (value) => {
-    set((state) => state.config ? { config: { ...state.config, log_retention_days: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, log_retention_days: value } }
+        : {},
+    );
   },
 
   setImageConcurrentLimit: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_concurrent_limit: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_concurrent_limit: value } }
+        : {},
+    );
   },
 
   setImageSingleCountLimit: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_single_count_limit: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_single_count_limit: value } }
+        : {},
+    );
   },
 
   setImageTaskTimeoutSeconds: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_task_timeout_seconds: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_task_timeout_seconds: value } }
+        : {},
+    );
   },
 
   setUserDefaultConcurrentLimit: (value) => {
-    set((state) => state.config ? { config: { ...state.config, user_default_concurrent_limit: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, user_default_concurrent_limit: value } }
+        : {},
+    );
   },
 
   setUserDefaultRpmLimit: (value) => {
-    set((state) => state.config ? { config: { ...state.config, user_default_rpm_limit: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, user_default_rpm_limit: value } }
+        : {},
+    );
   },
 
   setAutoRemoveInvalidAccounts: (value) => {
-    set((state) => state.config ? { config: { ...state.config, auto_remove_invalid_accounts: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, auto_remove_invalid_accounts: value } }
+        : {},
+    );
   },
 
   setAutoRemoveRateLimitedAccounts: (value) => {
-    set((state) => state.config ? { config: { ...state.config, auto_remove_rate_limited_accounts: value } } : {});
+    set((state) =>
+      state.config
+        ? {
+            config: {
+              ...state.config,
+              auto_remove_rate_limited_accounts: value,
+            },
+          }
+        : {},
+    );
   },
 
   setLogLevel: (level, enabled) => {
@@ -569,203 +966,400 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   setBrandTopLeftName: (value) => {
-    set((state) => state.config ? { config: { ...state.config, brand_top_left_name: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, brand_top_left_name: value } }
+        : {},
+    );
   },
 
   setBrandSiteName: (value) => {
-    set((state) => state.config ? { config: { ...state.config, brand_site_name: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, brand_site_name: value } }
+        : {},
+    );
   },
 
   setBrandTopLeftLogoURL: (value) => {
-    set((state) => state.config ? { config: { ...state.config, brand_top_left_logo_url: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, brand_top_left_logo_url: value } }
+        : {},
+    );
   },
 
   setBrandSiteLogoURL: (value) => {
-    set((state) => state.config ? { config: { ...state.config, brand_site_logo_url: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, brand_site_logo_url: value } }
+        : {},
+    );
   },
 
   setRegistrationEnabled: (value) => {
-    set((state) => state.config ? { config: { ...state.config, registration_enabled: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, registration_enabled: value } }
+        : {},
+    );
   },
 
   setRegistrationAllowedEmailDomains: (value) => {
-    set((state) => state.config ? { config: { ...state.config, registration_allowed_email_domains: value } } : {});
+    set((state) =>
+      state.config
+        ? {
+            config: {
+              ...state.config,
+              registration_allowed_email_domains: value,
+            },
+          }
+        : {},
+    );
   },
 
   setRegistrationBonusImageTimes: (value) => {
-    set((state) => state.config ? { config: { ...state.config, registration_bonus_image_times: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, registration_bonus_image_times: value } }
+        : {},
+    );
   },
 
   setCFTurnstileSiteKey: (value) => {
-    set((state) => state.config ? { config: { ...state.config, cf_turnstile_site_key: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, cf_turnstile_site_key: value } }
+        : {},
+    );
   },
 
   setCFTurnstileSecretKey: (value) => {
-    set((state) => state.config ? { config: { ...state.config, cf_turnstile_secret_key: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, cf_turnstile_secret_key: value } }
+        : {},
+    );
   },
 
   setEmailSMTPEnabled: (value) => {
-    set((state) => state.config ? { config: { ...state.config, email_smtp_enabled: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, email_smtp_enabled: value } }
+        : {},
+    );
   },
 
   setEmailSMTPHost: (value) => {
-    set((state) => state.config ? { config: { ...state.config, email_smtp_host: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, email_smtp_host: value } }
+        : {},
+    );
   },
 
   setEmailSMTPPort: (value) => {
-    set((state) => state.config ? { config: { ...state.config, email_smtp_port: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, email_smtp_port: value } }
+        : {},
+    );
   },
 
   setEmailSMTPUseSSL: (value) => {
-    set((state) => state.config ? { config: { ...state.config, email_smtp_use_ssl: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, email_smtp_use_ssl: value } }
+        : {},
+    );
   },
 
   setEmailSMTPUsername: (value) => {
-    set((state) => state.config ? { config: { ...state.config, email_smtp_username: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, email_smtp_username: value } }
+        : {},
+    );
   },
 
   setEmailSMTPAuthCode: (value) => {
-    set((state) => state.config ? { config: { ...state.config, email_smtp_auth_code: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, email_smtp_auth_code: value } }
+        : {},
+    );
   },
 
   setEmailSMTPFromEmail: (value) => {
-    set((state) => state.config ? { config: { ...state.config, email_smtp_from_email: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, email_smtp_from_email: value } }
+        : {},
+    );
   },
 
   setEmailSMTPFromName: (value) => {
-    set((state) => state.config ? { config: { ...state.config, email_smtp_from_name: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, email_smtp_from_name: value } }
+        : {},
+    );
   },
 
   setImagePrice1K: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_price_1k_cents: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_price_1k_cents: value } }
+        : {},
+    );
   },
 
   setImagePrice2K: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_price_2k_cents: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_price_2k_cents: value } }
+        : {},
+    );
   },
 
   setImagePrice4K: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_price_4k_cents: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_price_4k_cents: value } }
+        : {},
+    );
   },
 
   setYiPayEnabled: (value) => {
-    set((state) => state.config ? { config: { ...state.config, yipay_enabled: value } } : {});
+    set((state) =>
+      state.config ? { config: { ...state.config, yipay_enabled: value } } : {},
+    );
   },
 
   setYiPayPID: (value) => {
-    set((state) => state.config ? { config: { ...state.config, yipay_pid: value } } : {});
+    set((state) =>
+      state.config ? { config: { ...state.config, yipay_pid: value } } : {},
+    );
   },
 
   setYiPayKey: (value) => {
-    set((state) => state.config ? { config: { ...state.config, yipay_key: value } } : {});
+    set((state) =>
+      state.config ? { config: { ...state.config, yipay_key: value } } : {},
+    );
   },
 
   setYiPaySubmitUrl: (value) => {
-    set((state) => state.config ? { config: { ...state.config, yipay_submit_url: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, yipay_submit_url: value } }
+        : {},
+    );
   },
 
   setYiPayNotifyUrl: (value) => {
-    set((state) => state.config ? { config: { ...state.config, yipay_notify_url: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, yipay_notify_url: value } }
+        : {},
+    );
   },
 
   setYiPayReturnUrl: (value) => {
-    set((state) => state.config ? { config: { ...state.config, yipay_return_url: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, yipay_return_url: value } }
+        : {},
+    );
   },
 
   setYiPaySiteName: (value) => {
-    set((state) => state.config ? { config: { ...state.config, yipay_site_name: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, yipay_site_name: value } }
+        : {},
+    );
   },
 
   setImageR2Enabled: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_r2_enabled: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_r2_enabled: value } }
+        : {},
+    );
   },
 
   setImageR2Endpoint: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_r2_endpoint: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_r2_endpoint: value } }
+        : {},
+    );
   },
 
   setImageR2Bucket: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_r2_bucket: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_r2_bucket: value } }
+        : {},
+    );
   },
 
   setImageR2Region: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_r2_region: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_r2_region: value } }
+        : {},
+    );
   },
 
   setImageR2AccessKeyId: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_r2_access_key_id: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_r2_access_key_id: value } }
+        : {},
+    );
   },
 
   setImageR2SecretAccessKey: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_r2_secret_access_key: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_r2_secret_access_key: value } }
+        : {},
+    );
   },
 
   setImageR2PublicBaseUrl: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_r2_public_base_url: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_r2_public_base_url: value } }
+        : {},
+    );
   },
 
   setImageR2Prefix: (value) => {
-    set((state) => state.config ? { config: { ...state.config, image_r2_prefix: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, image_r2_prefix: value } }
+        : {},
+    );
   },
 
   setLinuxDoEnabled: (value) => {
-    set((state) => state.config ? { config: { ...state.config, linuxdo_enabled: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, linuxdo_enabled: value } }
+        : {},
+    );
   },
 
   setLinuxDoClientId: (value) => {
-    set((state) => state.config ? { config: { ...state.config, linuxdo_client_id: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, linuxdo_client_id: value } }
+        : {},
+    );
   },
 
   setLinuxDoClientSecret: (value) => {
-    set((state) => state.config ? { config: { ...state.config, linuxdo_client_secret: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, linuxdo_client_secret: value } }
+        : {},
+    );
   },
 
   setLinuxDoRedirectUrl: (value) => {
-    set((state) => state.config ? { config: { ...state.config, linuxdo_redirect_url: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, linuxdo_redirect_url: value } }
+        : {},
+    );
   },
 
   setLinuxDoFrontendRedirectUrl: (value) => {
-    set((state) => state.config ? { config: { ...state.config, linuxdo_frontend_redirect_url: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, linuxdo_frontend_redirect_url: value } }
+        : {},
+    );
   },
 
   setUpdateRepo: (value) => {
-    set((state) => state.config ? { config: { ...state.config, update_repo: value } } : {});
+    set((state) =>
+      state.config ? { config: { ...state.config, update_repo: value } } : {},
+    );
   },
 
   setUpdateGitHubToken: (value) => {
-    set((state) => state.config ? { config: { ...state.config, update_github_token: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, update_github_token: value } }
+        : {},
+    );
+  },
+
+  setConfigField: (key, value) => {
+    set((state) => {
+      if (!state.config) {
+        return {};
+      }
+      return {
+        config: {
+          ...state.config,
+          [key]: value,
+        },
+      };
+    });
   },
 
   setLoginPageImageUrl: (value) => {
-    set((state) => state.config ? { config: { ...state.config, login_page_image_url: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, login_page_image_url: value } }
+        : {},
+    );
   },
 
   setLoginPageImageMode: (value) => {
-    set((state) => state.config ? { config: { ...state.config, login_page_image_mode: value } } : {});
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, login_page_image_mode: value } }
+        : {},
+    );
   },
 
   setLoginPageImageTransform: (transform) => {
     const normalized = normalizeLoginPageImageTransform(transform);
-    set((state) => state.config ? {
-      config: {
-        ...state.config,
-        login_page_image_zoom: normalized.zoom,
-        login_page_image_position_x: normalized.positionX,
-        login_page_image_position_y: normalized.positionY,
-      },
-    } : {});
+    set((state) =>
+      state.config
+        ? {
+            config: {
+              ...state.config,
+              login_page_image_zoom: normalized.zoom,
+              login_page_image_position_x: normalized.positionX,
+              login_page_image_position_y: normalized.positionY,
+            },
+          }
+        : {},
+    );
   },
 
   restoreDefaultLoginPageImage: () => {
-    set((state) => state.config ? {
-      config: {
-        ...state.config,
-        login_page_image_url: "",
-        login_page_image_zoom: LOGIN_PAGE_IMAGE_DEFAULT_TRANSFORM.zoom,
-        login_page_image_position_x: LOGIN_PAGE_IMAGE_DEFAULT_TRANSFORM.positionX,
-        login_page_image_position_y: LOGIN_PAGE_IMAGE_DEFAULT_TRANSFORM.positionY,
-      },
-    } : {});
+    set((state) =>
+      state.config
+        ? {
+            config: {
+              ...state.config,
+              login_page_image_url: "",
+              login_page_image_zoom: LOGIN_PAGE_IMAGE_DEFAULT_TRANSFORM.zoom,
+              login_page_image_position_x:
+                LOGIN_PAGE_IMAGE_DEFAULT_TRANSFORM.positionX,
+              login_page_image_position_y:
+                LOGIN_PAGE_IMAGE_DEFAULT_TRANSFORM.positionY,
+            },
+          }
+        : {},
+    );
   },
 
   saveLoginPageImage: async ({ file, action }) => {
@@ -780,7 +1374,9 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     });
     const settings: LoginPageImageSettings = {
       login_page_image_url: String(config.login_page_image_url || "").trim(),
-      login_page_image_mode: normalizeLoginPageImageMode(config.login_page_image_mode),
+      login_page_image_mode: normalizeLoginPageImageMode(
+        config.login_page_image_mode,
+      ),
       login_page_image_zoom: transform.zoom,
       login_page_image_position_x: transform.positionX,
       login_page_image_position_y: transform.positionY,
@@ -788,24 +1384,39 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
     set({ isSavingConfig: true });
     try {
-      const data = await updateLoginPageImageSettings(settings, { action, file });
+      const data = await updateLoginPageImageSettings(settings, {
+        action,
+        file,
+      });
       const nextConfig = normalizeConfig(data.config);
       set({ config: nextConfig });
       dispatchAppMetaUpdated({
         app_title: String(nextConfig.brand_top_left_name || "chatgpt2api"),
         project_name: String(nextConfig.brand_site_name || "chatgpt2api"),
-        top_left_logo_url: String(nextConfig.brand_top_left_logo_url || "/logo-mark.svg"),
-        site_logo_url: String(nextConfig.brand_site_logo_url || "/logo-mark.svg"),
+        top_left_logo_url: String(
+          nextConfig.brand_top_left_logo_url || "/logo-mark.svg",
+        ),
+        site_logo_url: String(
+          nextConfig.brand_site_logo_url || "/logo-mark.svg",
+        ),
         login_page_image_url: String(nextConfig.login_page_image_url || ""),
-        login_page_image_mode: normalizeLoginPageImageMode(nextConfig.login_page_image_mode),
+        login_page_image_mode: normalizeLoginPageImageMode(
+          nextConfig.login_page_image_mode,
+        ),
         login_page_image_zoom: Number(nextConfig.login_page_image_zoom),
-        login_page_image_position_x: Number(nextConfig.login_page_image_position_x),
-        login_page_image_position_y: Number(nextConfig.login_page_image_position_y),
+        login_page_image_position_x: Number(
+          nextConfig.login_page_image_position_x,
+        ),
+        login_page_image_position_y: Number(
+          nextConfig.login_page_image_position_y,
+        ),
       });
       toast.success("登录页图片已保存");
       return true;
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "保存登录页图片失败");
+      toast.error(
+        error instanceof Error ? error.message : "保存登录页图片失败",
+      );
       return false;
     } finally {
       set({ isSavingConfig: false });
@@ -818,7 +1429,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const data = await fetchLogGovernance();
       set({ logGovernance: data.governance });
     } catch (error) {
-      if (!silent) toast.error(error instanceof Error ? error.message : "加载日志治理数据失败");
+      if (!silent)
+        toast.error(
+          error instanceof Error ? error.message : "加载日志治理数据失败",
+        );
     } finally {
       if (!silent) set({ isLoadingLogGovernance: false });
     }
@@ -829,7 +1443,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     if (!config) {
       return;
     }
-    const retentionDays = Math.min(3650, Math.max(1, Number(config.log_retention_days) || 7));
+    const retentionDays = Math.min(
+      3650,
+      Math.max(1, Number(config.log_retention_days) || 7),
+    );
     set({ isCleaningLogs: true });
     try {
       const data = await cleanupLogs(retentionDays);
@@ -851,7 +1468,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const data = await fetchRegisterConfig();
       set({ registerConfig: data.register });
     } catch (error) {
-      if (!silent) toast.error(error instanceof Error ? error.message : "加载注册配置失败");
+      if (!silent)
+        toast.error(
+          error instanceof Error ? error.message : "加载注册配置失败",
+        );
     } finally {
       if (!silent) set({ isLoadingRegister: false });
     }
@@ -862,55 +1482,121 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   setRegisterProxy: (value) => {
-    set((state) => state.registerConfig ? { registerConfig: { ...state.registerConfig, proxy: value } } : {});
+    set((state) =>
+      state.registerConfig
+        ? { registerConfig: { ...state.registerConfig, proxy: value } }
+        : {},
+    );
   },
 
   setRegisterTotal: (value) => {
-    set((state) => state.registerConfig ? { registerConfig: { ...state.registerConfig, total: Number(value) || 0 } } : {});
+    set((state) =>
+      state.registerConfig
+        ? {
+            registerConfig: {
+              ...state.registerConfig,
+              total: Number(value) || 0,
+            },
+          }
+        : {},
+    );
   },
 
   setRegisterThreads: (value) => {
-    set((state) => state.registerConfig ? { registerConfig: { ...state.registerConfig, threads: Number(value) || 0 } } : {});
+    set((state) =>
+      state.registerConfig
+        ? {
+            registerConfig: {
+              ...state.registerConfig,
+              threads: Number(value) || 0,
+            },
+          }
+        : {},
+    );
   },
 
   setRegisterMode: (value) => {
-    set((state) => state.registerConfig ? { registerConfig: { ...state.registerConfig, mode: value } } : {});
+    set((state) =>
+      state.registerConfig
+        ? { registerConfig: { ...state.registerConfig, mode: value } }
+        : {},
+    );
   },
 
   setRegisterTargetQuota: (value) => {
-    set((state) => state.registerConfig ? { registerConfig: { ...state.registerConfig, target_quota: Number(value) || 0 } } : {});
+    set((state) =>
+      state.registerConfig
+        ? {
+            registerConfig: {
+              ...state.registerConfig,
+              target_quota: Number(value) || 0,
+            },
+          }
+        : {},
+    );
   },
 
   setRegisterTargetAvailable: (value) => {
-    set((state) => state.registerConfig ? { registerConfig: { ...state.registerConfig, target_available: Number(value) || 0 } } : {});
+    set((state) =>
+      state.registerConfig
+        ? {
+            registerConfig: {
+              ...state.registerConfig,
+              target_available: Number(value) || 0,
+            },
+          }
+        : {},
+    );
   },
 
   setRegisterCheckInterval: (value) => {
-    set((state) => state.registerConfig ? { registerConfig: { ...state.registerConfig, check_interval: Number(value) || 0 } } : {});
+    set((state) =>
+      state.registerConfig
+        ? {
+            registerConfig: {
+              ...state.registerConfig,
+              check_interval: Number(value) || 0,
+            },
+          }
+        : {},
+    );
   },
 
   setRegisterMailField: (key, value) => {
-    set((state) => state.registerConfig ? {
-      registerConfig: {
-        ...state.registerConfig,
-        mail: { ...state.registerConfig.mail, [key]: Number(value) || 0 },
-      },
-    } : {});
+    set((state) =>
+      state.registerConfig
+        ? {
+            registerConfig: {
+              ...state.registerConfig,
+              mail: { ...state.registerConfig.mail, [key]: Number(value) || 0 },
+            },
+          }
+        : {},
+    );
   },
 
   addRegisterProvider: () => {
-    set((state) => state.registerConfig ? {
-      registerConfig: {
-        ...state.registerConfig,
-        mail: {
-          ...state.registerConfig.mail,
-          providers: [
-            ...(state.registerConfig.mail.providers || []),
-            { enable: true, type: "tempmail_lol", api_key: "", domain: [] },
-          ],
-        },
-      },
-    } : {});
+    set((state) =>
+      state.registerConfig
+        ? {
+            registerConfig: {
+              ...state.registerConfig,
+              mail: {
+                ...state.registerConfig.mail,
+                providers: [
+                  ...(state.registerConfig.mail.providers || []),
+                  {
+                    enable: true,
+                    type: "tempmail_lol",
+                    api_key: "",
+                    domain: [],
+                  },
+                ],
+              },
+            },
+          }
+        : {},
+    );
   },
 
   updateRegisterProvider: (index, updates) => {
@@ -918,20 +1604,31 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       if (!state.registerConfig) return {};
       const providers = [...(state.registerConfig.mail.providers || [])];
       providers[index] = { ...(providers[index] || {}), ...updates };
-      return { registerConfig: { ...state.registerConfig, mail: { ...state.registerConfig.mail, providers } } };
+      return {
+        registerConfig: {
+          ...state.registerConfig,
+          mail: { ...state.registerConfig.mail, providers },
+        },
+      };
     });
   },
 
   deleteRegisterProvider: (index) => {
-    set((state) => state.registerConfig ? {
-      registerConfig: {
-        ...state.registerConfig,
-        mail: {
-          ...state.registerConfig.mail,
-          providers: (state.registerConfig.mail.providers || []).filter((_, itemIndex) => itemIndex !== index),
-        },
-      },
-    } : {});
+    set((state) =>
+      state.registerConfig
+        ? {
+            registerConfig: {
+              ...state.registerConfig,
+              mail: {
+                ...state.registerConfig.mail,
+                providers: (state.registerConfig.mail.providers || []).filter(
+                  (_, itemIndex) => itemIndex !== index,
+                ),
+              },
+            },
+          }
+        : {},
+    );
   },
 
   saveRegister: async () => {
@@ -946,7 +1643,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         threads: Math.max(1, Number(registerConfig.threads) || 1),
         mode: registerConfig.mode,
         target_quota: Math.max(1, Number(registerConfig.target_quota) || 1),
-        target_available: Math.max(1, Number(registerConfig.target_available) || 1),
+        target_available: Math.max(
+          1,
+          Number(registerConfig.target_available) || 1,
+        ),
         check_interval: Math.max(1, Number(registerConfig.check_interval) || 5),
       });
       set({ registerConfig: data.register });
@@ -971,13 +1671,23 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           threads: Math.max(1, Number(registerConfig.threads) || 1),
           mode: registerConfig.mode,
           target_quota: Math.max(1, Number(registerConfig.target_quota) || 1),
-          target_available: Math.max(1, Number(registerConfig.target_available) || 1),
-          check_interval: Math.max(1, Number(registerConfig.check_interval) || 5),
+          target_available: Math.max(
+            1,
+            Number(registerConfig.target_available) || 1,
+          ),
+          check_interval: Math.max(
+            1,
+            Number(registerConfig.check_interval) || 5,
+          ),
         });
       }
-      const data = registerConfig.enabled ? await stopRegister() : await startRegister();
+      const data = registerConfig.enabled
+        ? await stopRegister()
+        : await startRegister();
       set({ registerConfig: data.register });
-      toast.success(registerConfig.enabled ? "注册任务已停止" : "注册任务已启动");
+      toast.success(
+        registerConfig.enabled ? "注册任务已停止" : "注册任务已启动",
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "切换注册状态失败");
     } finally {
@@ -1007,7 +1717,9 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       set({ pools: data.pools });
     } catch (error) {
       if (!silent) {
-        toast.error(error instanceof Error ? error.message : "加载 CPA 连接失败");
+        toast.error(
+          error instanceof Error ? error.message : "加载 CPA 连接失败",
+        );
       }
     } finally {
       if (!silent) {
@@ -1177,7 +1889,9 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const result = await startCPAImport(browserPool.id, selectedNames);
       set({
         pools: pools.map((pool) =>
-          pool.id === browserPool.id ? { ...pool, import_job: result.import_job } : pool,
+          pool.id === browserPool.id
+            ? { ...pool, import_job: result.import_job }
+            : pool,
         ),
         browserOpen: false,
       });

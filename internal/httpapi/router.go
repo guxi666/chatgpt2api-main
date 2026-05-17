@@ -71,6 +71,8 @@ func (a *App) routes() []appRoute {
 		exact(http.MethodGet, "/api/wallet", a.handleWallet),
 		exact(http.MethodPost, "/api/wallet/redeem", a.handleWalletRedeem),
 		exact("", "/api/pay/orders", a.handlePayOrders),
+		exact("", "/api/subscriptions/plans", a.handleSubscriptions),
+		exact("", "/api/subscriptions/orders", a.handleSubscriptions),
 		exact("", "/api/pay/yipay", a.handleYiPayNotify),
 		exact("", "/api/pay/yipay/", a.handleYiPayNotify),
 		exact("", "/api/pay/yipay/notify", a.handleYiPayNotify),

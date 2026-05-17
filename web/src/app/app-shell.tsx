@@ -24,7 +24,7 @@ export function AppShell() {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex min-h-screen max-w-[1440px] flex-col gap-2 px-3 py-3 sm:px-5 lg:px-6">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1660px] flex-col gap-2 px-3 py-3 sm:px-4 lg:px-4">
         <TopNav />
         <AnimatedRoutes />
       </div>

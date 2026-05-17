@@ -599,6 +599,7 @@ func (a *App) ensureAgencyTierRoles() {
 			"/image",
 			"/image-manager",
 			"/wallet",
+			"/subscription",
 			"/agency",
 			"/agency-commission",
 		}
@@ -617,6 +618,8 @@ func (a *App) ensureAgencyTierRoles() {
 			service.APIPermissionKey("POST", "/api/wallet/redeem"),
 			service.APIPermissionKey("GET", "/api/pay/orders"),
 			service.APIPermissionKey("POST", "/api/pay/orders"),
+			service.APIPermissionKey("GET", "/api/subscriptions/plans"),
+			service.APIPermissionKey("POST", "/api/subscriptions/orders"),
 			service.APIPermissionKey("GET", "/api/agency"),
 			service.APIPermissionKey("GET", "/api/agency/commission"),
 			service.APIPermissionKey("GET", "/api/agency/withdrawals"),

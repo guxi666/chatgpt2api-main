@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"net/http"
@@ -354,6 +355,8 @@ func (a *App) handleAdminRoles(w http.ResponseWriter, r *http.Request) {
 	if _, ok := a.requireIdentity(w, r, ""); !ok {
 		return
 	}
+	a.ensureAgencyTierRoles()
+	a.ensureSubscriptionTierRoles()
 	base := "/api/admin/roles"
 	if r.URL.Path == base {
 		switch r.Method {
@@ -649,6 +652,10 @@ func (a *App) managedUsers() []map[string]any {
 			item["balance_cents"] = util.ToInt(billing["balance_cents"], 0)
 			item["total_recharge_cents"] = util.ToInt(billing["total_recharge_cents"], 0)
 			item["total_consume_cents"] = util.ToInt(billing["total_consume_cents"], 0)
+			item["subscription_tier"] = util.Clean(billing["subscription_tier"])
+			item["subscription_start_at"] = util.Clean(billing["subscription_start_at"])
+			item["subscription_expire_at"] = util.Clean(billing["subscription_expire_at"])
+			item["subscription_active"] = util.ToBool(billing["subscription_active"])
 			item["billing_user"] = true
 			item["image_price_cents"] = a.config.ImagePriceCents()
 			continue
@@ -668,6 +675,10 @@ func (a *App) managedUsers() []map[string]any {
 		item["balance_cents"] = 0
 		item["total_recharge_cents"] = 0
 		item["total_consume_cents"] = 0
+		item["subscription_tier"] = ""
+		item["subscription_start_at"] = ""
+		item["subscription_expire_at"] = ""
+		item["subscription_active"] = false
 		item["billing_user"] = false
 		item["image_price_cents"] = a.config.ImagePriceCents()
 	}
@@ -755,7 +766,82 @@ func (a *App) handleAdminBilling(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if len(parts) == 6 && parts[5] == "subscription" {
+			userID, decodeErr := url.PathUnescape(parts[4])
+			if decodeErr != nil {
+				util.WriteError(w, http.StatusBadRequest, "invalid user id")
+				return
+			}
+			if r.Method != http.MethodPost {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			body, err := readJSONMap(r)
+			if err != nil {
+				util.WriteError(w, http.StatusBadRequest, "invalid json body")
+				return
+			}
+			mode := strings.TrimSpace(util.Clean(body["mode"]))
+			tier := strings.TrimSpace(util.Clean(body["tier"]))
+			expireAt := strings.TrimSpace(util.Clean(body["expire_at"]))
+			extendDays := util.ToInt(body["extend_days"], 0)
+			status, updateErr := a.billing.AdminUpdateSubscriptionByUserID(userID, mode, tier, expireAt, extendDays)
+			if updateErr != nil {
+				util.WriteError(w, http.StatusBadRequest, updateErr.Error())
+				return
+			}
+			if mode != "clear" {
+				effectiveTier := strings.TrimSpace(util.Clean(status["tier"]))
+				if effectiveTier != "" {
+					a.ensureSubscriptionTierRoles()
+					if roleID, ok := a.subscriptionRoleIDByTier(effectiveTier); ok {
+						_ = a.auth.UpdateUser(userID, map[string]any{"role_id": roleID})
+					}
+				}
+			}
+			util.WriteJSON(w, http.StatusOK, map[string]any{
+				"status": status,
+				"items":  a.managedUsers(),
+			})
+			return
+		}
 		http.NotFound(w, r)
+		return
+	}
+
+	if len(parts) >= 5 && parts[3] == "subscriptions" && parts[4] == "report" {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		query := r.URL.Query()
+		statusFilter := strings.ToLower(strings.TrimSpace(query.Get("status")))
+		if statusFilter == "" {
+			statusFilter = service.BillingOrderStatusPaid
+		}
+		tierFilter := strings.ToLower(strings.TrimSpace(query.Get("tier")))
+		startAt, startErr := parseSubscriptionReportDateParam(query.Get("start_at"), false)
+		if startErr != nil {
+			util.WriteError(w, http.StatusBadRequest, startErr.Error())
+			return
+		}
+		endAt, endErr := parseSubscriptionReportDateParam(query.Get("end_at"), true)
+		if endErr != nil {
+			util.WriteError(w, http.StatusBadRequest, endErr.Error())
+			return
+		}
+		items, _ := a.billing.ListOrdersForAdmin(0)
+		report := buildSubscriptionReport(items, adminSubscriptionReportFilter{
+			Status:  statusFilter,
+			Tier:    tierFilter,
+			StartAt: startAt,
+			EndAt:   endAt,
+		})
+		if strings.EqualFold(strings.TrimSpace(query.Get("export")), "csv") {
+			writeSubscriptionReportCSV(w, report)
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, report)
 		return
 	}
 
@@ -917,6 +1003,237 @@ func (a *App) handleAdminBilling(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.NotFound(w, r)
+}
+
+type adminSubscriptionTierSummary struct {
+	Orders         int
+	RevenueCents   int
+	NewSubscribers int
+	Renewals       int
+}
+
+type adminSubscriptionReportFilter struct {
+	Status  string
+	Tier    string
+	StartAt time.Time
+	EndAt   time.Time
+}
+
+func buildSubscriptionReport(items []map[string]any, filter adminSubscriptionReportFilter) map[string]any {
+	statusFilter := strings.ToLower(strings.TrimSpace(filter.Status))
+	if statusFilter == "" {
+		statusFilter = service.BillingOrderStatusPaid
+	}
+	tierFilter := strings.ToLower(strings.TrimSpace(filter.Tier))
+	tierStats := map[string]*adminSubscriptionTierSummary{
+		service.SubscriptionTierMonthly:   {},
+		service.SubscriptionTierQuarterly: {},
+		service.SubscriptionTierYearly:    {},
+	}
+	subscriptionItems := make([]map[string]any, 0)
+	for _, item := range items {
+		kind := strings.ToLower(strings.TrimSpace(util.Clean(item["order_kind"])))
+		if kind != service.BillingOrderKindSubMonthly && kind != service.BillingOrderKindSubQuarterly && kind != service.BillingOrderKindSubYearly {
+			continue
+		}
+		status := strings.ToLower(strings.TrimSpace(util.Clean(item["status"])))
+		if statusFilter != "all" && status != statusFilter {
+			continue
+		}
+		createdAt := serviceTime(item)
+		if !filter.StartAt.IsZero() && createdAt.Before(filter.StartAt) {
+			continue
+		}
+		if !filter.EndAt.IsZero() && createdAt.After(filter.EndAt) {
+			continue
+		}
+		copyItem := util.CopyMap(item)
+		subscriptionItems = append(subscriptionItems, copyItem)
+	}
+	sortSubscriptionOrders(subscriptionItems)
+	seenUserPaid := map[string]int{}
+	totalRevenue := 0
+	totalOrders := 0
+	for _, item := range subscriptionItems {
+		tier := strings.TrimSpace(util.Clean(item["subscription_tier"]))
+		if tier == "" {
+			switch strings.ToLower(strings.TrimSpace(util.Clean(item["order_kind"]))) {
+			case service.BillingOrderKindSubMonthly:
+				tier = service.SubscriptionTierMonthly
+			case service.BillingOrderKindSubQuarterly:
+				tier = service.SubscriptionTierQuarterly
+			case service.BillingOrderKindSubYearly:
+				tier = service.SubscriptionTierYearly
+			}
+		}
+		if tierFilter != "" && tierFilter != "all" && tier != tierFilter {
+			continue
+		}
+		entry, ok := tierStats[tier]
+		if !ok {
+			entry = &adminSubscriptionTierSummary{}
+			tierStats[tier] = entry
+		}
+		amount := util.ToInt(item["amount_cents"], 0)
+		entry.Orders++
+		entry.RevenueCents += amount
+		totalOrders++
+		totalRevenue += amount
+		userID := strings.TrimSpace(util.Clean(item["user_id"]))
+		if seenUserPaid[userID] > 0 {
+			entry.Renewals++
+		} else {
+			entry.NewSubscribers++
+		}
+		seenUserPaid[userID]++
+	}
+	return map[string]any{
+		"summary": map[string]any{
+			"orders":          totalOrders,
+			"revenue_cents":   totalRevenue,
+			"revenue_yuan":    fmt.Sprintf("%.2f", float64(totalRevenue)/100.0),
+			"renewal_orders":  countRenewals(tierStats),
+			"new_subscribers": countNewSubscribers(tierStats),
+			"paid_user_count": len(seenUserPaid),
+			"generated_at":    time.Now().Format(time.RFC3339Nano),
+			"filter_status":   statusFilter,
+			"filter_tier":     tierFilter,
+			"filter_start_at": formatOptionalTime(filter.StartAt),
+			"filter_end_at":   formatOptionalTime(filter.EndAt),
+		},
+		"tiers": map[string]any{
+			service.SubscriptionTierMonthly: map[string]any{
+				"orders":          tierStats[service.SubscriptionTierMonthly].Orders,
+				"revenue_cents":   tierStats[service.SubscriptionTierMonthly].RevenueCents,
+				"revenue_yuan":    fmt.Sprintf("%.2f", float64(tierStats[service.SubscriptionTierMonthly].RevenueCents)/100.0),
+				"new_subscribers": tierStats[service.SubscriptionTierMonthly].NewSubscribers,
+				"renewals":        tierStats[service.SubscriptionTierMonthly].Renewals,
+			},
+			service.SubscriptionTierQuarterly: map[string]any{
+				"orders":          tierStats[service.SubscriptionTierQuarterly].Orders,
+				"revenue_cents":   tierStats[service.SubscriptionTierQuarterly].RevenueCents,
+				"revenue_yuan":    fmt.Sprintf("%.2f", float64(tierStats[service.SubscriptionTierQuarterly].RevenueCents)/100.0),
+				"new_subscribers": tierStats[service.SubscriptionTierQuarterly].NewSubscribers,
+				"renewals":        tierStats[service.SubscriptionTierQuarterly].Renewals,
+			},
+			service.SubscriptionTierYearly: map[string]any{
+				"orders":          tierStats[service.SubscriptionTierYearly].Orders,
+				"revenue_cents":   tierStats[service.SubscriptionTierYearly].RevenueCents,
+				"revenue_yuan":    fmt.Sprintf("%.2f", float64(tierStats[service.SubscriptionTierYearly].RevenueCents)/100.0),
+				"new_subscribers": tierStats[service.SubscriptionTierYearly].NewSubscribers,
+				"renewals":        tierStats[service.SubscriptionTierYearly].Renewals,
+			},
+		},
+		"items": subscriptionItems,
+	}
+}
+
+func countRenewals(stats map[string]*adminSubscriptionTierSummary) int {
+	total := 0
+	for _, item := range stats {
+		total += item.Renewals
+	}
+	return total
+}
+
+func countNewSubscribers(stats map[string]*adminSubscriptionTierSummary) int {
+	total := 0
+	for _, item := range stats {
+		total += item.NewSubscribers
+	}
+	return total
+}
+
+func sortSubscriptionOrders(items []map[string]any) {
+	for i := 0; i < len(items); i++ {
+		for j := i + 1; j < len(items); j++ {
+			left := serviceTime(items[i])
+			right := serviceTime(items[j])
+			if left.After(right) {
+				items[i], items[j] = items[j], items[i]
+			}
+		}
+	}
+}
+
+func serviceTime(item map[string]any) time.Time {
+	for _, key := range []string{"paid_at", "updated_at", "created_at"} {
+		if parsed := parseFlexibleTime(util.Clean(item[key])); !parsed.IsZero() {
+			return parsed
+		}
+	}
+	return time.Time{}
+}
+
+func parseFlexibleTime(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed
+	}
+	if parsed, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.Local); err == nil {
+		return parsed
+	}
+	if parsed, err := time.ParseInLocation("2006-01-02", value, time.Local); err == nil {
+		return parsed
+	}
+	return time.Time{}
+}
+
+func parseSubscriptionReportDateParam(value string, end bool) (time.Time, error) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return time.Time{}, nil
+	}
+	if onlyDate, err := time.ParseInLocation("2006-01-02", text, time.Local); err == nil {
+		if end {
+			return onlyDate.Add(24*time.Hour - time.Nanosecond), nil
+		}
+		return onlyDate, nil
+	}
+	parsed := parseFlexibleTime(text)
+	if parsed.IsZero() {
+		if end {
+			return time.Time{}, fmt.Errorf("invalid end_at format")
+		}
+		return time.Time{}, fmt.Errorf("invalid start_at format")
+	}
+	return parsed, nil
+}
+
+func formatOptionalTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.Format(time.RFC3339Nano)
+}
+
+func writeSubscriptionReportCSV(w http.ResponseWriter, report map[string]any) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="subscription-orders.csv"`)
+	writer := csv.NewWriter(w)
+	_ = writer.Write([]string{"order_id", "out_trade_no", "user_id", "user_email", "tier", "amount_cents", "amount_yuan", "status", "paid_at", "created_at"})
+	for _, raw := range util.AsMapSlice(report["items"]) {
+		amountCents := util.ToInt(raw["amount_cents"], 0)
+		_ = writer.Write([]string{
+			util.Clean(raw["id"]),
+			util.Clean(raw["out_trade_no"]),
+			util.Clean(raw["user_id"]),
+			util.Clean(raw["user_email"]),
+			util.Clean(raw["subscription_tier"]),
+			strconv.Itoa(amountCents),
+			fmt.Sprintf("%.2f", float64(amountCents)/100.0),
+			util.Clean(raw["status"]),
+			util.Clean(raw["paid_at"]),
+			util.Clean(raw["created_at"]),
+		})
+	}
+	writer.Flush()
 }
 
 func (a *App) handlePublicAnnouncements(w http.ResponseWriter, r *http.Request) {

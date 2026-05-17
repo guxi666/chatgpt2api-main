@@ -18,6 +18,7 @@ import { ProxySettingsCard } from "./components/proxy-settings-card";
 import { R2StorageCard } from "./components/r2-storage-card";
 import { SiteBrandCard } from "./components/site-brand-card";
 import { SettingsHeader } from "./components/settings-header";
+import { SubscriptionSettingsCard } from "./components/subscription-settings-card";
 import { Sub2APIConnections } from "./components/sub2api-connections";
 import { useSettingsStore } from "./store";
 
@@ -74,6 +75,9 @@ function AdminSettingsPageContent() {
         </SettingsMasonryItem>
         <SettingsMasonryItem>
           <PaymentSettingsCard />
+        </SettingsMasonryItem>
+        <SettingsMasonryItem>
+          <SubscriptionSettingsCard />
         </SettingsMasonryItem>
         <SettingsMasonryItem>
           <R2StorageCard />

@@ -276,6 +276,7 @@ func (a *App) handleYiPayNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.activateAgencyFromPayResult(notifyResult, "YiPay notify")
+	a.activateSubscriptionFromPayResult(notifyResult, "YiPay notify")
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte("success"))
 }
@@ -307,6 +308,7 @@ func (a *App) handleYiPayReturn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.activateAgencyFromPayResult(notifyResult, "YiPay return")
+	a.activateSubscriptionFromPayResult(notifyResult, "YiPay return")
 	http.Redirect(w, r, redirectPath, http.StatusFound)
 }
 
@@ -343,6 +345,9 @@ func (a *App) ensureImageBillingCredit(w http.ResponseWriter, identity service.I
 	if !a.shouldBillImage(identity) {
 		return true
 	}
+	if a.billing.HasActiveSubscription(identity) {
+		return true
+	}
 	if err := a.billing.EnsureCanConsume(identity, a.imageBillingAmountFromPayload(payload)); err != nil {
 		util.WriteError(w, http.StatusPaymentRequired, err.Error())
 		return false
@@ -354,9 +359,36 @@ func (a *App) chargeImageUsage(identity service.Identity, endpoint string, paylo
 	if !a.shouldBillImage(identity) {
 		return nil
 	}
+	if a.billing.HasActiveSubscription(identity) {
+		return nil
+	}
 	tier := a.imageBillingTierFromPayload(payload)
 	_, err := a.billing.ConsumeImageUsage(identity, a.imageBillingAmountFromPayload(payload), "image usage "+strings.TrimSpace(endpoint)+" "+tier)
 	return err
+}
+
+func (a *App) activateSubscriptionFromPayResult(result map[string]any, source string) {
+	tier := strings.TrimSpace(util.Clean(result["subscription_tier"]))
+	if tier == "" {
+		return
+	}
+	userID := strings.TrimSpace(util.Clean(result["user_id"]))
+	if userID == "" {
+		return
+	}
+	a.ensureSubscriptionTierRoles()
+	roleID, ok := a.subscriptionRoleIDByTier(tier)
+	if !ok {
+		return
+	}
+	if updated := a.auth.UpdateUser(userID, map[string]any{"role_id": roleID}); updated != nil {
+		return
+	}
+	a.logs.Add(source+" subscription role switch failed", map[string]any{
+		"status":  "failed",
+		"user_id": userID,
+		"tier":    tier,
+	})
 }
 
 func (a *App) shouldBillImage(identity service.Identity) bool {
@@ -518,12 +550,15 @@ func parseRechargeAmountCents(body map[string]any) (int, error) {
 
 func walletFromUser(user map[string]any) map[string]any {
 	return map[string]any{
-		"invite_code":          util.Clean(user["invite_code"]),
-		"invited_by":           util.Clean(user["invited_by"]),
-		"invited_by_email":     util.Clean(user["invited_by_email"]),
-		"balance_cents":        util.ToInt(user["balance_cents"], 0),
-		"total_recharge_cents": util.ToInt(user["total_recharge_cents"], 0),
-		"total_consume_cents":  util.ToInt(user["total_consume_cents"], 0),
+		"invite_code":            util.Clean(user["invite_code"]),
+		"invited_by":             util.Clean(user["invited_by"]),
+		"invited_by_email":       util.Clean(user["invited_by_email"]),
+		"balance_cents":          util.ToInt(user["balance_cents"], 0),
+		"total_recharge_cents":   util.ToInt(user["total_recharge_cents"], 0),
+		"total_consume_cents":    util.ToInt(user["total_consume_cents"], 0),
+		"subscription_tier":      util.Clean(user["subscription_tier"]),
+		"subscription_active":    util.ToBool(user["subscription_active"]),
+		"subscription_expire_at": util.Clean(user["subscription_expire_at"]),
 	}
 }
 

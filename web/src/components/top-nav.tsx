@@ -1,7 +1,14 @@
 ﻿"use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronUp, LogOut, MoonStar, Sun, UserCircle2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  LogOut,
+  MoonStar,
+  Sun,
+  UserCircle2,
+} from "lucide-react";
 import { motion, useReducedMotion, type Transition } from "motion/react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 
@@ -21,7 +28,11 @@ import {
   type StoredAuthSession,
 } from "@/store/auth";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { fetchAccounts, logout, type Account } from "@/lib/api";
 import { useAppMeta } from "@/lib/use-app-meta";
 import { cn } from "@/lib/utils";
@@ -35,6 +46,7 @@ import {
 const navItems = [
   { href: "/image", label: "创作台" },
   { href: "/wallet", label: "钱包充值" },
+  { href: "/subscription", label: "套餐订阅" },
   { href: "/agency", label: "代理加盟" },
   { href: "/accounts", label: "账号池管理" },
   { href: "/register", label: "注册机" },
@@ -59,8 +71,15 @@ const reducedNavActiveTransition: Transition = {
 };
 
 function formatAvailableQuota(accounts: Account[]) {
-  const availableAccounts = accounts.filter((account) => account.status !== "禁用");
-  return String(availableAccounts.reduce((sum, account) => sum + Math.max(0, account.quota), 0));
+  const availableAccounts = accounts.filter(
+    (account) => account.status !== "禁用",
+  );
+  return String(
+    availableAccounts.reduce(
+      (sum, account) => sum + Math.max(0, account.quota),
+      0,
+    ),
+  );
 }
 
 function ThemeToggleButton({
@@ -109,7 +128,7 @@ function NavPill({ item, pathname }: { item: NavItem; pathname: string }) {
       to={item.href}
       className={() =>
         cn(
-          "relative isolate shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors sm:text-sm",
+          "relative isolate shrink-0 whitespace-nowrap rounded-full px-2.5 py-1.5 text-[13px] font-medium transition-colors sm:text-sm",
           active
             ? "text-[#18181b] dark:text-accent-foreground"
             : "text-[#45515e] hover:bg-black/[0.05] hover:text-[#18181b] dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-accent-foreground",
@@ -119,13 +138,21 @@ function NavPill({ item, pathname }: { item: NavItem; pathname: string }) {
       {active ? (
         <motion.span
           layoutId={NAV_ACTIVE_LAYOUT_ID}
-          transition={prefersReducedMotion ? reducedNavActiveTransition : navActiveTransition}
+          transition={
+            prefersReducedMotion
+              ? reducedNavActiveTransition
+              : navActiveTransition
+          }
           className="absolute inset-0 -z-10 rounded-full bg-black/[0.06] shadow-[inset_0_0_0_1px_rgba(20,86,240,0.08)] dark:bg-accent"
         />
       ) : null}
       <motion.span
         animate={{ scale: active && !prefersReducedMotion ? 1.03 : 1 }}
-        transition={prefersReducedMotion ? reducedNavActiveTransition : { duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+        transition={
+          prefersReducedMotion
+            ? reducedNavActiveTransition
+            : { duration: 0.16, ease: [0.22, 1, 0.36, 1] }
+        }
         className="relative z-10 block"
       >
         {item.label}
@@ -160,14 +187,18 @@ function AccountMenu({
           variant="outline"
           className={cn(
             "h-9 rounded-full px-2.5 shadow-none",
-            profileActive ? "border-[#1456f0]/30 bg-[#edf4ff] text-[#1456f0] dark:bg-sky-950/30 dark:text-sky-300" : "",
+            profileActive
+              ? "border-[#1456f0]/30 bg-[#edf4ff] text-[#1456f0] dark:bg-sky-950/30 dark:text-sky-300"
+              : "",
           )}
           aria-label="账号菜单"
         >
           <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
             {initial}
           </span>
-          <span className="hidden max-w-[120px] truncate lg:inline">{displayName}</span>
+          <span className="hidden max-w-[120px] truncate xl:inline">
+            {displayName}
+          </span>
           <ChevronDown />
         </Button>
       </PopoverTrigger>
@@ -183,7 +214,9 @@ function AccountMenu({
                 {initial}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold text-foreground">{displayName}</div>
+                <div className="truncate text-sm font-semibold text-foreground">
+                  {displayName}
+                </div>
                 <code className="block truncate font-mono text-xs text-muted-foreground">
                   {session.subjectId || session.role}
                 </code>
@@ -194,15 +227,21 @@ function AccountMenu({
           <div className="grid grid-cols-3 gap-2 text-xs">
             <div className="rounded-lg bg-muted/40 px-2 py-1.5">
               <div className="text-muted-foreground">角色</div>
-              <div className="truncate font-medium text-foreground">{roleLabel}</div>
+              <div className="truncate font-medium text-foreground">
+                {roleLabel}
+              </div>
             </div>
             <div className="rounded-lg bg-muted/40 px-2 py-1.5">
               <div className="text-muted-foreground">额度</div>
-              <div className="truncate font-medium text-foreground">{availableQuota}</div>
+              <div className="truncate font-medium text-foreground">
+                {availableQuota}
+              </div>
             </div>
             <div className="rounded-lg bg-muted/40 px-2 py-1.5">
               <div className="text-muted-foreground">版本</div>
-              <div className="truncate font-medium text-foreground">v{webConfig.appVersion}</div>
+              <div className="truncate font-medium text-foreground">
+                v{webConfig.appVersion}
+              </div>
             </div>
           </div>
 
@@ -210,7 +249,9 @@ function AccountMenu({
             to={profileNavItem.href}
             className={cn(
               "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition hover:bg-accent hover:text-accent-foreground",
-              profileActive ? "bg-[#edf4ff] text-[#1456f0] dark:bg-sky-950/30 dark:text-sky-300" : "text-foreground",
+              profileActive
+                ? "bg-[#edf4ff] text-[#1456f0] dark:bg-sky-950/30 dark:text-sky-300"
+                : "text-foreground",
             )}
             onClick={() => setOpen(false)}
           >
@@ -240,8 +281,12 @@ export function TopNav() {
   const location = useLocation();
   const navigate = useNavigate();
   const pathname = location.pathname.replace(/\/+$/, "") || "/";
-  const [session, setSession] = useState<StoredAuthSession | null | undefined>(() => getCachedAuthSession());
-  const [theme, setTheme] = useState<ColorTheme>(() => getPreferredColorTheme());
+  const [session, setSession] = useState<StoredAuthSession | null | undefined>(
+    () => getCachedAuthSession(),
+  );
+  const [theme, setTheme] = useState<ColorTheme>(() =>
+    getPreferredColorTheme(),
+  );
   const [availableQuota, setAvailableQuota] = useState("--");
   const [navCollapsed, setNavCollapsed] = useState(false);
 
@@ -276,7 +321,10 @@ export function TopNav() {
     };
     window.addEventListener(AUTH_SESSION_CHANGE_EVENT, handleSessionChange);
     return () => {
-      window.removeEventListener(AUTH_SESSION_CHANGE_EVENT, handleSessionChange);
+      window.removeEventListener(
+        AUTH_SESSION_CHANGE_EVENT,
+        handleSessionChange,
+      );
     };
   }, []);
 
@@ -295,7 +343,9 @@ export function TopNav() {
         }
       } catch {
         if (active) {
-          setAvailableQuota((current) => (current === "加载中..." ? "--" : current));
+          setAvailableQuota((current) =>
+            current === "加载中..." ? "--" : current,
+          );
         }
       }
     };
@@ -327,41 +377,54 @@ export function TopNav() {
   const handleThemeToggle = (button: HTMLButtonElement) => {
     const nextTheme = theme === "dark" ? "light" : "dark";
     const rect = button.getBoundingClientRect();
-    applyColorTheme(
-      nextTheme,
-      {
-        force: true,
-        origin: {
-          x: rect.left + rect.width / 2,
-          y: rect.top + rect.height / 2,
-        },
+    applyColorTheme(nextTheme, {
+      force: true,
+      origin: {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
       },
-    );
+    });
     saveColorTheme(nextTheme);
     setTheme(nextTheme);
   };
 
-  if (pathname === "/login" || pathname === "/auth/linuxdo/callback" || session === undefined || !session) {
+  if (
+    pathname === "/login" ||
+    pathname === "/auth/linuxdo/callback" ||
+    session === undefined ||
+    !session
+  ) {
     return null;
   }
 
-  const visibleNavItems = navItems.filter((item) => canAccessPath(session, item.href));
-  const roleLabel = session.role === "admin" ? "管理员" : session.roleName || (session.provider === "linuxdo" ? "Linuxdo 用户" : "普通用户");
+  const visibleNavItems = navItems.filter((item) =>
+    canAccessPath(session, item.href),
+  );
+  const roleLabel =
+    session.role === "admin"
+      ? "管理员"
+      : session.roleName ||
+        (session.provider === "linuxdo" ? "Linuxdo 用户" : "普通用户");
   const canAccessImageTasks = canAccessPath(session, "/image");
   const navToggleLabel = navCollapsed ? "展开导航栏" : "收起导航栏";
-  const brandTitle = (appMeta.app_title || "chatgpt2api").trim() || "chatgpt2api";
-  const brandLogoURL = resolveBrandAssetURL(appMeta.top_left_logo_url || "/logo-mark.svg") || "/logo-mark.svg";
+  const brandTitle =
+    (appMeta.app_title || "chatgpt2api").trim() || "chatgpt2api";
+  const brandLogoURL =
+    resolveBrandAssetURL(appMeta.top_left_logo_url || "/logo-mark.svg") ||
+    "/logo-mark.svg";
 
   return (
     <header className="sticky top-3 z-40 rounded-[24px] border border-border bg-card/90 shadow-[0_0_22.576px_rgba(44,74,116,0.09)] backdrop-blur dark:border-border dark:bg-card/92">
-      <div className="flex min-h-14 flex-col gap-2 px-3 py-2 lg:flex-row lg:items-center lg:justify-between lg:gap-6 lg:px-5">
-        <div className="flex min-w-0 items-center justify-between gap-2 lg:shrink-0 lg:justify-start lg:pr-1">
+      <div className="flex min-h-14 flex-col gap-2 px-2 py-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3 lg:px-3">
+        <div className="flex min-w-0 items-center justify-between gap-2 lg:shrink-0 lg:justify-start lg:pr-0.5">
           <Button
             type="button"
             variant="ghost"
             className={cn(
-              "font-display h-9 max-w-[190px] justify-start rounded-full px-1.5 pr-2 text-[15px] font-semibold text-[#18181b] shadow-none hover:bg-black/[0.04] hover:text-[#1456f0] sm:max-w-none dark:text-foreground dark:hover:text-sky-300",
-              navCollapsed ? "bg-black/[0.04] text-[#1456f0] dark:bg-accent dark:text-sky-300" : "",
+              "font-display h-9 max-w-[160px] justify-start rounded-full px-1 pr-1.5 text-[15px] font-semibold text-[#18181b] shadow-none hover:bg-black/[0.04] hover:text-[#1456f0] sm:max-w-none lg:max-w-[170px] xl:max-w-[190px] dark:text-foreground dark:hover:text-sky-300",
+              navCollapsed
+                ? "bg-black/[0.04] text-[#1456f0] dark:bg-accent dark:text-sky-300"
+                : "",
             )}
             aria-controls={PRIMARY_NAV_ID}
             aria-expanded={!navCollapsed}
@@ -376,10 +439,16 @@ export function TopNav() {
               className="size-7 rounded-[10px] shadow-[0_4px_10px_rgba(184,90,127,0.16)]"
             />
             <span className="truncate">{brandTitle}</span>
-            {navCollapsed ? <ChevronDown aria-hidden="true" /> : <ChevronUp aria-hidden="true" />}
+            {navCollapsed ? (
+              <ChevronDown aria-hidden="true" />
+            ) : (
+              <ChevronUp aria-hidden="true" />
+            )}
           </Button>
           <div className="ml-auto flex shrink-0 items-center gap-1 lg:hidden">
-            {canAccessImageTasks ? <ImageTaskQueue className="size-8 px-0" /> : null}
+            {canAccessImageTasks ? (
+              <ImageTaskQueue className="size-8 px-0" />
+            ) : null}
             <AnnouncementNotifications target="image" className="size-8" />
             <ThemeToggleButton theme={theme} onToggle={handleThemeToggle} />
             <AccountMenu
@@ -395,7 +464,7 @@ export function TopNav() {
           id={PRIMARY_NAV_ID}
           aria-label="主导航"
           className={cn(
-            "hide-scrollbar -mx-1 min-w-0 gap-1 overflow-x-auto overscroll-x-contain px-1 pb-0.5 scroll-px-1 touch-pan-x [-webkit-overflow-scrolling:touch] lg:mx-0 lg:flex-1 lg:justify-center lg:gap-2 lg:px-2 lg:pb-0",
+            "hide-scrollbar -mx-1 min-w-0 gap-1 overflow-x-auto overscroll-x-contain px-1 pb-0.5 scroll-px-1 touch-pan-x [-webkit-overflow-scrolling:touch] lg:mx-0 lg:flex-1 lg:justify-start lg:gap-1 lg:px-1 lg:pb-0",
             navCollapsed ? "hidden" : "flex",
           )}
         >
@@ -403,7 +472,7 @@ export function TopNav() {
             <NavPill key={item.href} item={item} pathname={pathname} />
           ))}
         </nav>
-        <div className="hidden shrink-0 items-center justify-end gap-1.5 lg:flex">
+        <div className="hidden shrink-0 items-center justify-end gap-1 lg:flex">
           {canAccessImageTasks ? <ImageTaskQueue /> : null}
           <AnnouncementNotifications target="image" className="size-8" />
           <ThemeToggleButton theme={theme} onToggle={handleThemeToggle} />
@@ -419,4 +488,3 @@ export function TopNav() {
     </header>
   );
 }
-

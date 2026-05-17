@@ -1190,7 +1190,9 @@ export default function AgencyPage() {
               const sessionData = await verifySession(token);
               roleName = String(sessionData.role_name || "").trim();
               roleID = String(sessionData.role_id || "").trim();
-            } catch {}
+            } catch {
+              // ignore token refresh failure and fallback to cached session role
+            }
           }
           const walletTier = wallet.wallet?.agency_enabled ? String(wallet.wallet?.agency_tier || "").trim() : "";
           const tier = tierRank(walletTier) > 0 ? walletTier : tierFromRole(roleName, roleID);

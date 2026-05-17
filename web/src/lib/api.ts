@@ -20,8 +20,13 @@ export type ImageModel = (typeof IMAGE_MODEL_OPTIONS)[number]["value"];
 export const DEFAULT_IMAGE_MODEL: ImageModel = "gpt-image-2";
 export const DEFAULT_CHAT_MODEL: ImageModel = "auto";
 export const CODEX_IMAGE_MODEL: ImageModel = "codex-gpt-image-2";
-const IMAGE_MODEL_VALUES = new Set<string>(IMAGE_MODEL_OPTIONS.map((option) => option.value));
-const IMAGE_TASK_MODEL_VALUES = new Set<ImageModel>(["gpt-image-2", "codex-gpt-image-2"]);
+const IMAGE_MODEL_VALUES = new Set<string>(
+  IMAGE_MODEL_OPTIONS.map((option) => option.value),
+);
+const IMAGE_TASK_MODEL_VALUES = new Set<ImageModel>([
+  "gpt-image-2",
+  "codex-gpt-image-2",
+]);
 const RESPONSE_IMAGE_TOOL_MODEL_VALUES = new Set<ImageModel>([
   "auto",
   "gpt-image-2",
@@ -46,10 +51,16 @@ const CHAT_MODEL_VALUES = new Set<ImageModel>([
   "gpt-5.4",
   "gpt-5.5",
 ]);
-export const IMAGE_TASK_MODEL_OPTIONS = IMAGE_MODEL_OPTIONS.filter((option) => IMAGE_TASK_MODEL_VALUES.has(option.value));
-export const RESPONSE_IMAGE_TOOL_MODEL_OPTIONS = IMAGE_MODEL_OPTIONS.filter((option) => RESPONSE_IMAGE_TOOL_MODEL_VALUES.has(option.value));
+export const IMAGE_TASK_MODEL_OPTIONS = IMAGE_MODEL_OPTIONS.filter((option) =>
+  IMAGE_TASK_MODEL_VALUES.has(option.value),
+);
+export const RESPONSE_IMAGE_TOOL_MODEL_OPTIONS = IMAGE_MODEL_OPTIONS.filter(
+  (option) => RESPONSE_IMAGE_TOOL_MODEL_VALUES.has(option.value),
+);
 export const IMAGE_CREATION_MODEL_OPTIONS = IMAGE_TASK_MODEL_OPTIONS;
-export const CHAT_MODEL_OPTIONS = IMAGE_MODEL_OPTIONS.filter((option) => CHAT_MODEL_VALUES.has(option.value));
+export const CHAT_MODEL_OPTIONS = IMAGE_MODEL_OPTIONS.filter((option) =>
+  CHAT_MODEL_VALUES.has(option.value),
+);
 
 export function isImageModel(value: unknown): value is ImageModel {
   return typeof value === "string" && IMAGE_MODEL_VALUES.has(value);
@@ -93,7 +104,9 @@ export function isImageQuality(value: unknown): value is ImageQuality {
   return typeof value === "string" && IMAGE_QUALITY_VALUES.has(value);
 }
 
-export function isImageOutputFormat(value: unknown): value is ImageOutputFormat {
+export function isImageOutputFormat(
+  value: unknown,
+): value is ImageOutputFormat {
   return typeof value === "string" && IMAGE_OUTPUT_FORMAT_VALUES.has(value);
 }
 
@@ -203,6 +216,28 @@ export type SettingsConfig = {
   agency_tier_basic_discount_bp?: number | string;
   agency_tier_pro_discount_bp?: number | string;
   agency_tier_premium_discount_bp?: number | string;
+  subscription_heading?: string;
+  subscription_subheading?: string;
+  subscription_safety_text?: string;
+  subscription_agent_hint?: string;
+  subscription_monthly_name?: string;
+  subscription_monthly_desc?: string;
+  subscription_monthly_badge?: string;
+  subscription_monthly_price_cents?: number | string;
+  subscription_monthly_price_note?: string;
+  subscription_monthly_features?: string;
+  subscription_quarterly_name?: string;
+  subscription_quarterly_desc?: string;
+  subscription_quarterly_badge?: string;
+  subscription_quarterly_price_cents?: number | string;
+  subscription_quarterly_price_note?: string;
+  subscription_quarterly_features?: string;
+  subscription_yearly_name?: string;
+  subscription_yearly_desc?: string;
+  subscription_yearly_badge?: string;
+  subscription_yearly_price_cents?: number | string;
+  subscription_yearly_price_note?: string;
+  subscription_yearly_features?: string;
   yipay_enabled?: boolean;
   yipay_pid?: string;
   yipay_key?: string;
@@ -576,8 +611,16 @@ export type PayOrder = {
   id: string;
   record_type?: "transaction" | "order";
   type?: string;
-  order_kind?: "recharge" | "agency_join" | "agency_upgrade" | string;
+  order_kind?:
+    | "recharge"
+    | "agency_join"
+    | "agency_upgrade"
+    | "subscription_monthly"
+    | "subscription_quarterly"
+    | "subscription_yearly"
+    | string;
   agency_tier?: "basic" | "pro" | "premium" | string;
+  subscription_tier?: "monthly" | "quarterly" | "yearly" | string;
   provider: string;
   status: PayOrderStatus | string;
   out_trade_no?: string;
@@ -720,9 +763,74 @@ export type ManagedUser = {
   total_consume_cents?: number;
   billing_user?: boolean;
   image_price_cents?: number;
+  subscription_tier?: "monthly" | "quarterly" | "yearly" | string;
+  subscription_start_at?: string;
+  subscription_expire_at?: string;
+  subscription_active?: boolean;
   has_password?: boolean;
   menu_paths?: string[];
   api_permissions?: string[];
+};
+
+export type SubscriptionAdminReport = {
+  summary: {
+    orders: number;
+    revenue_cents: number;
+    revenue_yuan: string;
+    renewal_orders: number;
+    new_subscribers: number;
+    paid_user_count: number;
+    generated_at: string;
+    filter_status?: string;
+    filter_tier?: string;
+    filter_start_at?: string;
+    filter_end_at?: string;
+  };
+  tiers: Record<
+    string,
+    {
+      orders: number;
+      revenue_cents: number;
+      revenue_yuan: string;
+      new_subscribers: number;
+      renewals: number;
+    }
+  >;
+  items: PayOrder[];
+};
+
+export type SubscriptionTier = "monthly" | "quarterly" | "yearly";
+
+export type SubscriptionPlan = {
+  key: SubscriptionTier | string;
+  name: string;
+  description?: string;
+  badge?: string;
+  price_cents: number;
+  price_yuan?: number;
+  price_note?: string;
+  features?: string[];
+  role_name?: string;
+  period_label?: string;
+};
+
+export type SubscriptionStatus = {
+  tier?: SubscriptionTier | string;
+  start_at?: string;
+  expire_at?: string;
+  active: boolean;
+  remaining_days?: number;
+};
+
+export type SubscriptionPlansResponse = {
+  plans: SubscriptionPlan[];
+  status: SubscriptionStatus;
+  wallet: WalletInfo;
+  pay_channels?: string[];
+  heading?: string;
+  subheading?: string;
+  safety_text?: string;
+  agent_hint?: string;
 };
 
 export type ManagedRole = {
@@ -792,7 +900,13 @@ export type LoginPayload = {
 };
 
 export async function login(payload: LoginPayload) {
-  const { username = "", email = "", password = "", key = "", cfTurnstileToken = "" } = payload;
+  const {
+    username = "",
+    email = "",
+    password = "",
+    key = "",
+    cfTurnstileToken = "",
+  } = payload;
   return httpRequest<LoginResponse>("/auth/login", {
     method: "POST",
     body: {
@@ -806,15 +920,21 @@ export async function login(payload: LoginPayload) {
   });
 }
 
-export async function sendRegisterCode(email: string, cfTurnstileToken?: string) {
-  return httpRequest<{ ok: boolean; expires_in?: number }>("/auth/register/send-code", {
-    method: "POST",
-    body: {
-      email,
-      cf_turnstile_token: cfTurnstileToken ?? "",
+export async function sendRegisterCode(
+  email: string,
+  cfTurnstileToken?: string,
+) {
+  return httpRequest<{ ok: boolean; expires_in?: number }>(
+    "/auth/register/send-code",
+    {
+      method: "POST",
+      body: {
+        email,
+        cf_turnstile_token: cfTurnstileToken ?? "",
+      },
+      redirectOnUnauthorized: false,
     },
-    redirectOnUnauthorized: false,
-  });
+  );
 }
 
 export async function registerAccount(
@@ -841,15 +961,21 @@ export async function registerAccount(
   });
 }
 
-export async function sendPasswordResetCode(email: string, cfTurnstileToken?: string) {
-  return httpRequest<{ ok: boolean; expires_in?: number }>("/auth/password/send-code", {
-    method: "POST",
-    body: {
-      email,
-      cf_turnstile_token: cfTurnstileToken ?? "",
+export async function sendPasswordResetCode(
+  email: string,
+  cfTurnstileToken?: string,
+) {
+  return httpRequest<{ ok: boolean; expires_in?: number }>(
+    "/auth/password/send-code",
+    {
+      method: "POST",
+      body: {
+        email,
+        cf_turnstile_token: cfTurnstileToken ?? "",
+      },
+      redirectOnUnauthorized: false,
     },
-    redirectOnUnauthorized: false,
-  });
+  );
 }
 
 export async function resetPasswordByEmail(
@@ -875,35 +1001,72 @@ export async function fetchWallet() {
 }
 
 export async function redeemWalletCode(payload: { code: string }) {
-  return httpRequest<{ ok: boolean; wallet: WalletInfo }>("/api/wallet/redeem", {
-    method: "POST",
-    body: payload,
-  });
+  return httpRequest<{ ok: boolean; wallet: WalletInfo }>(
+    "/api/wallet/redeem",
+    {
+      method: "POST",
+      body: payload,
+    },
+  );
 }
 
-export async function createPayOrder(payload: { amount?: string; amount_cents?: number; pay_type: PayType }) {
+export async function createPayOrder(payload: {
+  amount?: string;
+  amount_cents?: number;
+  pay_type: PayType;
+}) {
   return httpRequest<{ order: PayOrder }>("/api/pay/orders", {
     method: "POST",
     body: payload,
   });
 }
 
-export async function fetchPayOrders(filters: {
-  limit?: number;
-  record_type?: "transaction" | "order" | "all";
-  type?: "recharge" | "consume" | "adjust" | "all";
-  status?: "pending" | "paid" | "failed" | "all";
-  page?: number;
-  page_size?: number;
-} = {}) {
+export async function fetchSubscriptionPlans() {
+  return httpRequest<SubscriptionPlansResponse>("/api/subscriptions/plans");
+}
+
+export async function createSubscriptionOrder(payload: {
+  tier: SubscriptionTier;
+  pay_type: PayType | "balance";
+}) {
+  return httpRequest<{
+    ok: boolean;
+    pending_payment?: boolean;
+    tier: SubscriptionTier | string;
+    order?: PayOrder;
+    wallet?: WalletInfo;
+    status?: SubscriptionStatus;
+  }>("/api/subscriptions/orders", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function fetchPayOrders(
+  filters: {
+    limit?: number;
+    record_type?: "transaction" | "order" | "all";
+    type?: "recharge" | "consume" | "adjust" | "all";
+    status?: "pending" | "paid" | "failed" | "all";
+    page?: number;
+    page_size?: number;
+  } = {},
+) {
   const params = new URLSearchParams();
-  if (filters.limit && filters.limit > 0) params.set("limit", String(filters.limit));
-  if (filters.record_type && filters.record_type !== "all") params.set("record_type", filters.record_type);
+  if (filters.limit && filters.limit > 0)
+    params.set("limit", String(filters.limit));
+  if (filters.record_type && filters.record_type !== "all")
+    params.set("record_type", filters.record_type);
   if (filters.type && filters.type !== "all") params.set("type", filters.type);
-  if (filters.status && filters.status !== "all") params.set("status", filters.status);
-  if (filters.page && filters.page > 0) params.set("page", String(filters.page));
-  if (filters.page_size && filters.page_size > 0) params.set("page_size", String(filters.page_size));
-  return httpRequest<PayOrderListResponse>(`/api/pay/orders${params.toString() ? `?${params.toString()}` : ""}`);
+  if (filters.status && filters.status !== "all")
+    params.set("status", filters.status);
+  if (filters.page && filters.page > 0)
+    params.set("page", String(filters.page));
+  if (filters.page_size && filters.page_size > 0)
+    params.set("page_size", String(filters.page_size));
+  return httpRequest<PayOrderListResponse>(
+    `/api/pay/orders${params.toString() ? `?${params.toString()}` : ""}`,
+  );
 }
 
 export async function verifySession(token: string) {
@@ -931,9 +1094,12 @@ export async function fetchAuthProviders() {
 
 export async function fetchVisibleAnnouncements(target: AnnouncementTarget) {
   const params = new URLSearchParams({ target });
-  return httpRequest<{ items: Announcement[] }>(`/api/announcements?${params.toString()}`, {
-    redirectOnUnauthorized: false,
-  });
+  return httpRequest<{ items: Announcement[] }>(
+    `/api/announcements?${params.toString()}`,
+    {
+      redirectOnUnauthorized: false,
+    },
+  );
 }
 
 export async function fetchAdminAnnouncements() {
@@ -947,26 +1113,40 @@ export async function createAnnouncement(announcement: {
   show_login: boolean;
   show_image: boolean;
 }) {
-  return httpRequest<{ item: Announcement; items: Announcement[] }>("/api/admin/announcements", {
-    method: "POST",
-    body: announcement,
-  });
+  return httpRequest<{ item: Announcement; items: Announcement[] }>(
+    "/api/admin/announcements",
+    {
+      method: "POST",
+      body: announcement,
+    },
+  );
 }
 
 export async function updateAnnouncement(
   announcementId: string,
-  updates: Partial<Pick<Announcement, "title" | "content" | "enabled" | "show_login" | "show_image">>,
+  updates: Partial<
+    Pick<
+      Announcement,
+      "title" | "content" | "enabled" | "show_login" | "show_image"
+    >
+  >,
 ) {
-  return httpRequest<{ item: Announcement; items: Announcement[] }>(`/api/admin/announcements/${announcementId}`, {
-    method: "POST",
-    body: updates,
-  });
+  return httpRequest<{ item: Announcement; items: Announcement[] }>(
+    `/api/admin/announcements/${announcementId}`,
+    {
+      method: "POST",
+      body: updates,
+    },
+  );
 }
 
 export async function deleteAnnouncement(announcementId: string) {
-  return httpRequest<{ items: Announcement[] }>(`/api/admin/announcements/${announcementId}`, {
-    method: "DELETE",
-  });
+  return httpRequest<{ items: Announcement[] }>(
+    `/api/admin/announcements/${announcementId}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export async function fetchAccounts() {
@@ -1015,24 +1195,32 @@ export async function updateAccount(
   });
 }
 
-export async function generateImage(prompt: string, model?: ImageModel, size?: string, quality?: ImageQuality) {
+export async function generateImage(
+  prompt: string,
+  model?: ImageModel,
+  size?: string,
+  quality?: ImageQuality,
+) {
   void quality;
-  return httpRequest<ImageResponse>(
-    "/v1/images/generations",
-    {
-      method: "POST",
-      body: {
-        prompt,
-        ...(model ? { model } : {}),
-        ...(size ? { size } : {}),
-        n: 1,
-        response_format: "b64_json",
-      },
+  return httpRequest<ImageResponse>("/v1/images/generations", {
+    method: "POST",
+    body: {
+      prompt,
+      ...(model ? { model } : {}),
+      ...(size ? { size } : {}),
+      n: 1,
+      response_format: "b64_json",
     },
-  );
+  });
 }
 
-export async function editImage(files: File | File[], prompt: string, model?: ImageModel, size?: string, quality?: ImageQuality) {
+export async function editImage(
+  files: File | File[],
+  prompt: string,
+  model?: ImageModel,
+  size?: string,
+  quality?: ImageQuality,
+) {
   void quality;
   const formData = new FormData();
   const uploadFiles = Array.isArray(files) ? files : [files];
@@ -1049,13 +1237,10 @@ export async function editImage(files: File | File[], prompt: string, model?: Im
   }
   formData.append("n", "1");
 
-  return httpRequest<ImageResponse>(
-    "/v1/images/edits",
-    {
-      method: "POST",
-      body: formData,
-    },
-  );
+  return httpRequest<ImageResponse>("/v1/images/edits", {
+    method: "POST",
+    body: formData,
+  });
 }
 
 export async function createImageGenerationTask(
@@ -1081,7 +1266,9 @@ export async function createImageGenerationTask(
       ...(model ? { model } : {}),
       ...(size ? { size } : {}),
       ...(outputFormat ? { output_format: outputFormat } : {}),
-      ...(typeof outputCompression === "number" ? { output_compression: outputCompression } : {}),
+      ...(typeof outputCompression === "number"
+        ? { output_compression: outputCompression }
+        : {}),
       ...(messages?.length ? { messages } : {}),
       visibility,
       n: count,
@@ -1105,21 +1292,26 @@ export async function createResponseImageGenerationTask(
 ) {
   void quality;
   void imageResolution;
-  return httpRequest<CreationTask>("/api/creation-tasks/response-image-generations", {
-    method: "POST",
-    body: {
-      client_task_id: clientTaskId,
-      prompt,
-      model,
-      ...(size ? { size } : {}),
-      ...(outputFormat ? { output_format: outputFormat } : {}),
-      ...(typeof outputCompression === "number" ? { output_compression: outputCompression } : {}),
-      ...(messages?.length ? { messages } : {}),
-      ...(images?.length ? { images } : {}),
-      visibility,
-      n: count,
+  return httpRequest<CreationTask>(
+    "/api/creation-tasks/response-image-generations",
+    {
+      method: "POST",
+      body: {
+        client_task_id: clientTaskId,
+        prompt,
+        model,
+        ...(size ? { size } : {}),
+        ...(outputFormat ? { output_format: outputFormat } : {}),
+        ...(typeof outputCompression === "number"
+          ? { output_compression: outputCompression }
+          : {}),
+        ...(messages?.length ? { messages } : {}),
+        ...(images?.length ? { images } : {}),
+        visibility,
+        n: count,
+      },
     },
-  });
+  );
 }
 
 export async function createImageEditTask(
@@ -1187,7 +1379,10 @@ export async function createChatCompletionTask(
   });
 }
 
-export async function createChatCompletion(model: ImageModel, messages: CreationTaskMessage[]) {
+export async function createChatCompletion(
+  model: ImageModel,
+  messages: CreationTaskMessage[],
+) {
   return httpRequest<ChatCompletionResponse>("/v1/chat/completions", {
     method: "POST",
     body: {
@@ -1203,12 +1398,15 @@ export async function fetchCreationTasks(ids: string[]) {
   if (ids.length > 0) {
     params.set("ids", ids.join(","));
   }
-  const data = await httpRequest<CreationTaskListResponse>(`/api/creation-tasks${params.toString() ? `?${params.toString()}` : ""}`, {
-    headers: {
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
+  const data = await httpRequest<CreationTaskListResponse>(
+    `/api/creation-tasks${params.toString() ? `?${params.toString()}` : ""}`,
+    {
+      headers: {
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
     },
-  });
+  );
   return {
     items: Array.isArray(data.items) ? data.items : [],
     missing_ids: Array.isArray(data.missing_ids) ? data.missing_ids : [],
@@ -1216,10 +1414,13 @@ export async function fetchCreationTasks(ids: string[]) {
 }
 
 export async function cancelCreationTask(clientTaskId: string) {
-  return httpRequest<CreationTask>(`/api/creation-tasks/${encodeURIComponent(clientTaskId)}/cancel`, {
-    method: "POST",
-    body: {},
-  });
+  return httpRequest<CreationTask>(
+    `/api/creation-tasks/${encodeURIComponent(clientTaskId)}/cancel`,
+    {
+      method: "POST",
+      body: {},
+    },
+  );
 }
 
 export async function fetchSettingsConfig() {
@@ -1258,7 +1459,9 @@ export async function fetchAgencyCommissionDashboard() {
 }
 
 export async function fetchAgencyWithdrawals(limit = 100) {
-  return httpRequest<{ items: AgencyWithdrawalRequest[] }>(`/api/agency/withdrawals?limit=${encodeURIComponent(String(limit))}`);
+  return httpRequest<{ items: AgencyWithdrawalRequest[] }>(
+    `/api/agency/withdrawals?limit=${encodeURIComponent(String(limit))}`,
+  );
 }
 
 export async function createAgencyWithdrawal(payload: {
@@ -1268,42 +1471,75 @@ export async function createAgencyWithdrawal(payload: {
   phone?: string;
   wechat_id?: string;
 }) {
-  return httpRequest<{ ok: boolean; item: AgencyWithdrawalRequest }>("/api/agency/withdrawals", {
-    method: "POST",
-    body: payload,
-  });
+  return httpRequest<{ ok: boolean; item: AgencyWithdrawalRequest }>(
+    "/api/agency/withdrawals",
+    {
+      method: "POST",
+      body: payload,
+    },
+  );
 }
 
 export async function fetchAgencyWithdrawProfile() {
-  return httpRequest<{ profile: AgencyWithdrawProfile }>("/api/agency/withdraw-profile");
+  return httpRequest<{ profile: AgencyWithdrawProfile }>(
+    "/api/agency/withdraw-profile",
+  );
 }
 
-export async function updateAgencyWithdrawProfile(payload: AgencyWithdrawProfile) {
-  return httpRequest<{ ok: boolean; profile: AgencyWithdrawProfile }>("/api/agency/withdraw-profile", {
-    method: "POST",
-    body: payload,
-  });
+export async function updateAgencyWithdrawProfile(
+  payload: AgencyWithdrawProfile,
+) {
+  return httpRequest<{ ok: boolean; profile: AgencyWithdrawProfile }>(
+    "/api/agency/withdraw-profile",
+    {
+      method: "POST",
+      body: payload,
+    },
+  );
 }
 
-export async function uploadAgencyWithdrawQRCode(kind: "alipay" | "wechat", file: File) {
+export async function uploadAgencyWithdrawQRCode(
+  kind: "alipay" | "wechat",
+  file: File,
+) {
   const formData = new FormData();
   formData.append("kind", kind);
   formData.append("file", file);
-  return httpRequest<{ ok: boolean; url: string; profile: AgencyWithdrawProfile }>("/api/agency/withdraw-profile/upload", {
+  return httpRequest<{
+    ok: boolean;
+    url: string;
+    profile: AgencyWithdrawProfile;
+  }>("/api/agency/withdraw-profile/upload", {
     method: "POST",
     body: formData,
   });
 }
 
-export async function joinAgencyTier(tier: "basic" | "pro" | "premium", pay_type?: PayType) {
-  return httpRequest<{ ok: boolean; pending_payment?: boolean; tier: string; order?: PayOrder }>("/api/agency/join", {
+export async function joinAgencyTier(
+  tier: "basic" | "pro" | "premium",
+  pay_type?: PayType,
+) {
+  return httpRequest<{
+    ok: boolean;
+    pending_payment?: boolean;
+    tier: string;
+    order?: PayOrder;
+  }>("/api/agency/join", {
     method: "POST",
     body: { tier, pay_type },
   });
 }
 
-export async function upgradeAgencyTier(tier: "basic" | "pro" | "premium", pay_type?: PayType) {
-  return httpRequest<{ ok: boolean; pending_payment?: boolean; tier: string; order?: PayOrder }>("/api/agency/upgrade", {
+export async function upgradeAgencyTier(
+  tier: "basic" | "pro" | "premium",
+  pay_type?: PayType,
+) {
+  return httpRequest<{
+    ok: boolean;
+    pending_payment?: boolean;
+    tier: string;
+    order?: PayOrder;
+  }>("/api/agency/upgrade", {
     method: "POST",
     body: { tier, pay_type },
   });
@@ -1313,22 +1549,38 @@ export async function fetchAgencyAdminUsers() {
   return httpRequest<{ items: AgencyAdminUser[] }>("/api/agency/admin/users");
 }
 
-export async function activateAgencyUser(payload: { user_id: string; tier: "basic" | "pro" | "premium" }) {
-  return httpRequest<{ ok: boolean; wallet?: Record<string, unknown>; tier: string }>("/api/agency/admin/users", {
+export async function activateAgencyUser(payload: {
+  user_id: string;
+  tier: "basic" | "pro" | "premium";
+}) {
+  return httpRequest<{
+    ok: boolean;
+    wallet?: Record<string, unknown>;
+    tier: string;
+  }>("/api/agency/admin/users", {
     method: "POST",
     body: payload,
   });
 }
 
 export async function fetchAgencyAdminWithdrawals(limit = 500) {
-  return httpRequest<{ items: AgencyWithdrawalRequest[] }>(`/api/agency/admin/withdrawals?limit=${encodeURIComponent(String(limit))}`);
+  return httpRequest<{ items: AgencyWithdrawalRequest[] }>(
+    `/api/agency/admin/withdrawals?limit=${encodeURIComponent(String(limit))}`,
+  );
 }
 
-export async function updateAgencyAdminWithdrawal(payload: { id: string; status: "pending" | "approved" | "paid" | "rejected"; admin_note?: string }) {
-  return httpRequest<{ ok: boolean; item: AgencyWithdrawalRequest }>("/api/agency/admin/withdrawals", {
-    method: "POST",
-    body: payload,
-  });
+export async function updateAgencyAdminWithdrawal(payload: {
+  id: string;
+  status: "pending" | "approved" | "paid" | "rejected";
+  admin_note?: string;
+}) {
+  return httpRequest<{ ok: boolean; item: AgencyWithdrawalRequest }>(
+    "/api/agency/admin/withdrawals",
+    {
+      method: "POST",
+      body: payload,
+    },
+  );
 }
 
 export async function updateSettingsConfig(settings: Partial<SettingsConfig>) {
@@ -1345,17 +1597,29 @@ export async function updateLoginPageImageSettings(
   const formData = new FormData();
   formData.append("login_page_image_url", settings.login_page_image_url);
   formData.append("login_page_image_mode", settings.login_page_image_mode);
-  formData.append("login_page_image_zoom", String(settings.login_page_image_zoom));
-  formData.append("login_page_image_position_x", String(settings.login_page_image_position_x));
-  formData.append("login_page_image_position_y", String(settings.login_page_image_position_y));
+  formData.append(
+    "login_page_image_zoom",
+    String(settings.login_page_image_zoom),
+  );
+  formData.append(
+    "login_page_image_position_x",
+    String(settings.login_page_image_position_x),
+  );
+  formData.append(
+    "login_page_image_position_y",
+    String(settings.login_page_image_position_y),
+  );
   formData.append("login_page_image_action", options.action);
   if (options.file) {
     formData.append("login_page_image_file", options.file);
   }
-  return httpRequest<{ config: SettingsConfig }>("/api/settings/login-page-image", {
-    method: "POST",
-    body: formData,
-  });
+  return httpRequest<{ config: SettingsConfig }>(
+    "/api/settings/login-page-image",
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
 }
 
 export async function fetchManagedImages(
@@ -1374,37 +1638,48 @@ export async function fetchManagedImages(
   if (filters.start_date) params.set("start_date", filters.start_date);
   if (filters.end_date) params.set("end_date", filters.end_date);
   if (filters.owner_query) params.set("owner_query", filters.owner_query);
-  if (filters.page && filters.page > 0) params.set("page", String(filters.page));
-  if (filters.page_size && filters.page_size > 0) params.set("page_size", String(filters.page_size));
-  const data = await httpRequest<{ items?: ManagedImage[] | null; groups?: Array<{ date: string; items: ManagedImage[] }> | null }>(
-    `/api/images${params.toString() ? `?${params.toString()}` : ""}`,
-    { signal: options.signal },
-  );
+  if (filters.page && filters.page > 0)
+    params.set("page", String(filters.page));
+  if (filters.page_size && filters.page_size > 0)
+    params.set("page_size", String(filters.page_size));
+  const data = await httpRequest<{
+    items?: ManagedImage[] | null;
+    groups?: Array<{ date: string; items: ManagedImage[] }> | null;
+  }>(`/api/images${params.toString() ? `?${params.toString()}` : ""}`, {
+    signal: options.signal,
+  });
   return {
     items: Array.isArray(data.items) ? data.items : [],
     groups: Array.isArray(data.groups) ? data.groups : [],
     total: Number((data as { total?: unknown }).total || 0),
     page: Number((data as { page?: unknown }).page || 1),
-    page_size: Number((data as { page_size?: unknown }).page_size || filters.page_size || 20),
+    page_size: Number(
+      (data as { page_size?: unknown }).page_size || filters.page_size || 20,
+    ),
     total_page: Number((data as { total_page?: unknown }).total_page || 1),
   };
 }
 
-export async function updateManagedImageVisibility(path: string, visibility: ImageVisibility) {
-  return httpRequest<{ item: Partial<ManagedImage> & { path: string; visibility: ImageVisibility } }>(
-    "/api/images/visibility",
-    {
-      method: "PATCH",
-      body: { path, visibility },
-    },
-  );
+export async function updateManagedImageVisibility(
+  path: string,
+  visibility: ImageVisibility,
+) {
+  return httpRequest<{
+    item: Partial<ManagedImage> & { path: string; visibility: ImageVisibility };
+  }>("/api/images/visibility", {
+    method: "PATCH",
+    body: { path, visibility },
+  });
 }
 
 export async function deleteManagedImages(paths: string[]) {
-  return httpRequest<{ deleted: number; missing: number; paths: string[] }>("/api/images", {
-    method: "DELETE",
-    body: { paths },
-  });
+  return httpRequest<{ deleted: number; missing: number; paths: string[] }>(
+    "/api/images",
+    {
+      method: "DELETE",
+      body: { paths },
+    },
+  );
 }
 
 export async function uploadManagedImagesToR2(paths: string[]) {
@@ -1413,7 +1688,12 @@ export async function uploadManagedImagesToR2(paths: string[]) {
     skipped?: number;
     missing: number;
     failed: number;
-    items: Array<{ path: string; key: string; url?: string; skipped?: boolean }>;
+    items: Array<{
+      path: string;
+      key: string;
+      url?: string;
+      skipped?: boolean;
+    }>;
     errors?: Array<{ path?: string; error: string }>;
   }>("/api/images/r2-upload", {
     method: "POST",
@@ -1424,20 +1704,32 @@ export async function uploadManagedImagesToR2(paths: string[]) {
 export async function fetchSystemLogs(filters: SystemLogFilters) {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
-    if (value === undefined || value === null || value === "" || value === "all") {
+    if (
+      value === undefined ||
+      value === null ||
+      value === "" ||
+      value === "all"
+    ) {
       continue;
     }
     params.set(key, String(value));
   }
-  return httpRequest<{ items: SystemLog[] }>(`/api/logs${params.toString() ? `?${params.toString()}` : ""}`);
+  return httpRequest<{ items: SystemLog[] }>(
+    `/api/logs${params.toString() ? `?${params.toString()}` : ""}`,
+  );
 }
 
 export async function fetchLogGovernance() {
-  return httpRequest<{ governance: LogGovernanceSummary }>("/api/logs/governance");
+  return httpRequest<{ governance: LogGovernanceSummary }>(
+    "/api/logs/governance",
+  );
 }
 
 export async function cleanupLogs(retentionDays: number) {
-  return httpRequest<{ cleanup: LogCleanupResult; governance: LogGovernanceSummary }>("/api/logs/governance", {
+  return httpRequest<{
+    cleanup: LogCleanupResult;
+    governance: LogGovernanceSummary;
+  }>("/api/logs/governance", {
     method: "POST",
     body: { retention_days: retentionDays },
   });
@@ -1448,7 +1740,9 @@ export async function checkSystemUpdates(force = false) {
   if (force) {
     params.set("force", "true");
   }
-  return httpRequest<SystemUpdateInfo>(`/api/admin/system/check-updates${params.toString() ? `?${params.toString()}` : ""}`);
+  return httpRequest<SystemUpdateInfo>(
+    `/api/admin/system/check-updates${params.toString() ? `?${params.toString()}` : ""}`,
+  );
 }
 
 export async function performSystemUpdate() {
@@ -1477,21 +1771,30 @@ export async function fetchUserKeys() {
 }
 
 export async function createUserKey(name: string) {
-  return httpRequest<{ item: UserKey; key: string; items: UserKey[] }>("/api/auth/users", {
-    method: "POST",
-    body: { name },
-  });
+  return httpRequest<{ item: UserKey; key: string; items: UserKey[] }>(
+    "/api/auth/users",
+    {
+      method: "POST",
+      body: { name },
+    },
+  );
 }
 
 export async function revealUserKey(keyId: string) {
   return httpRequest<{ key: string }>(`/api/auth/users/${keyId}/key`);
 }
 
-export async function updateUserKey(keyId: string, updates: { enabled?: boolean; name?: string }) {
-  return httpRequest<{ item: UserKey; items: UserKey[] }>(`/api/auth/users/${keyId}`, {
-    method: "POST",
-    body: updates,
-  });
+export async function updateUserKey(
+  keyId: string,
+  updates: { enabled?: boolean; name?: string },
+) {
+  return httpRequest<{ item: UserKey; items: UserKey[] }>(
+    `/api/auth/users/${keyId}`,
+    {
+      method: "POST",
+      body: updates,
+    },
+  );
 }
 
 export async function deleteUserKey(keyId: string) {
@@ -1509,21 +1812,30 @@ export async function fetchProfileAPIKey() {
 }
 
 export async function upsertProfileAPIKey(name: string) {
-  return httpRequest<{ item: UserKey; key: string; items: UserKey[] }>("/api/profile/api-key", {
-    method: "POST",
-    body: { name },
-  });
+  return httpRequest<{ item: UserKey; key: string; items: UserKey[] }>(
+    "/api/profile/api-key",
+    {
+      method: "POST",
+      body: { name },
+    },
+  );
 }
 
 export async function revealProfileAPIKey(keyId: string) {
   return httpRequest<{ key: string }>(`${profileAPIKeyPath(keyId)}/key`);
 }
 
-export async function updateProfileAPIKey(keyId: string, updates: { enabled?: boolean; name?: string }) {
-  return httpRequest<{ item: UserKey; items: UserKey[] }>(profileAPIKeyPath(keyId), {
-    method: "POST",
-    body: updates,
-  });
+export async function updateProfileAPIKey(
+  keyId: string,
+  updates: { enabled?: boolean; name?: string },
+) {
+  return httpRequest<{ item: UserKey; items: UserKey[] }>(
+    profileAPIKeyPath(keyId),
+    {
+      method: "POST",
+      body: updates,
+    },
+  );
 }
 
 export async function deleteProfileAPIKey(keyId: string) {
@@ -1539,7 +1851,10 @@ export async function updateProfileName(name: string) {
   });
 }
 
-export async function changeProfilePassword(currentPassword: string, newPassword: string) {
+export async function changeProfilePassword(
+  currentPassword: string,
+  newPassword: string,
+) {
   return httpRequest<{ ok: boolean }>("/api/profile/password", {
     method: "POST",
     body: {
@@ -1558,7 +1873,9 @@ export async function fetchManagedUsers() {
 }
 
 export async function fetchPermissionCatalog() {
-  return httpRequest<{ menus: PermissionMenu[]; apis: ApiPermission[] }>("/api/admin/permissions");
+  return httpRequest<{ menus: PermissionMenu[]; apis: ApiPermission[] }>(
+    "/api/admin/permissions",
+  );
 }
 
 function managedRolePath(roleId: string) {
@@ -1575,20 +1892,31 @@ export async function createManagedRole(updates: {
   menu_paths?: string[];
   api_permissions?: string[];
 }) {
-  return httpRequest<{ item: ManagedRole; items: ManagedRole[] }>("/api/admin/roles", {
-    method: "POST",
-    body: updates,
-  });
+  return httpRequest<{ item: ManagedRole; items: ManagedRole[] }>(
+    "/api/admin/roles",
+    {
+      method: "POST",
+      body: updates,
+    },
+  );
 }
 
 export async function updateManagedRole(
   roleId: string,
-  updates: { name?: string; description?: string; menu_paths?: string[]; api_permissions?: string[] },
+  updates: {
+    name?: string;
+    description?: string;
+    menu_paths?: string[];
+    api_permissions?: string[];
+  },
 ) {
-  return httpRequest<{ item: ManagedRole; items: ManagedRole[] }>(managedRolePath(roleId), {
-    method: "POST",
-    body: updates,
-  });
+  return httpRequest<{ item: ManagedRole; items: ManagedRole[] }>(
+    managedRolePath(roleId),
+    {
+      method: "POST",
+      body: updates,
+    },
+  );
 }
 
 export async function deleteManagedRole(roleId: string) {
@@ -1598,20 +1926,26 @@ export async function deleteManagedRole(roleId: string) {
 }
 
 export async function createManagedUser(payload: CreateManagedUserPayload) {
-  return httpRequest<{ item: ManagedUser; items: ManagedUser[] }>("/api/admin/users", {
-    method: "POST",
-    body: payload,
-  });
+  return httpRequest<{ item: ManagedUser; items: ManagedUser[] }>(
+    "/api/admin/users",
+    {
+      method: "POST",
+      body: payload,
+    },
+  );
 }
 
 export async function updateManagedUser(
   userId: string,
   updates: { enabled?: boolean; name?: string; role_id?: string },
 ) {
-  return httpRequest<{ item: ManagedUser; items: ManagedUser[] }>(managedUserPath(userId), {
-    method: "POST",
-    body: updates,
-  });
+  return httpRequest<{ item: ManagedUser; items: ManagedUser[] }>(
+    managedUserPath(userId),
+    {
+      method: "POST",
+      body: updates,
+    },
+  );
 }
 
 export async function adjustManagedUserBalance(
@@ -1627,8 +1961,28 @@ export async function adjustManagedUserBalance(
   );
 }
 
+export async function adjustManagedUserSubscription(
+  userId: string,
+  payload: {
+    mode: "set" | "extend" | "clear";
+    tier?: "monthly" | "quarterly" | "yearly" | string;
+    expire_at?: string;
+    extend_days?: number;
+  },
+) {
+  return httpRequest<{ status: SubscriptionStatus; items: ManagedUser[] }>(
+    `/api/admin/billing/users/${encodeURIComponent(userId)}/subscription`,
+    {
+      method: "POST",
+      body: payload,
+    },
+  );
+}
+
 export async function fetchRedeemCodes(limit = 200) {
-  return httpRequest<{ items: RedeemCode[] }>(`/api/admin/billing/redeem-codes?limit=${encodeURIComponent(String(limit))}`);
+  return httpRequest<{ items: RedeemCode[] }>(
+    `/api/admin/billing/redeem-codes?limit=${encodeURIComponent(String(limit))}`,
+  );
 }
 
 export async function createRedeemCodes(payload: {
@@ -1638,47 +1992,94 @@ export async function createRedeemCodes(payload: {
   expires_at?: string;
   note?: string;
 }) {
-  return httpRequest<{ items: RedeemCode[]; created: RedeemCode[] }>("/api/admin/billing/redeem-codes", {
-    method: "POST",
-    body: payload,
-  });
+  return httpRequest<{ items: RedeemCode[]; created: RedeemCode[] }>(
+    "/api/admin/billing/redeem-codes",
+    {
+      method: "POST",
+      body: payload,
+    },
+  );
 }
 
 export async function updateRedeemCode(
   code: string,
   payload: { enabled?: boolean; expires_at?: string; note?: string },
 ) {
-  return httpRequest<{ item: RedeemCode; items: RedeemCode[] }>(`/api/admin/billing/redeem-codes/${encodeURIComponent(code)}`, {
-    method: "POST",
-    body: payload,
-  });
+  return httpRequest<{ item: RedeemCode; items: RedeemCode[] }>(
+    `/api/admin/billing/redeem-codes/${encodeURIComponent(code)}`,
+    {
+      method: "POST",
+      body: payload,
+    },
+  );
 }
 
 export async function deleteRedeemCode(code: string) {
-  return httpRequest<{ items: RedeemCode[] }>(`/api/admin/billing/redeem-codes/${encodeURIComponent(code)}`, {
-    method: "DELETE",
-  });
+  return httpRequest<{ items: RedeemCode[] }>(
+    `/api/admin/billing/redeem-codes/${encodeURIComponent(code)}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
-export async function fetchAdminBillingOrders(filters: {
-  limit?: number;
-  status?: "pending" | "paid" | "failed" | "all";
-  order_kind?: "recharge" | "agency_join" | "agency_upgrade" | "all";
-  page?: number;
-  page_size?: number;
-} | number = 0) {
+export async function fetchAdminBillingOrders(
+  filters:
+    | {
+        limit?: number;
+        status?: "pending" | "paid" | "failed" | "all";
+        order_kind?:
+          | "recharge"
+          | "agency_join"
+          | "agency_upgrade"
+          | "subscription_monthly"
+          | "subscription_quarterly"
+          | "subscription_yearly"
+          | "all";
+        page?: number;
+        page_size?: number;
+      }
+    | number = 0,
+) {
   const params = new URLSearchParams();
   if (typeof filters === "number") {
     params.set("limit", String(filters));
   } else {
     if (filters.limit !== undefined) params.set("limit", String(filters.limit));
-    if (filters.status && filters.status !== "all") params.set("status", filters.status);
-    if (filters.order_kind && filters.order_kind !== "all") params.set("order_kind", filters.order_kind);
-    if (filters.page && filters.page > 0) params.set("page", String(filters.page));
-    if (filters.page_size && filters.page_size > 0) params.set("page_size", String(filters.page_size));
+    if (filters.status && filters.status !== "all")
+      params.set("status", filters.status);
+    if (filters.order_kind && filters.order_kind !== "all")
+      params.set("order_kind", filters.order_kind);
+    if (filters.page && filters.page > 0)
+      params.set("page", String(filters.page));
+    if (filters.page_size && filters.page_size > 0)
+      params.set("page_size", String(filters.page_size));
   }
-  return httpRequest<{ items: PayOrder[]; stats: AdminBillingStats; total?: number; page?: number; page_size?: number; total_page?: number }>(
-    `/api/admin/billing/orders?${params.toString()}`,
+  return httpRequest<{
+    items: PayOrder[];
+    stats: AdminBillingStats;
+    total?: number;
+    page?: number;
+    page_size?: number;
+    total_page?: number;
+  }>(`/api/admin/billing/orders?${params.toString()}`);
+}
+
+export async function fetchAdminSubscriptionReport(filters?: {
+  tier?: "monthly" | "quarterly" | "yearly" | "all";
+  status?: "paid" | "pending" | "failed" | "all";
+  start_at?: string;
+  end_at?: string;
+}) {
+  const params = new URLSearchParams();
+  if (filters?.tier && filters.tier !== "all") params.set("tier", filters.tier);
+  if (filters?.status && filters.status !== "all")
+    params.set("status", filters.status);
+  if (filters?.start_at) params.set("start_at", filters.start_at);
+  if (filters?.end_at) params.set("end_at", filters.end_at);
+  const query = params.toString();
+  return httpRequest<SubscriptionAdminReport>(
+    `/api/admin/billing/subscriptions/report${query ? `?${query}` : ""}`,
   );
 }
 
@@ -1687,13 +2088,15 @@ export async function revealManagedUserKey(userId: string) {
 }
 
 export async function resetManagedUserKey(userId: string, name?: string) {
-  return httpRequest<{ item: ManagedUser; api_key: UserKey; key: string; items: ManagedUser[] }>(
-    `${managedUserPath(userId)}/reset-key`,
-    {
-      method: "POST",
-      body: { name: name ?? "" },
-    },
-  );
+  return httpRequest<{
+    item: ManagedUser;
+    api_key: UserKey;
+    key: string;
+    items: ManagedUser[];
+  }>(`${managedUserPath(userId)}/reset-key`, {
+    method: "POST",
+    body: { name: name ?? "" },
+  });
 }
 
 export async function deleteManagedUser(userId: string) {
@@ -1702,11 +2105,17 @@ export async function deleteManagedUser(userId: string) {
   });
 }
 
-export async function resetManagedUserPassword(userId: string, password: string) {
-  return httpRequest<{ ok: boolean; items: ManagedUser[] }>(`${managedUserPath(userId)}/password`, {
-    method: "POST",
-    body: { password },
-  });
+export async function resetManagedUserPassword(
+  userId: string,
+  password: string,
+) {
+  return httpRequest<{ ok: boolean; items: ManagedUser[] }>(
+    `${managedUserPath(userId)}/password`,
+    {
+      method: "POST",
+      body: { password },
+    },
+  );
 }
 
 export async function fetchRegisterConfig() {
@@ -1721,15 +2130,21 @@ export async function updateRegisterConfig(updates: Partial<RegisterConfig>) {
 }
 
 export async function startRegister() {
-  return httpRequest<{ register: RegisterConfig }>("/api/register/start", { method: "POST" });
+  return httpRequest<{ register: RegisterConfig }>("/api/register/start", {
+    method: "POST",
+  });
 }
 
 export async function stopRegister() {
-  return httpRequest<{ register: RegisterConfig }>("/api/register/stop", { method: "POST" });
+  return httpRequest<{ register: RegisterConfig }>("/api/register/stop", {
+    method: "POST",
+  });
 }
 
 export async function resetRegister() {
-  return httpRequest<{ register: RegisterConfig }>("/api/register/reset", { method: "POST" });
+  return httpRequest<{ register: RegisterConfig }>("/api/register/reset", {
+    method: "POST",
+  });
 }
 
 // ── CPA (CLIProxyAPI) ──────────────────────────────────────────────
@@ -1764,7 +2179,11 @@ export async function fetchCPAPools() {
   return httpRequest<{ pools: CPAPool[] }>("/api/cpa/pools");
 }
 
-export async function createCPAPool(pool: { name: string; base_url: string; secret_key: string }) {
+export async function createCPAPool(pool: {
+  name: string;
+  base_url: string;
+  secret_key: string;
+}) {
   return httpRequest<{ pool: CPAPool; pools: CPAPool[] }>("/api/cpa/pools", {
     method: "POST",
     body: pool,
@@ -1775,10 +2194,13 @@ export async function updateCPAPool(
   poolId: string,
   updates: { name?: string; base_url?: string; secret_key?: string },
 ) {
-  return httpRequest<{ pool: CPAPool; pools: CPAPool[] }>(`/api/cpa/pools/${poolId}`, {
-    method: "POST",
-    body: updates,
-  });
+  return httpRequest<{ pool: CPAPool; pools: CPAPool[] }>(
+    `/api/cpa/pools/${poolId}`,
+    {
+      method: "POST",
+      body: updates,
+    },
+  );
 }
 
 export async function deleteCPAPool(poolId: string) {
@@ -1788,18 +2210,25 @@ export async function deleteCPAPool(poolId: string) {
 }
 
 export async function fetchCPAPoolFiles(poolId: string) {
-  return httpRequest<{ pool_id: string; files: CPARemoteFile[] }>(`/api/cpa/pools/${poolId}/files`);
+  return httpRequest<{ pool_id: string; files: CPARemoteFile[] }>(
+    `/api/cpa/pools/${poolId}/files`,
+  );
 }
 
 export async function startCPAImport(poolId: string, names: string[]) {
-  return httpRequest<{ import_job: CPAImportJob | null }>(`/api/cpa/pools/${poolId}/import`, {
-    method: "POST",
-    body: { names },
-  });
+  return httpRequest<{ import_job: CPAImportJob | null }>(
+    `/api/cpa/pools/${poolId}/import`,
+    {
+      method: "POST",
+      body: { names },
+    },
+  );
 }
 
 export async function fetchCPAPoolImportJob(poolId: string) {
-  return httpRequest<{ import_job: CPAImportJob | null }>(`/api/cpa/pools/${poolId}/import`);
+  return httpRequest<{ import_job: CPAImportJob | null }>(
+    `/api/cpa/pools/${poolId}/import`,
+  );
 }
 
 // ── Sub2API ────────────────────────────────────────────────────────
@@ -1835,7 +2264,9 @@ export type Sub2APIRemoteGroup = {
 };
 
 export async function fetchSub2APIServers() {
-  const data = await httpRequest<{ servers?: Sub2APIServer[] | null }>("/api/sub2api/servers");
+  const data = await httpRequest<{ servers?: Sub2APIServer[] | null }>(
+    "/api/sub2api/servers",
+  );
   return {
     servers: Array.isArray(data.servers) ? data.servers : [],
   };
@@ -1849,7 +2280,10 @@ export async function createSub2APIServer(server: {
   api_key: string;
   group_id: string;
 }) {
-  const data = await httpRequest<{ server: Sub2APIServer; servers?: Sub2APIServer[] | null }>("/api/sub2api/servers", {
+  const data = await httpRequest<{
+    server: Sub2APIServer;
+    servers?: Sub2APIServer[] | null;
+  }>("/api/sub2api/servers", {
     method: "POST",
     body: server,
   });
@@ -1870,7 +2304,10 @@ export async function updateSub2APIServer(
     group_id?: string;
   },
 ) {
-  const data = await httpRequest<{ server: Sub2APIServer; servers?: Sub2APIServer[] | null }>(`/api/sub2api/servers/${serverId}`, {
+  const data = await httpRequest<{
+    server: Sub2APIServer;
+    servers?: Sub2APIServer[] | null;
+  }>(`/api/sub2api/servers/${serverId}`, {
     method: "POST",
     body: updates,
   });
@@ -1881,9 +2318,10 @@ export async function updateSub2APIServer(
 }
 
 export async function fetchSub2APIServerGroups(serverId: string) {
-  const data = await httpRequest<{ server_id: string; groups?: Sub2APIRemoteGroup[] | null }>(
-    `/api/sub2api/servers/${serverId}/groups`,
-  );
+  const data = await httpRequest<{
+    server_id: string;
+    groups?: Sub2APIRemoteGroup[] | null;
+  }>(`/api/sub2api/servers/${serverId}/groups`);
   return {
     server_id: data.server_id,
     groups: Array.isArray(data.groups) ? data.groups : [],
@@ -1891,33 +2329,45 @@ export async function fetchSub2APIServerGroups(serverId: string) {
 }
 
 export async function deleteSub2APIServer(serverId: string) {
-  const data = await httpRequest<{ servers?: Sub2APIServer[] | null }>(`/api/sub2api/servers/${serverId}`, {
-    method: "DELETE",
-  });
+  const data = await httpRequest<{ servers?: Sub2APIServer[] | null }>(
+    `/api/sub2api/servers/${serverId}`,
+    {
+      method: "DELETE",
+    },
+  );
   return {
     servers: Array.isArray(data.servers) ? data.servers : [],
   };
 }
 
 export async function fetchSub2APIServerAccounts(serverId: string) {
-  const data = await httpRequest<{ server_id: string; accounts?: Sub2APIRemoteAccount[] | null }>(
-    `/api/sub2api/servers/${serverId}/accounts`,
-  );
+  const data = await httpRequest<{
+    server_id: string;
+    accounts?: Sub2APIRemoteAccount[] | null;
+  }>(`/api/sub2api/servers/${serverId}/accounts`);
   return {
     server_id: data.server_id,
     accounts: Array.isArray(data.accounts) ? data.accounts : [],
   };
 }
 
-export async function startSub2APIImport(serverId: string, accountIds: string[]) {
-  return httpRequest<{ import_job: CPAImportJob | null }>(`/api/sub2api/servers/${serverId}/import`, {
-    method: "POST",
-    body: { account_ids: accountIds },
-  });
+export async function startSub2APIImport(
+  serverId: string,
+  accountIds: string[],
+) {
+  return httpRequest<{ import_job: CPAImportJob | null }>(
+    `/api/sub2api/servers/${serverId}/import`,
+    {
+      method: "POST",
+      body: { account_ids: accountIds },
+    },
+  );
 }
 
 export async function fetchSub2APIImportJob(serverId: string) {
-  return httpRequest<{ import_job: CPAImportJob | null }>(`/api/sub2api/servers/${serverId}/import`);
+  return httpRequest<{ import_job: CPAImportJob | null }>(
+    `/api/sub2api/servers/${serverId}/import`,
+  );
 }
 
 // ── Upstream proxy ────────────────────────────────────────────────
@@ -1938,7 +2388,10 @@ export async function fetchProxy() {
   return httpRequest<{ proxy: ProxySettings }>("/api/proxy");
 }
 
-export async function updateProxy(updates: { enabled?: boolean; url?: string }) {
+export async function updateProxy(updates: {
+  enabled?: boolean;
+  url?: string;
+}) {
   return httpRequest<{ proxy: ProxySettings }>("/api/proxy", {
     method: "POST",
     body: updates,

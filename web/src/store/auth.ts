@@ -64,25 +64,33 @@ function normalizeMenus(value: unknown): AuthMenuItem[] {
     if (!path || !label) {
       return [];
     }
-    return [{
-      id: String(candidate.id || path).trim(),
-      label,
-      path,
-      icon: String(candidate.icon || "").trim(),
-      order: typeof candidate.order === "number" ? candidate.order : 0,
-      children: normalizeMenus(candidate.children),
-    }];
+    return [
+      {
+        id: String(candidate.id || path).trim(),
+        label,
+        path,
+        icon: String(candidate.icon || "").trim(),
+        order: typeof candidate.order === "number" ? candidate.order : 0,
+        children: normalizeMenus(candidate.children),
+      },
+    ];
   });
 }
 
-function normalizeSession(value: unknown, fallbackKey = ""): StoredAuthSession | null {
+function normalizeSession(
+  value: unknown,
+  fallbackKey = "",
+): StoredAuthSession | null {
   if (!value || typeof value !== "object") {
     return null;
   }
 
   const candidate = value as Partial<StoredAuthSession>;
   const key = String(candidate.key || fallbackKey || "").trim();
-  const role = candidate.role === "admin" || candidate.role === "user" ? candidate.role : null;
+  const role =
+    candidate.role === "admin" || candidate.role === "user"
+      ? candidate.role
+      : null;
   if (!key || !role) {
     return null;
   }
@@ -101,7 +109,10 @@ function normalizeSession(value: unknown, fallbackKey = ""): StoredAuthSession |
   };
 }
 
-export function canAccessPath(session: StoredAuthSession | null | undefined, path: string) {
+export function canAccessPath(
+  session: StoredAuthSession | null | undefined,
+  path: string,
+) {
   if (!session) {
     return false;
   }
@@ -114,7 +125,11 @@ export function canAccessPath(session: StoredAuthSession | null | undefined, pat
   return session.menuPaths.includes(path);
 }
 
-export function hasAPIPermission(session: StoredAuthSession | null | undefined, method: string, path: string) {
+export function hasAPIPermission(
+  session: StoredAuthSession | null | undefined,
+  method: string,
+  path: string,
+) {
   if (!session) {
     return false;
   }
@@ -128,7 +143,15 @@ export function getDefaultRouteForSession(session: StoredAuthSession) {
   if (session.role === "admin") {
     return "/accounts";
   }
-  for (const path of ["/image", "/wallet", "/image-manager", "/settings", ...session.menuPaths, "/profile"]) {
+  for (const path of [
+    "/image",
+    "/wallet",
+    "/subscription",
+    "/image-manager",
+    "/settings",
+    ...session.menuPaths,
+    "/profile",
+  ]) {
     if (canAccessPath(session, path)) {
       return path;
     }
@@ -141,7 +164,9 @@ export async function getStoredAuthSession() {
     return null;
   }
 
-  return normalizeSession(await authStorage.getItem<StoredAuthSession>(AUTH_SESSION_STORAGE_KEY));
+  return normalizeSession(
+    await authStorage.getItem<StoredAuthSession>(AUTH_SESSION_STORAGE_KEY),
+  );
 }
 
 export async function getStoredSessionToken() {

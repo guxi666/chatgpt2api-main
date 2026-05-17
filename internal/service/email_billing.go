@@ -23,6 +23,7 @@ import (
 
 const (
 	BillingProviderYiPay         = "yipay"
+	BillingProviderBalance       = "balance"
 	BillingProviderPayPal        = "paypal"
 	BillingProviderUSDT          = "usdt"
 	BillingProviderRedeemCode    = "redeem_code"
@@ -42,6 +43,9 @@ const (
 	BillingOrderKindRecharge      = "recharge"
 	BillingOrderKindAgencyJoin    = "agency_join"
 	BillingOrderKindAgencyUpgrade = "agency_upgrade"
+	BillingOrderKindSubMonthly    = "subscription_monthly"
+	BillingOrderKindSubQuarterly  = "subscription_quarterly"
+	BillingOrderKindSubYearly     = "subscription_yearly"
 
 	BillingTxTypeRecharge = "recharge"
 	BillingTxTypeConsume  = "consume"
@@ -56,6 +60,10 @@ const (
 	AgencyTierBasic   = "basic"
 	AgencyTierPro     = "pro"
 	AgencyTierPremium = "premium"
+
+	SubscriptionTierMonthly   = "monthly"
+	SubscriptionTierQuarterly = "quarterly"
+	SubscriptionTierYearly    = "yearly"
 )
 
 var emailRE = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
@@ -148,6 +156,9 @@ type billingUser struct {
 	AgencyWeChatQRCode string
 	AgencyPhone        string
 	AgencyWeChatID     string
+	SubscriptionTier   string
+	SubscriptionStart  string
+	SubscriptionExpire string
 	RegisterIP         string
 	RegisterDeviceID   string
 	CreatedAt          string
@@ -167,6 +178,7 @@ type billingOrder struct {
 	AmountCents int
 	BonusCents  int
 	AgencyTier  string
+	SubTier     string
 	Note        string
 	Status      string
 	CreatedAt   string
@@ -481,27 +493,53 @@ func (s *EmailBillingService) GetWalletByIdentity(identity Identity) map[string]
 		}
 	}
 	return map[string]any{
-		"user_id":               user.ID,
-		"email":                 user.Email,
-		"name":                  user.Name,
-		"invite_code":           user.InviteCode,
-		"invited_by":            user.InvitedBy,
-		"invited_by_email":      invitedByEmail,
-		"invited_count":         len(invitedUsers),
-		"invited_users":         invitedUsers,
-		"balance_cents":         user.BalanceCents,
-		"total_recharge_cents":  user.TotalRechargeCents,
-		"total_consume_cents":   user.TotalConsumeCents,
-		"agency_tier":           user.AgencyTier,
-		"agency_enabled":        user.AgencyEnabled,
-		"agency_commission_bp":  user.AgencyCommissionBP,
-		"agency_discount_bp":    user.AgencyDiscountBP,
-		"agency_joined_at":      user.AgencyJoinedAt,
-		"image_price_note":      "amount is in cents",
-		"last_login_at":         user.LastLoginAt,
-		"updated_at":            user.UpdatedAt,
-		"billing_provider_hint": BillingProviderYiPay,
+		"user_id":                user.ID,
+		"email":                  user.Email,
+		"name":                   user.Name,
+		"invite_code":            user.InviteCode,
+		"invited_by":             user.InvitedBy,
+		"invited_by_email":       invitedByEmail,
+		"invited_count":          len(invitedUsers),
+		"invited_users":          invitedUsers,
+		"balance_cents":          user.BalanceCents,
+		"total_recharge_cents":   user.TotalRechargeCents,
+		"total_consume_cents":    user.TotalConsumeCents,
+		"agency_tier":            user.AgencyTier,
+		"agency_enabled":         user.AgencyEnabled,
+		"agency_commission_bp":   user.AgencyCommissionBP,
+		"agency_discount_bp":     user.AgencyDiscountBP,
+		"agency_joined_at":       user.AgencyJoinedAt,
+		"subscription_tier":      user.SubscriptionTier,
+		"subscription_start_at":  user.SubscriptionStart,
+		"subscription_expire_at": user.SubscriptionExpire,
+		"subscription_active":    hasActiveSubscriptionLocked(user),
+		"image_price_note":       "amount is in cents",
+		"last_login_at":          user.LastLoginAt,
+		"updated_at":             user.UpdatedAt,
+		"billing_provider_hint":  BillingProviderYiPay,
 	}
+}
+
+func (s *EmailBillingService) HasActiveSubscription(identity Identity) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.ensureUserByIdentityLocked(identity)
+	if user == nil {
+		return false
+	}
+	return hasActiveSubscriptionLocked(user)
+}
+
+func (s *EmailBillingService) SubscriptionStatusByIdentity(identity Identity) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.ensureUserByIdentityLocked(identity)
+	if user == nil {
+		return map[string]any{
+			"active": false,
+		}
+	}
+	return subscriptionStatusFromUserLocked(user)
 }
 
 func (s *EmailBillingService) ApplyRegisterBonusForUser(userID string, imagePriceCents int, registerBonusTimes int) error {
@@ -613,6 +651,24 @@ func (s *EmailBillingService) DeactivateAgencyByUserID(userID string) (map[strin
 		return nil, err
 	}
 	return publicBillingUser(user), nil
+}
+
+func (s *EmailBillingService) ActivateSubscriptionByUserID(userID, tier string) (map[string]any, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user id is required")
+	}
+	tier = normalizeSubscriptionTier(tier)
+	if tier == "" {
+		return nil, fmt.Errorf("invalid subscription tier")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.users[userID]
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	return activateSubscriptionLocked(user, tier)
 }
 
 func (s *EmailBillingService) activateAgencyLocked(user *billingUser, benefit AgencyTierBenefit, allowUpgradeOnly bool) (map[string]any, error) {
@@ -1364,6 +1420,85 @@ func (s *EmailBillingService) AdminSetUserBalance(userID string, balanceCents in
 	return s.AdminAdjustUserBalance(userID, delta, note)
 }
 
+func (s *EmailBillingService) AdminUpdateSubscriptionByUserID(userID, mode, tier, expireAt string, extendDays int) (map[string]any, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user id is required")
+	}
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = "set"
+	}
+	tier = normalizeSubscriptionTier(tier)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.users[userID]
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	now := time.Now().UTC()
+	switch mode {
+	case "clear":
+		user.SubscriptionTier = ""
+		user.SubscriptionStart = ""
+		user.SubscriptionExpire = ""
+		user.UpdatedAt = util.NowISO()
+	case "extend":
+		if extendDays <= 0 {
+			return nil, fmt.Errorf("extend_days must be greater than 0")
+		}
+		if tier == "" {
+			tier = normalizeSubscriptionTier(user.SubscriptionTier)
+		}
+		if tier == "" {
+			return nil, fmt.Errorf("subscription tier is required")
+		}
+		base := now
+		currentExpire := parseBillingTimestamp(user.SubscriptionExpire)
+		if currentExpire.After(base) {
+			base = currentExpire
+		}
+		if normalizeSubscriptionTier(user.SubscriptionTier) == "" || strings.TrimSpace(user.SubscriptionStart) == "" {
+			user.SubscriptionStart = now.Format(time.RFC3339Nano)
+		}
+		user.SubscriptionTier = tier
+		user.SubscriptionExpire = base.AddDate(0, 0, extendDays).Format(time.RFC3339Nano)
+		user.UpdatedAt = util.NowISO()
+	case "set":
+		if tier == "" {
+			return nil, fmt.Errorf("subscription tier is required")
+		}
+		if strings.TrimSpace(expireAt) == "" {
+			if _, err := activateSubscriptionLocked(user, tier); err != nil {
+				return nil, err
+			}
+		} else {
+			parsedExpireAt, err := parseAdminSubscriptionExpireAt(expireAt)
+			if err != nil {
+				return nil, err
+			}
+			if !parsedExpireAt.After(now) {
+				return nil, fmt.Errorf("expire_at must be later than now")
+			}
+			user.SubscriptionTier = tier
+			if strings.TrimSpace(user.SubscriptionStart) == "" {
+				user.SubscriptionStart = now.Format(time.RFC3339Nano)
+			}
+			user.SubscriptionExpire = parsedExpireAt.Format(time.RFC3339Nano)
+			user.UpdatedAt = util.NowISO()
+		}
+	default:
+		return nil, fmt.Errorf("invalid mode")
+	}
+
+	if err := s.saveLocked(); err != nil {
+		return nil, err
+	}
+	return subscriptionStatusFromUserLocked(user), nil
+}
+
 func (s *EmailBillingService) RedeemCode(identity Identity, code string) (map[string]any, error) {
 	code = strings.ToUpper(strings.TrimSpace(code))
 	if code == "" {
@@ -1557,6 +1692,9 @@ func (s *EmailBillingService) EnsureCanConsume(identity Identity, amountCents in
 	if user == nil {
 		return nil
 	}
+	if hasActiveSubscriptionLocked(user) {
+		return nil
+	}
 	if !user.Enabled {
 		return fmt.Errorf("account is disabled")
 	}
@@ -1574,6 +1712,9 @@ func (s *EmailBillingService) ConsumeImageUsage(identity Identity, amountCents i
 	defer s.mu.Unlock()
 	user := s.ensureUserByIdentityLocked(identity)
 	if user == nil {
+		return nil, nil
+	}
+	if hasActiveSubscriptionLocked(user) {
 		return nil, nil
 	}
 	if !user.Enabled {
@@ -1630,7 +1771,7 @@ func (s *EmailBillingService) CreateYiPayOrder(identity Identity, amountCents in
 	if !user.Enabled {
 		return nil, fmt.Errorf("account is disabled")
 	}
-	return s.createYiPayOrderLocked(user, amountCents, payType, cfg, "chatgpt2api wallet recharge", BillingOrderKindRecharge, "", "")
+	return s.createYiPayOrderLocked(user, amountCents, payType, cfg, "chatgpt2api wallet recharge", BillingOrderKindRecharge, "", "", "")
 }
 
 func (s *EmailBillingService) CreateAgencyYiPayOrder(identity Identity, tier string, amountCents int, payType string, cfg YiPayGatewayConfig, allowUpgradeOnly bool) (map[string]any, error) {
@@ -1671,10 +1812,120 @@ func (s *EmailBillingService) CreateAgencyYiPayOrder(identity Identity, tier str
 		kind = BillingOrderKindAgencyUpgrade
 	}
 	note := "chatgpt2api agency tier " + tier
-	return s.createYiPayOrderLocked(user, amountCents, payType, cfg, note, kind, tier, note)
+	return s.createYiPayOrderLocked(user, amountCents, payType, cfg, note, kind, tier, "", note)
 }
 
-func (s *EmailBillingService) createYiPayOrderLocked(user *billingUser, amountCents int, payType string, cfg YiPayGatewayConfig, orderName, orderKind, agencyTier, note string) (map[string]any, error) {
+func (s *EmailBillingService) CreateSubscriptionYiPayOrder(identity Identity, tier string, amountCents int, payType string, cfg YiPayGatewayConfig) (map[string]any, error) {
+	if !cfg.Enabled || strings.TrimSpace(cfg.PID) == "" || strings.TrimSpace(cfg.Key) == "" || strings.TrimSpace(cfg.SubmitURL) == "" {
+		return nil, fmt.Errorf("YiPay is not configured")
+	}
+	payType = strings.ToLower(strings.TrimSpace(payType))
+	switch payType {
+	case "alipay", "wxpay", "paypal", "usdt":
+	default:
+		return nil, fmt.Errorf("unsupported pay type")
+	}
+	tier = normalizeSubscriptionTier(tier)
+	if tier == "" {
+		return nil, fmt.Errorf("invalid subscription tier")
+	}
+	if amountCents < 1 {
+		return nil, fmt.Errorf("subscription price is invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.ensureUserByIdentityLocked(identity)
+	if user == nil {
+		return nil, fmt.Errorf("user identity required")
+	}
+	if !user.Enabled {
+		return nil, fmt.Errorf("account is disabled")
+	}
+	orderKind := subscriptionOrderKindByTier(tier)
+	if orderKind == "" {
+		return nil, fmt.Errorf("invalid subscription tier")
+	}
+	note := "chatgpt2api subscription " + tier
+	return s.createYiPayOrderLocked(user, amountCents, payType, cfg, note, orderKind, "", tier, note)
+}
+
+func (s *EmailBillingService) CreateSubscriptionByBalance(identity Identity, tier string, amountCents int) (map[string]any, error) {
+	tier = normalizeSubscriptionTier(tier)
+	if tier == "" {
+		return nil, fmt.Errorf("invalid subscription tier")
+	}
+	if amountCents < 1 {
+		return nil, fmt.Errorf("subscription price is invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.ensureUserByIdentityLocked(identity)
+	if user == nil {
+		return nil, fmt.Errorf("user identity required")
+	}
+	if !user.Enabled {
+		return nil, fmt.Errorf("account is disabled")
+	}
+	if user.BalanceCents < amountCents {
+		return nil, fmt.Errorf("insufficient balance, please recharge first")
+	}
+	now := util.NowISO()
+	orderKind := subscriptionOrderKindByTier(tier)
+	order := &billingOrder{
+		ID:          "ord_" + util.NewHex(18),
+		OutTradeNo:  s.newOutTradeNoLocked(),
+		TradeNo:     "bal_" + util.NewHex(12),
+		Provider:    BillingProviderBalance,
+		Kind:        normalizeBillingOrderKind(orderKind),
+		UserID:      user.ID,
+		UserEmail:   user.Email,
+		PayType:     BillingProviderBalance,
+		AmountCents: amountCents,
+		SubTier:     tier,
+		Note:        "balance pay subscription " + tier,
+		Status:      BillingOrderStatusPaid,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		PaidAt:      now,
+	}
+
+	restoreUser := *user
+	user.BalanceCents -= amountCents
+	user.TotalConsumeCents += amountCents
+	if _, err := activateSubscriptionLocked(user, tier); err != nil {
+		*user = restoreUser
+		return nil, err
+	}
+
+	tx := map[string]any{
+		"id":                  "tx_" + util.NewHex(18),
+		"user_id":             user.ID,
+		"email":               user.Email,
+		"type":                BillingTxTypeConsume,
+		"amount_cents":        -amountCents,
+		"balance_after_cents": user.BalanceCents,
+		"provider":            BillingProviderBalance,
+		"pay_type":            BillingProviderBalance,
+		"note":                "subscription " + tier,
+		"out_trade_no":        order.OutTradeNo,
+		"trade_no":            order.TradeNo,
+		"created_at":          now,
+	}
+
+	s.orders[order.OutTradeNo] = order
+	s.transactions = append(s.transactions, tx)
+	if err := s.saveLocked(); err != nil {
+		*user = restoreUser
+		delete(s.orders, order.OutTradeNo)
+		if len(s.transactions) > 0 {
+			s.transactions = s.transactions[:len(s.transactions)-1]
+		}
+		return nil, err
+	}
+	return publicBillingOrder(order), nil
+}
+
+func (s *EmailBillingService) createYiPayOrderLocked(user *billingUser, amountCents int, payType string, cfg YiPayGatewayConfig, orderName, orderKind, agencyTier, subTier, note string) (map[string]any, error) {
 	if user == nil {
 		return nil, fmt.Errorf("user identity required")
 	}
@@ -1690,6 +1941,7 @@ func (s *EmailBillingService) createYiPayOrderLocked(user *billingUser, amountCe
 		PayType:     payType,
 		AmountCents: amountCents,
 		AgencyTier:  normalizeAgencyTier(agencyTier),
+		SubTier:     normalizeSubscriptionTier(subTier),
 		Note:        strings.TrimSpace(note),
 		Status:      BillingOrderStatusPending,
 		CreatedAt:   now,
@@ -1730,20 +1982,21 @@ func (s *EmailBillingService) createYiPayOrderLocked(user *billingUser, amountCe
 		return nil, err
 	}
 	return map[string]any{
-		"id":           order.ID,
-		"provider":     order.Provider,
-		"status":       order.Status,
-		"out_trade_no": order.OutTradeNo,
-		"user_id":      order.UserID,
-		"user_email":   order.UserEmail,
-		"pay_type":     order.PayType,
-		"order_kind":   order.Kind,
-		"agency_tier":  order.AgencyTier,
-		"amount_cents": order.AmountCents,
-		"amount_yuan":  centsToYuan(order.AmountCents),
-		"pay_url":      payURL,
-		"created_at":   order.CreatedAt,
-		"updated_at":   order.UpdatedAt,
+		"id":                order.ID,
+		"provider":          order.Provider,
+		"status":            order.Status,
+		"out_trade_no":      order.OutTradeNo,
+		"user_id":           order.UserID,
+		"user_email":        order.UserEmail,
+		"pay_type":          order.PayType,
+		"order_kind":        order.Kind,
+		"agency_tier":       order.AgencyTier,
+		"subscription_tier": order.SubTier,
+		"amount_cents":      order.AmountCents,
+		"amount_yuan":       centsToYuan(order.AmountCents),
+		"pay_url":           payURL,
+		"created_at":        order.CreatedAt,
+		"updated_at":        order.UpdatedAt,
 	}, nil
 }
 
@@ -1907,6 +2160,17 @@ func (s *EmailBillingService) HandleYiPayNotify(values url.Values, cfg YiPayGate
 	switch normalizeBillingOrderKind(order.Kind) {
 	case BillingOrderKindAgencyJoin, BillingOrderKindAgencyUpgrade:
 		// Agency orders only unlock agency tier; no wallet credit is added.
+	case BillingOrderKindSubMonthly, BillingOrderKindSubQuarterly, BillingOrderKindSubYearly:
+		if order.SubTier == "" {
+			order.SubTier = subscriptionTierByOrderKind(order.Kind)
+		}
+		if _, activateErr := activateSubscriptionLocked(user, order.SubTier); activateErr != nil {
+			order.Status = BillingOrderStatusPending
+			order.TradeNo = ""
+			order.PaidAt = ""
+			order.UpdatedAt = util.NowISO()
+			return false, nil, activateErr
+		}
 	default:
 		creditedCents := order.AmountCents + maxBillingInt(0, order.BonusCents)
 		user.BalanceCents += creditedCents
@@ -1949,13 +2213,132 @@ func yipayNotifyResult(order *billingOrder) map[string]any {
 		return map[string]any{}
 	}
 	return map[string]any{
-		"order_id":     order.ID,
-		"out_trade_no": order.OutTradeNo,
-		"user_id":      order.UserID,
-		"order_kind":   normalizeBillingOrderKind(order.Kind),
-		"agency_tier":  normalizeAgencyTier(order.AgencyTier),
-		"status":       order.Status,
+		"order_id":          order.ID,
+		"out_trade_no":      order.OutTradeNo,
+		"user_id":           order.UserID,
+		"order_kind":        normalizeBillingOrderKind(order.Kind),
+		"agency_tier":       normalizeAgencyTier(order.AgencyTier),
+		"subscription_tier": normalizeSubscriptionTier(firstNonEmpty(order.SubTier, subscriptionTierByOrderKind(order.Kind))),
+		"status":            order.Status,
 	}
+}
+
+func normalizeSubscriptionTier(value any) string {
+	switch strings.ToLower(strings.TrimSpace(util.Clean(value))) {
+	case SubscriptionTierMonthly:
+		return SubscriptionTierMonthly
+	case SubscriptionTierQuarterly:
+		return SubscriptionTierQuarterly
+	case SubscriptionTierYearly:
+		return SubscriptionTierYearly
+	default:
+		return ""
+	}
+}
+
+func subscriptionTierByOrderKind(kind string) string {
+	switch normalizeBillingOrderKind(kind) {
+	case BillingOrderKindSubMonthly:
+		return SubscriptionTierMonthly
+	case BillingOrderKindSubQuarterly:
+		return SubscriptionTierQuarterly
+	case BillingOrderKindSubYearly:
+		return SubscriptionTierYearly
+	default:
+		return ""
+	}
+}
+
+func subscriptionOrderKindByTier(tier string) string {
+	switch normalizeSubscriptionTier(tier) {
+	case SubscriptionTierMonthly:
+		return BillingOrderKindSubMonthly
+	case SubscriptionTierQuarterly:
+		return BillingOrderKindSubQuarterly
+	case SubscriptionTierYearly:
+		return BillingOrderKindSubYearly
+	default:
+		return ""
+	}
+}
+
+func subscriptionMonthsByTier(tier string) int {
+	switch normalizeSubscriptionTier(tier) {
+	case SubscriptionTierMonthly:
+		return 1
+	case SubscriptionTierQuarterly:
+		return 3
+	case SubscriptionTierYearly:
+		return 12
+	default:
+		return 0
+	}
+}
+
+func hasActiveSubscriptionLocked(user *billingUser) bool {
+	if user == nil {
+		return false
+	}
+	if normalizeSubscriptionTier(user.SubscriptionTier) == "" {
+		return false
+	}
+	expireAt := parseBillingTimestamp(user.SubscriptionExpire)
+	if expireAt.IsZero() {
+		return false
+	}
+	return expireAt.After(time.Now().UTC())
+}
+
+func subscriptionStatusFromUserLocked(user *billingUser) map[string]any {
+	if user == nil {
+		return map[string]any{
+			"active": false,
+		}
+	}
+	tier := normalizeSubscriptionTier(user.SubscriptionTier)
+	expireAt := parseBillingTimestamp(user.SubscriptionExpire)
+	active := tier != "" && !expireAt.IsZero() && expireAt.After(time.Now().UTC())
+	remainingDays := 0
+	if active {
+		remainingDays = int(expireAt.Sub(time.Now().UTC()).Hours() / 24)
+		if remainingDays < 0 {
+			remainingDays = 0
+		}
+	}
+	return map[string]any{
+		"tier":           tier,
+		"start_at":       strings.TrimSpace(user.SubscriptionStart),
+		"expire_at":      strings.TrimSpace(user.SubscriptionExpire),
+		"active":         active,
+		"remaining_days": remainingDays,
+	}
+}
+
+func activateSubscriptionLocked(user *billingUser, tier string) (map[string]any, error) {
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	tier = normalizeSubscriptionTier(tier)
+	if tier == "" {
+		return nil, fmt.Errorf("invalid subscription tier")
+	}
+	months := subscriptionMonthsByTier(tier)
+	if months <= 0 {
+		return nil, fmt.Errorf("invalid subscription tier")
+	}
+	now := time.Now().UTC()
+	base := now
+	currentExpire := parseBillingTimestamp(strings.TrimSpace(user.SubscriptionExpire))
+	if currentExpire.After(base) {
+		base = currentExpire
+	}
+	if !currentExpire.After(now) || normalizeSubscriptionTier(user.SubscriptionTier) == "" {
+		user.SubscriptionStart = now.Format(time.RFC3339Nano)
+	}
+	user.SubscriptionTier = tier
+	user.SubscriptionExpire = base.AddDate(0, months, 0).Format(time.RFC3339Nano)
+	user.UpdatedAt = util.NowISO()
+	return subscriptionStatusFromUserLocked(user), nil
 }
 
 func (s *EmailBillingService) ListOrdersByIdentity(identity Identity, limit int) []map[string]any {
@@ -2405,6 +2788,9 @@ func normalizeBillingUser(raw map[string]any) *billingUser {
 		AgencyWeChatQRCode: strings.TrimSpace(util.Clean(raw["agency_wechat_qr_code"])),
 		AgencyPhone:        strings.TrimSpace(util.Clean(raw["agency_phone"])),
 		AgencyWeChatID:     strings.TrimSpace(util.Clean(raw["agency_wechat_id"])),
+		SubscriptionTier:   normalizeSubscriptionTier(raw["subscription_tier"]),
+		SubscriptionStart:  strings.TrimSpace(util.Clean(raw["subscription_start_at"])),
+		SubscriptionExpire: strings.TrimSpace(util.Clean(raw["subscription_expire_at"])),
 		RegisterIP:         strings.TrimSpace(util.Clean(raw["register_ip"])),
 		RegisterDeviceID:   strings.TrimSpace(util.Clean(raw["register_device_id"])),
 		CreatedAt:          firstNonEmpty(util.Clean(raw["created_at"]), util.NowISO()),
@@ -2415,32 +2801,35 @@ func normalizeBillingUser(raw map[string]any) *billingUser {
 
 func billingUserToMap(user *billingUser) map[string]any {
 	return map[string]any{
-		"id":                    user.ID,
-		"email":                 user.Email,
-		"provider":              user.Provider,
-		"name":                  user.Name,
-		"invite_code":           user.InviteCode,
-		"invited_by":            user.InvitedBy,
-		"password_hash":         user.PasswordHash,
-		"auth_key_id":           user.AuthKeyID,
-		"enabled":               user.Enabled,
-		"balance_cents":         user.BalanceCents,
-		"total_recharge_cents":  user.TotalRechargeCents,
-		"total_consume_cents":   user.TotalConsumeCents,
-		"agency_tier":           user.AgencyTier,
-		"agency_enabled":        user.AgencyEnabled,
-		"agency_commission_bp":  user.AgencyCommissionBP,
-		"agency_discount_bp":    user.AgencyDiscountBP,
-		"agency_joined_at":      user.AgencyJoinedAt,
-		"agency_alipay_qr_code": user.AgencyAlipayQRCode,
-		"agency_wechat_qr_code": user.AgencyWeChatQRCode,
-		"agency_phone":          user.AgencyPhone,
-		"agency_wechat_id":      user.AgencyWeChatID,
-		"register_ip":           user.RegisterIP,
-		"register_device_id":    user.RegisterDeviceID,
-		"created_at":            user.CreatedAt,
-		"updated_at":            user.UpdatedAt,
-		"last_login_at":         user.LastLoginAt,
+		"id":                     user.ID,
+		"email":                  user.Email,
+		"provider":               user.Provider,
+		"name":                   user.Name,
+		"invite_code":            user.InviteCode,
+		"invited_by":             user.InvitedBy,
+		"password_hash":          user.PasswordHash,
+		"auth_key_id":            user.AuthKeyID,
+		"enabled":                user.Enabled,
+		"balance_cents":          user.BalanceCents,
+		"total_recharge_cents":   user.TotalRechargeCents,
+		"total_consume_cents":    user.TotalConsumeCents,
+		"agency_tier":            user.AgencyTier,
+		"agency_enabled":         user.AgencyEnabled,
+		"agency_commission_bp":   user.AgencyCommissionBP,
+		"agency_discount_bp":     user.AgencyDiscountBP,
+		"agency_joined_at":       user.AgencyJoinedAt,
+		"agency_alipay_qr_code":  user.AgencyAlipayQRCode,
+		"agency_wechat_qr_code":  user.AgencyWeChatQRCode,
+		"agency_phone":           user.AgencyPhone,
+		"agency_wechat_id":       user.AgencyWeChatID,
+		"subscription_tier":      user.SubscriptionTier,
+		"subscription_start_at":  user.SubscriptionStart,
+		"subscription_expire_at": user.SubscriptionExpire,
+		"register_ip":            user.RegisterIP,
+		"register_device_id":     user.RegisterDeviceID,
+		"created_at":             user.CreatedAt,
+		"updated_at":             user.UpdatedAt,
+		"last_login_at":          user.LastLoginAt,
 	}
 }
 
@@ -2450,25 +2839,29 @@ func publicBillingUser(user *billingUser) map[string]any {
 		provider = AuthProviderEmail
 	}
 	return map[string]any{
-		"id":                   user.ID,
-		"email":                user.Email,
-		"name":                 user.Name,
-		"invite_code":          user.InviteCode,
-		"invited_by":           user.InvitedBy,
-		"enabled":              user.Enabled,
-		"provider":             provider,
-		"role":                 AuthRoleUser,
-		"balance_cents":        user.BalanceCents,
-		"total_recharge_cents": user.TotalRechargeCents,
-		"total_consume_cents":  user.TotalConsumeCents,
-		"agency_tier":          user.AgencyTier,
-		"agency_enabled":       user.AgencyEnabled,
-		"agency_commission_bp": user.AgencyCommissionBP,
-		"agency_discount_bp":   user.AgencyDiscountBP,
-		"agency_joined_at":     user.AgencyJoinedAt,
-		"created_at":           user.CreatedAt,
-		"updated_at":           user.UpdatedAt,
-		"last_login_at":        user.LastLoginAt,
+		"id":                     user.ID,
+		"email":                  user.Email,
+		"name":                   user.Name,
+		"invite_code":            user.InviteCode,
+		"invited_by":             user.InvitedBy,
+		"enabled":                user.Enabled,
+		"provider":               provider,
+		"role":                   AuthRoleUser,
+		"balance_cents":          user.BalanceCents,
+		"total_recharge_cents":   user.TotalRechargeCents,
+		"total_consume_cents":    user.TotalConsumeCents,
+		"agency_tier":            user.AgencyTier,
+		"agency_enabled":         user.AgencyEnabled,
+		"agency_commission_bp":   user.AgencyCommissionBP,
+		"agency_discount_bp":     user.AgencyDiscountBP,
+		"agency_joined_at":       user.AgencyJoinedAt,
+		"subscription_tier":      user.SubscriptionTier,
+		"subscription_start_at":  user.SubscriptionStart,
+		"subscription_expire_at": user.SubscriptionExpire,
+		"subscription_active":    hasActiveSubscriptionLocked(user),
+		"created_at":             user.CreatedAt,
+		"updated_at":             user.UpdatedAt,
+		"last_login_at":          user.LastLoginAt,
 	}
 }
 
@@ -2514,6 +2907,12 @@ func normalizeBillingOrderKind(value any) string {
 		return BillingOrderKindAgencyJoin
 	case BillingOrderKindAgencyUpgrade:
 		return BillingOrderKindAgencyUpgrade
+	case BillingOrderKindSubMonthly:
+		return BillingOrderKindSubMonthly
+	case BillingOrderKindSubQuarterly:
+		return BillingOrderKindSubQuarterly
+	case BillingOrderKindSubYearly:
+		return BillingOrderKindSubYearly
 	default:
 		return BillingOrderKindRecharge
 	}
@@ -2687,18 +3086,24 @@ func normalizeBillingOrder(raw map[string]any) *billingOrder {
 	default:
 		status = BillingOrderStatusPending
 	}
+	subTier := normalizeSubscriptionTier(raw["subscription_tier"])
+	kind := normalizeBillingOrderKind(raw["order_kind"])
+	if subTier == "" {
+		subTier = subscriptionTierByOrderKind(kind)
+	}
 	return &billingOrder{
 		ID:          firstNonEmpty(strings.TrimSpace(util.Clean(raw["id"])), "ord_"+util.NewHex(18)),
 		OutTradeNo:  outTradeNo,
 		TradeNo:     strings.TrimSpace(util.Clean(raw["trade_no"])),
 		Provider:    firstNonEmpty(strings.TrimSpace(util.Clean(raw["provider"])), BillingProviderYiPay),
-		Kind:        normalizeBillingOrderKind(raw["order_kind"]),
+		Kind:        kind,
 		UserID:      userID,
 		UserEmail:   strings.TrimSpace(util.Clean(raw["user_email"])),
 		PayType:     strings.TrimSpace(util.Clean(raw["pay_type"])),
 		AmountCents: maxBillingInt(0, util.ToInt(raw["amount_cents"], 0)),
 		BonusCents:  maxBillingInt(0, util.ToInt(raw["bonus_cents"], 0)),
 		AgencyTier:  normalizeAgencyTier(raw["agency_tier"]),
+		SubTier:     subTier,
 		Note:        strings.TrimSpace(util.Clean(raw["note"])),
 		Status:      status,
 		CreatedAt:   firstNonEmpty(strings.TrimSpace(util.Clean(raw["created_at"])), util.NowISO()),
@@ -2709,45 +3114,47 @@ func normalizeBillingOrder(raw map[string]any) *billingOrder {
 
 func billingOrderToMap(order *billingOrder) map[string]any {
 	return map[string]any{
-		"id":           order.ID,
-		"out_trade_no": order.OutTradeNo,
-		"trade_no":     order.TradeNo,
-		"provider":     order.Provider,
-		"order_kind":   normalizeBillingOrderKind(order.Kind),
-		"user_id":      order.UserID,
-		"user_email":   order.UserEmail,
-		"pay_type":     order.PayType,
-		"amount_cents": order.AmountCents,
-		"bonus_cents":  order.BonusCents,
-		"agency_tier":  normalizeAgencyTier(order.AgencyTier),
-		"note":         strings.TrimSpace(order.Note),
-		"status":       order.Status,
-		"created_at":   order.CreatedAt,
-		"updated_at":   order.UpdatedAt,
-		"paid_at":      order.PaidAt,
+		"id":                order.ID,
+		"out_trade_no":      order.OutTradeNo,
+		"trade_no":          order.TradeNo,
+		"provider":          order.Provider,
+		"order_kind":        normalizeBillingOrderKind(order.Kind),
+		"user_id":           order.UserID,
+		"user_email":        order.UserEmail,
+		"pay_type":          order.PayType,
+		"amount_cents":      order.AmountCents,
+		"bonus_cents":       order.BonusCents,
+		"agency_tier":       normalizeAgencyTier(order.AgencyTier),
+		"subscription_tier": normalizeSubscriptionTier(order.SubTier),
+		"note":              strings.TrimSpace(order.Note),
+		"status":            order.Status,
+		"created_at":        order.CreatedAt,
+		"updated_at":        order.UpdatedAt,
+		"paid_at":           order.PaidAt,
 	}
 }
 
 func publicBillingOrder(order *billingOrder) map[string]any {
 	return map[string]any{
-		"id":           order.ID,
-		"out_trade_no": order.OutTradeNo,
-		"trade_no":     order.TradeNo,
-		"provider":     order.Provider,
-		"order_kind":   normalizeBillingOrderKind(order.Kind),
-		"pay_type":     order.PayType,
-		"amount_cents": order.AmountCents,
-		"amount_yuan":  centsToYuan(order.AmountCents),
-		"bonus_cents":  order.BonusCents,
-		"bonus_yuan":   centsToYuan(order.BonusCents),
-		"credit_cents": order.AmountCents + maxBillingInt(0, order.BonusCents),
-		"credit_yuan":  centsToYuan(order.AmountCents + maxBillingInt(0, order.BonusCents)),
-		"agency_tier":  normalizeAgencyTier(order.AgencyTier),
-		"note":         strings.TrimSpace(order.Note),
-		"status":       order.Status,
-		"created_at":   order.CreatedAt,
-		"updated_at":   order.UpdatedAt,
-		"paid_at":      order.PaidAt,
+		"id":                order.ID,
+		"out_trade_no":      order.OutTradeNo,
+		"trade_no":          order.TradeNo,
+		"provider":          order.Provider,
+		"order_kind":        normalizeBillingOrderKind(order.Kind),
+		"pay_type":          order.PayType,
+		"amount_cents":      order.AmountCents,
+		"amount_yuan":       centsToYuan(order.AmountCents),
+		"bonus_cents":       order.BonusCents,
+		"bonus_yuan":        centsToYuan(order.BonusCents),
+		"credit_cents":      order.AmountCents + maxBillingInt(0, order.BonusCents),
+		"credit_yuan":       centsToYuan(order.AmountCents + maxBillingInt(0, order.BonusCents)),
+		"agency_tier":       normalizeAgencyTier(order.AgencyTier),
+		"subscription_tier": normalizeSubscriptionTier(order.SubTier),
+		"note":              strings.TrimSpace(order.Note),
+		"status":            order.Status,
+		"created_at":        order.CreatedAt,
+		"updated_at":        order.UpdatedAt,
+		"paid_at":           order.PaidAt,
 	}
 }
 
@@ -2808,6 +3215,35 @@ func normalizeRedeemExpiresAt(value string) (string, error) {
 		return "", fmt.Errorf("过期时间必须晚于当前时间")
 	}
 	return parsed.UTC().Format(time.RFC3339Nano), nil
+}
+
+func parseAdminSubscriptionExpireAt(value string) (time.Time, error) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return time.Time{}, fmt.Errorf("expire_at is required")
+	}
+	parseLayouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+	}
+	for _, layout := range parseLayouts {
+		var (
+			parsed time.Time
+			err    error
+		)
+		if layout == time.RFC3339Nano || layout == time.RFC3339 {
+			parsed, err = time.Parse(layout, text)
+		} else {
+			parsed, err = time.ParseInLocation(layout, text, billingBeijingLocation)
+		}
+		if err == nil {
+			return parsed.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid expire_at format")
 }
 
 func normalizeEmail(email string) (string, error) {

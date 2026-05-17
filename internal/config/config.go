@@ -69,6 +69,28 @@ var settingEnvKeys = map[string]string{
 	"agency_tier_basic_discount_bp":      "CHATGPT2API_AGENCY_TIER_BASIC_DISCOUNT_BP",
 	"agency_tier_pro_discount_bp":        "CHATGPT2API_AGENCY_TIER_PRO_DISCOUNT_BP",
 	"agency_tier_premium_discount_bp":    "CHATGPT2API_AGENCY_TIER_PREMIUM_DISCOUNT_BP",
+	"subscription_heading":               "CHATGPT2API_SUBSCRIPTION_HEADING",
+	"subscription_subheading":            "CHATGPT2API_SUBSCRIPTION_SUBHEADING",
+	"subscription_safety_text":           "CHATGPT2API_SUBSCRIPTION_SAFETY_TEXT",
+	"subscription_agent_hint":            "CHATGPT2API_SUBSCRIPTION_AGENT_HINT",
+	"subscription_monthly_name":          "CHATGPT2API_SUBSCRIPTION_MONTHLY_NAME",
+	"subscription_monthly_desc":          "CHATGPT2API_SUBSCRIPTION_MONTHLY_DESC",
+	"subscription_monthly_badge":         "CHATGPT2API_SUBSCRIPTION_MONTHLY_BADGE",
+	"subscription_monthly_price_cents":   "CHATGPT2API_SUBSCRIPTION_MONTHLY_PRICE_CENTS",
+	"subscription_monthly_price_note":    "CHATGPT2API_SUBSCRIPTION_MONTHLY_PRICE_NOTE",
+	"subscription_monthly_features":      "CHATGPT2API_SUBSCRIPTION_MONTHLY_FEATURES",
+	"subscription_quarterly_name":        "CHATGPT2API_SUBSCRIPTION_QUARTERLY_NAME",
+	"subscription_quarterly_desc":        "CHATGPT2API_SUBSCRIPTION_QUARTERLY_DESC",
+	"subscription_quarterly_badge":       "CHATGPT2API_SUBSCRIPTION_QUARTERLY_BADGE",
+	"subscription_quarterly_price_cents": "CHATGPT2API_SUBSCRIPTION_QUARTERLY_PRICE_CENTS",
+	"subscription_quarterly_price_note":  "CHATGPT2API_SUBSCRIPTION_QUARTERLY_PRICE_NOTE",
+	"subscription_quarterly_features":    "CHATGPT2API_SUBSCRIPTION_QUARTERLY_FEATURES",
+	"subscription_yearly_name":           "CHATGPT2API_SUBSCRIPTION_YEARLY_NAME",
+	"subscription_yearly_desc":           "CHATGPT2API_SUBSCRIPTION_YEARLY_DESC",
+	"subscription_yearly_badge":          "CHATGPT2API_SUBSCRIPTION_YEARLY_BADGE",
+	"subscription_yearly_price_cents":    "CHATGPT2API_SUBSCRIPTION_YEARLY_PRICE_CENTS",
+	"subscription_yearly_price_note":     "CHATGPT2API_SUBSCRIPTION_YEARLY_PRICE_NOTE",
+	"subscription_yearly_features":       "CHATGPT2API_SUBSCRIPTION_YEARLY_FEATURES",
 	"agency_material_qr_enabled":         "CHATGPT2API_AGENCY_MATERIAL_QR_ENABLED",
 	"agency_material_qr_x_percent":       "CHATGPT2API_AGENCY_MATERIAL_QR_X_PERCENT",
 	"agency_material_qr_y_percent":       "CHATGPT2API_AGENCY_MATERIAL_QR_Y_PERCENT",
@@ -394,6 +416,106 @@ func (s *Store) AgencyTierProDiscountBP() int {
 
 func (s *Store) AgencyTierPremiumDiscountBP() int {
 	return clampAgencyBasisPoint(intSetting(s.settingValue("agency_tier_premium_discount_bp", 1500), 1500))
+}
+
+func (s *Store) SubscriptionHeading() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_heading", "选择适合你的订阅套餐")))
+}
+
+func (s *Store) SubscriptionSubheading() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_subheading", "在有效期内无限生图，不扣余额")))
+}
+
+func (s *Store) SubscriptionSafetyText() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_safety_text", "安全支付保障·随时可取消·无隐藏费用")))
+}
+
+func (s *Store) SubscriptionAgentHint() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_agent_hint", "购买代理充值更优惠")))
+}
+
+func (s *Store) SubscriptionMonthlyName() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_monthly_name", "包月套餐")))
+}
+
+func (s *Store) SubscriptionMonthlyDesc() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_monthly_desc", "适合轻量创作用户，按月续费更灵活")))
+}
+
+func (s *Store) SubscriptionMonthlyBadge() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_monthly_badge", "")))
+}
+
+func (s *Store) SubscriptionMonthlyPriceCents() int {
+	value := intSetting(s.settingValue("subscription_monthly_price_cents", 2990), 2990)
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func (s *Store) SubscriptionMonthlyPriceNote() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_monthly_price_note", "按月自动续费，可随时取消")))
+}
+
+func (s *Store) SubscriptionMonthlyFeatures() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_monthly_features", "无限生图\n高峰稳定排队\n专属客服支持")))
+}
+
+func (s *Store) SubscriptionQuarterlyName() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_quarterly_name", "包季套餐")))
+}
+
+func (s *Store) SubscriptionQuarterlyDesc() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_quarterly_desc", "适合持续创作者，整体更划算")))
+}
+
+func (s *Store) SubscriptionQuarterlyBadge() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_quarterly_badge", "推荐")))
+}
+
+func (s *Store) SubscriptionQuarterlyPriceCents() int {
+	value := intSetting(s.settingValue("subscription_quarterly_price_cents", 7990), 7990)
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func (s *Store) SubscriptionQuarterlyPriceNote() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_quarterly_price_note", "相比包月最高可省 11%")))
+}
+
+func (s *Store) SubscriptionQuarterlyFeatures() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_quarterly_features", "无限生图\n优先出图通道\n专属客服支持")))
+}
+
+func (s *Store) SubscriptionYearlyName() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_yearly_name", "包年套餐")))
+}
+
+func (s *Store) SubscriptionYearlyDesc() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_yearly_desc", "适合高频商业使用，年度成本最低")))
+}
+
+func (s *Store) SubscriptionYearlyBadge() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_yearly_badge", "最划算")))
+}
+
+func (s *Store) SubscriptionYearlyPriceCents() int {
+	value := intSetting(s.settingValue("subscription_yearly_price_cents", 27990), 27990)
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func (s *Store) SubscriptionYearlyPriceNote() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_yearly_price_note", "相比包月最高可省 22%")))
+}
+
+func (s *Store) SubscriptionYearlyFeatures() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_yearly_features", "无限生图\n全年优先保障\n专属客服支持")))
 }
 
 func clampAgencyBasisPoint(value int) int {
@@ -786,6 +908,28 @@ func (s *Store) Get() map[string]any {
 	data["agency_tier_basic_discount_bp"] = s.AgencyTierBasicDiscountBP()
 	data["agency_tier_pro_discount_bp"] = s.AgencyTierProDiscountBP()
 	data["agency_tier_premium_discount_bp"] = s.AgencyTierPremiumDiscountBP()
+	data["subscription_heading"] = s.SubscriptionHeading()
+	data["subscription_subheading"] = s.SubscriptionSubheading()
+	data["subscription_safety_text"] = s.SubscriptionSafetyText()
+	data["subscription_agent_hint"] = s.SubscriptionAgentHint()
+	data["subscription_monthly_name"] = s.SubscriptionMonthlyName()
+	data["subscription_monthly_desc"] = s.SubscriptionMonthlyDesc()
+	data["subscription_monthly_badge"] = s.SubscriptionMonthlyBadge()
+	data["subscription_monthly_price_cents"] = s.SubscriptionMonthlyPriceCents()
+	data["subscription_monthly_price_note"] = s.SubscriptionMonthlyPriceNote()
+	data["subscription_monthly_features"] = s.SubscriptionMonthlyFeatures()
+	data["subscription_quarterly_name"] = s.SubscriptionQuarterlyName()
+	data["subscription_quarterly_desc"] = s.SubscriptionQuarterlyDesc()
+	data["subscription_quarterly_badge"] = s.SubscriptionQuarterlyBadge()
+	data["subscription_quarterly_price_cents"] = s.SubscriptionQuarterlyPriceCents()
+	data["subscription_quarterly_price_note"] = s.SubscriptionQuarterlyPriceNote()
+	data["subscription_quarterly_features"] = s.SubscriptionQuarterlyFeatures()
+	data["subscription_yearly_name"] = s.SubscriptionYearlyName()
+	data["subscription_yearly_desc"] = s.SubscriptionYearlyDesc()
+	data["subscription_yearly_badge"] = s.SubscriptionYearlyBadge()
+	data["subscription_yearly_price_cents"] = s.SubscriptionYearlyPriceCents()
+	data["subscription_yearly_price_note"] = s.SubscriptionYearlyPriceNote()
+	data["subscription_yearly_features"] = s.SubscriptionYearlyFeatures()
 	yipay := s.YiPay()
 	data["yipay_enabled"] = yipay.Enabled
 	data["yipay_pid"] = yipay.PID
@@ -980,15 +1124,18 @@ func (s *Store) validateSettingsUpdateLocked(data map[string]any) error {
 		}
 	}
 	for key, value := range map[string]int{
-		"agency_tier_basic_cents":           intSetting(util.ValueOr(data["agency_tier_basic_cents"], 19900), 19900),
-		"agency_tier_pro_cents":             intSetting(util.ValueOr(data["agency_tier_pro_cents"], 49900), 49900),
-		"agency_tier_premium_cents":         intSetting(util.ValueOr(data["agency_tier_premium_cents"], 99900), 99900),
-		"agency_tier_basic_commission_bp":   clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_basic_commission_bp"], 3000), 3000)),
-		"agency_tier_pro_commission_bp":     clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_pro_commission_bp"], 4500), 4500)),
-		"agency_tier_premium_commission_bp": clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_premium_commission_bp"], 6000), 6000)),
-		"agency_tier_basic_discount_bp":     clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_basic_discount_bp"], 500), 500)),
-		"agency_tier_pro_discount_bp":       clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_pro_discount_bp"], 1000), 1000)),
-		"agency_tier_premium_discount_bp":   clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_premium_discount_bp"], 1500), 1500)),
+		"agency_tier_basic_cents":            intSetting(util.ValueOr(data["agency_tier_basic_cents"], 19900), 19900),
+		"agency_tier_pro_cents":              intSetting(util.ValueOr(data["agency_tier_pro_cents"], 49900), 49900),
+		"agency_tier_premium_cents":          intSetting(util.ValueOr(data["agency_tier_premium_cents"], 99900), 99900),
+		"agency_tier_basic_commission_bp":    clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_basic_commission_bp"], 3000), 3000)),
+		"agency_tier_pro_commission_bp":      clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_pro_commission_bp"], 4500), 4500)),
+		"agency_tier_premium_commission_bp":  clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_premium_commission_bp"], 6000), 6000)),
+		"agency_tier_basic_discount_bp":      clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_basic_discount_bp"], 500), 500)),
+		"agency_tier_pro_discount_bp":        clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_pro_discount_bp"], 1000), 1000)),
+		"agency_tier_premium_discount_bp":    clampAgencyBasisPoint(intSetting(util.ValueOr(data["agency_tier_premium_discount_bp"], 1500), 1500)),
+		"subscription_monthly_price_cents":   intSetting(util.ValueOr(data["subscription_monthly_price_cents"], 2990), 2990),
+		"subscription_quarterly_price_cents": intSetting(util.ValueOr(data["subscription_quarterly_price_cents"], 7990), 7990),
+		"subscription_yearly_price_cents":    intSetting(util.ValueOr(data["subscription_yearly_price_cents"], 27990), 27990),
 	} {
 		if value < 0 {
 			return fmt.Errorf("%s must be >= 0", key)
