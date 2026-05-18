@@ -73,6 +73,7 @@ type RemoteImageRecord struct {
 	Date             string
 	Size             int64
 	URL              string
+	Storage          string
 	ObjectKey        string
 	CreatedAt        string
 	Visibility       string
@@ -331,7 +332,7 @@ func (s *ImageService) remoteImageItems(startDate, endDate string, scope ImageAc
 			"thumbnail_url": record.URL,
 			"created_at":    firstNonEmptyString(record.CreatedAt, day+" 00:00:00"),
 			"visibility":    meta.Visibility,
-			"storage":       "r2",
+			"storage":       firstNonEmptyString(record.Storage, "r2"),
 		}
 		if meta.OwnerID != "" {
 			item["owner_id"] = meta.OwnerID
@@ -637,6 +638,7 @@ func (s *ImageService) UploadImagesToObjectStorage(ctx context.Context, paths []
 			Date:             imageDay(ref.rel, ref.info.ModTime()),
 			Size:             ref.info.Size(),
 			URL:              publicURL,
+			Storage:          "r2",
 			ObjectKey:        key,
 			CreatedAt:        createdAt,
 			Visibility:       meta.Visibility,

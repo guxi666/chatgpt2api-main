@@ -793,10 +793,7 @@ func (a *App) handleAdminBilling(w http.ResponseWriter, r *http.Request) {
 			if mode != "clear" {
 				effectiveTier := strings.TrimSpace(util.Clean(status["tier"]))
 				if effectiveTier != "" {
-					a.ensureSubscriptionTierRoles()
-					if roleID, ok := a.subscriptionRoleIDByTier(effectiveTier); ok {
-						_ = a.auth.UpdateUser(userID, map[string]any{"role_id": roleID})
-					}
+					a.switchSubscriptionRoleByTier(userID, effectiveTier, "Admin adjust")
 				}
 			}
 			util.WriteJSON(w, http.StatusOK, map[string]any{

@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { useEffect, useState } from "react";
 import { Gem, LoaderCircle, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -33,16 +34,27 @@ function PlanPriceInput({
   value: unknown;
   onChange: (cents: number) => void;
 }) {
+  const [draft, setDraft] = useState(centsToYuanText(value));
+
+  useEffect(() => {
+    setDraft(centsToYuanText(value));
+  }, [value]);
+
   return (
     <Field className="gap-1.5">
       <FieldLabel htmlFor={id}>价格（元）</FieldLabel>
       <Input
         id={id}
-        type="number"
+        type="text"
         min="0"
-        step="0.01"
-        value={centsToYuanText(value)}
-        onChange={(event) => onChange(yuanToCents(event.target.value))}
+        inputMode="decimal"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          const cents = yuanToCents(draft);
+          onChange(cents);
+          setDraft(centsToYuanText(cents));
+        }}
         className={settingsInputClassName}
       />
     </Field>

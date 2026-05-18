@@ -376,6 +376,18 @@ func (a *App) activateSubscriptionFromPayResult(result map[string]any, source st
 	if userID == "" {
 		return
 	}
+	a.switchSubscriptionRoleByTier(userID, tier, source)
+}
+
+func (a *App) switchSubscriptionRoleByTier(userID, tier, source string) {
+	userID = strings.TrimSpace(userID)
+	tier = strings.TrimSpace(tier)
+	if userID == "" || tier == "" {
+		return
+	}
+	if a.shouldKeepCurrentRoleOnSubscription(userID) {
+		return
+	}
 	a.ensureSubscriptionTierRoles()
 	roleID, ok := a.subscriptionRoleIDByTier(tier)
 	if !ok {
@@ -389,6 +401,43 @@ func (a *App) activateSubscriptionFromPayResult(result map[string]any, source st
 		"user_id": userID,
 		"tier":    tier,
 	})
+}
+
+func (a *App) shouldKeepCurrentRoleOnSubscription(userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false
+	}
+	roleID := ""
+	for _, user := range a.auth.ListUsers() {
+		if strings.TrimSpace(util.Clean(user["id"])) != userID {
+			continue
+		}
+		roleID = strings.TrimSpace(util.Clean(user["role_id"]))
+		break
+	}
+	if roleID == "" {
+		return false
+	}
+	if roleID == service.AuthRoleAdmin {
+		return true
+	}
+	for _, role := range a.auth.ListRoles() {
+		if strings.TrimSpace(util.Clean(role["id"])) != roleID {
+			continue
+		}
+		name := strings.TrimSpace(util.Clean(role["name"]))
+		if strings.Contains(name, "代理") {
+			return true
+		}
+		for _, menu := range util.AsStringSlice(role["menu_paths"]) {
+			if strings.TrimSpace(menu) == "/agency" || strings.TrimSpace(menu) == "/agency-commission" {
+				return true
+			}
+		}
+		break
+	}
+	return false
 }
 
 func (a *App) shouldBillImage(identity service.Identity) bool {

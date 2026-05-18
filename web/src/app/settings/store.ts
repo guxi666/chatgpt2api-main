@@ -307,6 +307,48 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
       typeof config.image_r2_prefix === "string"
         ? config.image_r2_prefix
         : "images",
+    image_r2_secondary_enabled: Boolean(config.image_r2_secondary_enabled),
+    image_r2_secondary_endpoint:
+      typeof config.image_r2_secondary_endpoint === "string"
+        ? config.image_r2_secondary_endpoint
+        : "",
+    image_r2_secondary_bucket:
+      typeof config.image_r2_secondary_bucket === "string"
+        ? config.image_r2_secondary_bucket
+        : "",
+    image_r2_secondary_region:
+      typeof config.image_r2_secondary_region === "string"
+        ? config.image_r2_secondary_region
+        : "auto",
+    image_r2_secondary_access_key_id:
+      typeof config.image_r2_secondary_access_key_id === "string"
+        ? config.image_r2_secondary_access_key_id
+        : "",
+    image_r2_secondary_secret_access_key: "",
+    image_r2_secondary_secret_access_key_configured: Boolean(
+      config.image_r2_secondary_secret_access_key_configured,
+    ),
+    image_r2_secondary_public_base_url:
+      typeof config.image_r2_secondary_public_base_url === "string"
+        ? config.image_r2_secondary_public_base_url
+        : "",
+    image_r2_secondary_prefix:
+      typeof config.image_r2_secondary_prefix === "string"
+        ? config.image_r2_secondary_prefix
+        : "images",
+    image_imgbed_enabled: Boolean(config.image_imgbed_enabled),
+    image_imgbed_upload_url:
+      typeof config.image_imgbed_upload_url === "string"
+        ? config.image_imgbed_upload_url
+        : "",
+    image_imgbed_auth_code: "",
+    image_imgbed_auth_code_configured: Boolean(
+      config.image_imgbed_auth_code_configured,
+    ),
+    image_imgbed_upload_channel:
+      typeof config.image_imgbed_upload_channel === "string"
+        ? config.image_imgbed_upload_channel
+        : "cfr2",
     linuxdo_enabled: Boolean(config.linuxdo_enabled),
     linuxdo_client_id:
       typeof config.linuxdo_client_id === "string"
@@ -597,6 +639,12 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const imageR2SecretAccessKey = String(
         config.image_r2_secret_access_key || "",
       ).trim();
+      const imageSecondaryR2SecretAccessKey = String(
+        config.image_r2_secondary_secret_access_key || "",
+      ).trim();
+      const imageImgBedAuthCode = String(
+        config.image_imgbed_auth_code || "",
+      ).trim();
       const payload: SettingsConfig = {
         ...config,
         refresh_account_interval_minute: Math.max(
@@ -778,6 +826,34 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           config.image_r2_public_base_url || "",
         ).trim(),
         image_r2_prefix: String(config.image_r2_prefix || "images").trim(),
+        image_r2_secondary_enabled: Boolean(config.image_r2_secondary_enabled),
+        image_r2_secondary_endpoint: String(
+          config.image_r2_secondary_endpoint || "",
+        ).trim(),
+        image_r2_secondary_bucket: String(
+          config.image_r2_secondary_bucket || "",
+        ).trim(),
+        image_r2_secondary_region: String(
+          config.image_r2_secondary_region || "auto",
+        ).trim(),
+        image_r2_secondary_access_key_id: String(
+          config.image_r2_secondary_access_key_id || "",
+        ).trim(),
+        image_r2_secondary_secret_access_key: imageSecondaryR2SecretAccessKey,
+        image_r2_secondary_public_base_url: String(
+          config.image_r2_secondary_public_base_url || "",
+        ).trim(),
+        image_r2_secondary_prefix: String(
+          config.image_r2_secondary_prefix || "images",
+        ).trim(),
+        image_imgbed_enabled: Boolean(config.image_imgbed_enabled),
+        image_imgbed_upload_url: String(
+          config.image_imgbed_upload_url || "",
+        ).trim(),
+        image_imgbed_auth_code: imageImgBedAuthCode,
+        image_imgbed_upload_channel: String(
+          config.image_imgbed_upload_channel || "cfr2",
+        ).trim(),
         linuxdo_enabled: Boolean(config.linuxdo_enabled),
         linuxdo_client_id: String(config.linuxdo_client_id || "").trim(),
         linuxdo_client_secret: linuxDoClientSecret,
@@ -808,12 +884,20 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       if (!imageR2SecretAccessKey) {
         delete payload.image_r2_secret_access_key;
       }
+      if (!imageSecondaryR2SecretAccessKey) {
+        delete payload.image_r2_secondary_secret_access_key;
+      }
+      if (!imageImgBedAuthCode) {
+        delete payload.image_imgbed_auth_code;
+      }
       delete payload.linuxdo_client_secret_configured;
       delete payload.update_github_token_configured;
       delete payload.cf_turnstile_secret_key_configured;
       delete payload.email_smtp_auth_code_configured;
       delete payload.yipay_key_configured;
       delete payload.image_r2_secret_access_key_configured;
+      delete payload.image_r2_secondary_secret_access_key_configured;
+      delete payload.image_imgbed_auth_code_configured;
 
       const data = await updateSettingsConfig(payload);
       const nextConfig = normalizeConfig(data.config);

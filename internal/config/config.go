@@ -19,110 +19,122 @@ import (
 )
 
 var settingEnvKeys = map[string]string{
-	"base_url":                           "CHATGPT2API_BASE_URL",
-	"brand_top_left_name":                "CHATGPT2API_BRAND_TOP_LEFT_NAME",
-	"brand_site_name":                    "CHATGPT2API_BRAND_SITE_NAME",
-	"brand_top_left_logo_url":            "CHATGPT2API_BRAND_TOP_LEFT_LOGO_URL",
-	"brand_site_logo_url":                "CHATGPT2API_BRAND_SITE_LOGO_URL",
-	"proxy":                              "CHATGPT2API_PROXY",
-	"refresh_account_interval_minute":    "CHATGPT2API_REFRESH_ACCOUNT_INTERVAL_MINUTE",
-	"image_concurrent_limit":             "CHATGPT2API_IMAGE_CONCURRENT_LIMIT",
-	"image_single_count_limit":           "CHATGPT2API_IMAGE_SINGLE_COUNT_LIMIT",
-	"image_task_timeout_seconds":         "CHATGPT2API_IMAGE_TASK_TIMEOUT_SECONDS",
-	"user_default_concurrent_limit":      "CHATGPT2API_USER_DEFAULT_CONCURRENT_LIMIT",
-	"user_default_rpm_limit":             "CHATGPT2API_USER_DEFAULT_RPM_LIMIT",
-	"image_retention_days":               "CHATGPT2API_IMAGE_RETENTION_DAYS",
-	"auto_remove_invalid_accounts":       "CHATGPT2API_AUTO_REMOVE_INVALID_ACCOUNTS",
-	"auto_remove_rate_limited_accounts":  "CHATGPT2API_AUTO_REMOVE_RATE_LIMITED_ACCOUNTS",
-	"log_retention_days":                 "CHATGPT2API_LOG_RETENTION_DAYS",
-	"log_levels":                         "CHATGPT2API_LOG_LEVELS",
-	"linuxdo_enabled":                    "CHATGPT2API_LINUXDO_ENABLED",
-	"linuxdo_client_id":                  "CHATGPT2API_LINUXDO_CLIENT_ID",
-	"linuxdo_client_secret":              "CHATGPT2API_LINUXDO_CLIENT_SECRET",
-	"linuxdo_redirect_url":               "CHATGPT2API_LINUXDO_REDIRECT_URL",
-	"linuxdo_frontend_redirect_url":      "CHATGPT2API_LINUXDO_FRONTEND_REDIRECT_URL",
-	"update_repo":                        "CHATGPT2API_UPDATE_REPO",
-	"update_github_token":                "CHATGPT2API_UPDATE_GITHUB_TOKEN",
-	"registration_enabled":               "CHATGPT2API_REGISTRATION_ENABLED",
-	"registration_allowed_email_domains": "CHATGPT2API_REGISTRATION_ALLOWED_EMAIL_DOMAINS",
-	"registration_bonus_image_times":     "CHATGPT2API_REGISTRATION_BONUS_IMAGE_TIMES",
-	"cf_turnstile_site_key":              "CHATGPT2API_CF_TURNSTILE_SITE_KEY",
-	"cf_turnstile_secret_key":            "CHATGPT2API_CF_TURNSTILE_SECRET_KEY",
-	"email_smtp_enabled":                 "CHATGPT2API_EMAIL_SMTP_ENABLED",
-	"email_smtp_host":                    "CHATGPT2API_EMAIL_SMTP_HOST",
-	"email_smtp_port":                    "CHATGPT2API_EMAIL_SMTP_PORT",
-	"email_smtp_use_ssl":                 "CHATGPT2API_EMAIL_SMTP_USE_SSL",
-	"email_smtp_username":                "CHATGPT2API_EMAIL_SMTP_USERNAME",
-	"email_smtp_auth_code":               "CHATGPT2API_EMAIL_SMTP_AUTH_CODE",
-	"email_smtp_from_email":              "CHATGPT2API_EMAIL_SMTP_FROM_EMAIL",
-	"email_smtp_from_name":               "CHATGPT2API_EMAIL_SMTP_FROM_NAME",
-	"image_price_cents":                  "CHATGPT2API_IMAGE_PRICE_CENTS",
-	"image_price_1k_cents":               "CHATGPT2API_IMAGE_PRICE_1K_CENTS",
-	"image_price_2k_cents":               "CHATGPT2API_IMAGE_PRICE_2K_CENTS",
-	"image_price_4k_cents":               "CHATGPT2API_IMAGE_PRICE_4K_CENTS",
-	"agency_tier_basic_cents":            "CHATGPT2API_AGENCY_TIER_BASIC_CENTS",
-	"agency_tier_pro_cents":              "CHATGPT2API_AGENCY_TIER_PRO_CENTS",
-	"agency_tier_premium_cents":          "CHATGPT2API_AGENCY_TIER_PREMIUM_CENTS",
-	"agency_tier_basic_commission_bp":    "CHATGPT2API_AGENCY_TIER_BASIC_COMMISSION_BP",
-	"agency_tier_pro_commission_bp":      "CHATGPT2API_AGENCY_TIER_PRO_COMMISSION_BP",
-	"agency_tier_premium_commission_bp":  "CHATGPT2API_AGENCY_TIER_PREMIUM_COMMISSION_BP",
-	"agency_tier_basic_discount_bp":      "CHATGPT2API_AGENCY_TIER_BASIC_DISCOUNT_BP",
-	"agency_tier_pro_discount_bp":        "CHATGPT2API_AGENCY_TIER_PRO_DISCOUNT_BP",
-	"agency_tier_premium_discount_bp":    "CHATGPT2API_AGENCY_TIER_PREMIUM_DISCOUNT_BP",
-	"subscription_heading":               "CHATGPT2API_SUBSCRIPTION_HEADING",
-	"subscription_subheading":            "CHATGPT2API_SUBSCRIPTION_SUBHEADING",
-	"subscription_safety_text":           "CHATGPT2API_SUBSCRIPTION_SAFETY_TEXT",
-	"subscription_agent_hint":            "CHATGPT2API_SUBSCRIPTION_AGENT_HINT",
-	"subscription_monthly_name":          "CHATGPT2API_SUBSCRIPTION_MONTHLY_NAME",
-	"subscription_monthly_desc":          "CHATGPT2API_SUBSCRIPTION_MONTHLY_DESC",
-	"subscription_monthly_badge":         "CHATGPT2API_SUBSCRIPTION_MONTHLY_BADGE",
-	"subscription_monthly_price_cents":   "CHATGPT2API_SUBSCRIPTION_MONTHLY_PRICE_CENTS",
-	"subscription_monthly_price_note":    "CHATGPT2API_SUBSCRIPTION_MONTHLY_PRICE_NOTE",
-	"subscription_monthly_features":      "CHATGPT2API_SUBSCRIPTION_MONTHLY_FEATURES",
-	"subscription_quarterly_name":        "CHATGPT2API_SUBSCRIPTION_QUARTERLY_NAME",
-	"subscription_quarterly_desc":        "CHATGPT2API_SUBSCRIPTION_QUARTERLY_DESC",
-	"subscription_quarterly_badge":       "CHATGPT2API_SUBSCRIPTION_QUARTERLY_BADGE",
-	"subscription_quarterly_price_cents": "CHATGPT2API_SUBSCRIPTION_QUARTERLY_PRICE_CENTS",
-	"subscription_quarterly_price_note":  "CHATGPT2API_SUBSCRIPTION_QUARTERLY_PRICE_NOTE",
-	"subscription_quarterly_features":    "CHATGPT2API_SUBSCRIPTION_QUARTERLY_FEATURES",
-	"subscription_yearly_name":           "CHATGPT2API_SUBSCRIPTION_YEARLY_NAME",
-	"subscription_yearly_desc":           "CHATGPT2API_SUBSCRIPTION_YEARLY_DESC",
-	"subscription_yearly_badge":          "CHATGPT2API_SUBSCRIPTION_YEARLY_BADGE",
-	"subscription_yearly_price_cents":    "CHATGPT2API_SUBSCRIPTION_YEARLY_PRICE_CENTS",
-	"subscription_yearly_price_note":     "CHATGPT2API_SUBSCRIPTION_YEARLY_PRICE_NOTE",
-	"subscription_yearly_features":       "CHATGPT2API_SUBSCRIPTION_YEARLY_FEATURES",
-	"agency_material_qr_enabled":         "CHATGPT2API_AGENCY_MATERIAL_QR_ENABLED",
-	"agency_material_qr_x_percent":       "CHATGPT2API_AGENCY_MATERIAL_QR_X_PERCENT",
-	"agency_material_qr_y_percent":       "CHATGPT2API_AGENCY_MATERIAL_QR_Y_PERCENT",
-	"agency_material_qr_size_percent":    "CHATGPT2API_AGENCY_MATERIAL_QR_SIZE_PERCENT",
-	"agency_material_qr_logo_percent":    "CHATGPT2API_AGENCY_MATERIAL_QR_LOGO_PERCENT",
-	"yipay_enabled":                      "CHATGPT2API_YIPAY_ENABLED",
-	"yipay_pid":                          "CHATGPT2API_YIPAY_PID",
-	"yipay_key":                          "CHATGPT2API_YIPAY_KEY",
-	"yipay_submit_url":                   "CHATGPT2API_YIPAY_SUBMIT_URL",
-	"yipay_notify_url":                   "CHATGPT2API_YIPAY_NOTIFY_URL",
-	"yipay_return_url":                   "CHATGPT2API_YIPAY_RETURN_URL",
-	"yipay_site_name":                    "CHATGPT2API_YIPAY_SITE_NAME",
-	"paypal_enabled":                     "CHATGPT2API_PAYPAL_ENABLED",
-	"paypal_checkout_url":                "CHATGPT2API_PAYPAL_CHECKOUT_URL",
-	"usdt_enabled":                       "CHATGPT2API_USDT_ENABLED",
-	"usdt_network":                       "CHATGPT2API_USDT_NETWORK",
-	"usdt_address":                       "CHATGPT2API_USDT_ADDRESS",
-	"usdt_payment_url":                   "CHATGPT2API_USDT_PAYMENT_URL",
-	"login_page_image_url":               "CHATGPT2API_LOGIN_PAGE_IMAGE_URL",
-	"login_page_image_mode":              "CHATGPT2API_LOGIN_PAGE_IMAGE_MODE",
-	"login_page_image_zoom":              "CHATGPT2API_LOGIN_PAGE_IMAGE_ZOOM",
-	"login_page_image_position_x":        "CHATGPT2API_LOGIN_PAGE_IMAGE_POSITION_X",
-	"login_page_image_position_y":        "CHATGPT2API_LOGIN_PAGE_IMAGE_POSITION_Y",
-	"image_prompt_presets_json":          "CHATGPT2API_IMAGE_PROMPT_PRESETS_JSON",
-	"image_r2_enabled":                   "CHATGPT2API_IMAGE_R2_ENABLED",
-	"image_r2_endpoint":                  "CHATGPT2API_IMAGE_R2_ENDPOINT",
-	"image_r2_bucket":                    "CHATGPT2API_IMAGE_R2_BUCKET",
-	"image_r2_region":                    "CHATGPT2API_IMAGE_R2_REGION",
-	"image_r2_access_key_id":             "CHATGPT2API_IMAGE_R2_ACCESS_KEY_ID",
-	"image_r2_secret_access_key":         "CHATGPT2API_IMAGE_R2_SECRET_ACCESS_KEY",
-	"image_r2_public_base_url":           "CHATGPT2API_IMAGE_R2_PUBLIC_BASE_URL",
-	"image_r2_prefix":                    "CHATGPT2API_IMAGE_R2_PREFIX",
+	"base_url":                             "CHATGPT2API_BASE_URL",
+	"brand_top_left_name":                  "CHATGPT2API_BRAND_TOP_LEFT_NAME",
+	"brand_site_name":                      "CHATGPT2API_BRAND_SITE_NAME",
+	"brand_top_left_logo_url":              "CHATGPT2API_BRAND_TOP_LEFT_LOGO_URL",
+	"brand_site_logo_url":                  "CHATGPT2API_BRAND_SITE_LOGO_URL",
+	"proxy":                                "CHATGPT2API_PROXY",
+	"refresh_account_interval_minute":      "CHATGPT2API_REFRESH_ACCOUNT_INTERVAL_MINUTE",
+	"image_concurrent_limit":               "CHATGPT2API_IMAGE_CONCURRENT_LIMIT",
+	"image_single_count_limit":             "CHATGPT2API_IMAGE_SINGLE_COUNT_LIMIT",
+	"image_task_timeout_seconds":           "CHATGPT2API_IMAGE_TASK_TIMEOUT_SECONDS",
+	"user_default_concurrent_limit":        "CHATGPT2API_USER_DEFAULT_CONCURRENT_LIMIT",
+	"user_default_rpm_limit":               "CHATGPT2API_USER_DEFAULT_RPM_LIMIT",
+	"image_retention_days":                 "CHATGPT2API_IMAGE_RETENTION_DAYS",
+	"auto_remove_invalid_accounts":         "CHATGPT2API_AUTO_REMOVE_INVALID_ACCOUNTS",
+	"auto_remove_rate_limited_accounts":    "CHATGPT2API_AUTO_REMOVE_RATE_LIMITED_ACCOUNTS",
+	"log_retention_days":                   "CHATGPT2API_LOG_RETENTION_DAYS",
+	"log_levels":                           "CHATGPT2API_LOG_LEVELS",
+	"linuxdo_enabled":                      "CHATGPT2API_LINUXDO_ENABLED",
+	"linuxdo_client_id":                    "CHATGPT2API_LINUXDO_CLIENT_ID",
+	"linuxdo_client_secret":                "CHATGPT2API_LINUXDO_CLIENT_SECRET",
+	"linuxdo_redirect_url":                 "CHATGPT2API_LINUXDO_REDIRECT_URL",
+	"linuxdo_frontend_redirect_url":        "CHATGPT2API_LINUXDO_FRONTEND_REDIRECT_URL",
+	"update_repo":                          "CHATGPT2API_UPDATE_REPO",
+	"update_github_token":                  "CHATGPT2API_UPDATE_GITHUB_TOKEN",
+	"registration_enabled":                 "CHATGPT2API_REGISTRATION_ENABLED",
+	"registration_allowed_email_domains":   "CHATGPT2API_REGISTRATION_ALLOWED_EMAIL_DOMAINS",
+	"registration_bonus_image_times":       "CHATGPT2API_REGISTRATION_BONUS_IMAGE_TIMES",
+	"cf_turnstile_site_key":                "CHATGPT2API_CF_TURNSTILE_SITE_KEY",
+	"cf_turnstile_secret_key":              "CHATGPT2API_CF_TURNSTILE_SECRET_KEY",
+	"email_smtp_enabled":                   "CHATGPT2API_EMAIL_SMTP_ENABLED",
+	"email_smtp_host":                      "CHATGPT2API_EMAIL_SMTP_HOST",
+	"email_smtp_port":                      "CHATGPT2API_EMAIL_SMTP_PORT",
+	"email_smtp_use_ssl":                   "CHATGPT2API_EMAIL_SMTP_USE_SSL",
+	"email_smtp_username":                  "CHATGPT2API_EMAIL_SMTP_USERNAME",
+	"email_smtp_auth_code":                 "CHATGPT2API_EMAIL_SMTP_AUTH_CODE",
+	"email_smtp_from_email":                "CHATGPT2API_EMAIL_SMTP_FROM_EMAIL",
+	"email_smtp_from_name":                 "CHATGPT2API_EMAIL_SMTP_FROM_NAME",
+	"image_price_cents":                    "CHATGPT2API_IMAGE_PRICE_CENTS",
+	"image_price_1k_cents":                 "CHATGPT2API_IMAGE_PRICE_1K_CENTS",
+	"image_price_2k_cents":                 "CHATGPT2API_IMAGE_PRICE_2K_CENTS",
+	"image_price_4k_cents":                 "CHATGPT2API_IMAGE_PRICE_4K_CENTS",
+	"agency_tier_basic_cents":              "CHATGPT2API_AGENCY_TIER_BASIC_CENTS",
+	"agency_tier_pro_cents":                "CHATGPT2API_AGENCY_TIER_PRO_CENTS",
+	"agency_tier_premium_cents":            "CHATGPT2API_AGENCY_TIER_PREMIUM_CENTS",
+	"agency_tier_basic_commission_bp":      "CHATGPT2API_AGENCY_TIER_BASIC_COMMISSION_BP",
+	"agency_tier_pro_commission_bp":        "CHATGPT2API_AGENCY_TIER_PRO_COMMISSION_BP",
+	"agency_tier_premium_commission_bp":    "CHATGPT2API_AGENCY_TIER_PREMIUM_COMMISSION_BP",
+	"agency_tier_basic_discount_bp":        "CHATGPT2API_AGENCY_TIER_BASIC_DISCOUNT_BP",
+	"agency_tier_pro_discount_bp":          "CHATGPT2API_AGENCY_TIER_PRO_DISCOUNT_BP",
+	"agency_tier_premium_discount_bp":      "CHATGPT2API_AGENCY_TIER_PREMIUM_DISCOUNT_BP",
+	"subscription_heading":                 "CHATGPT2API_SUBSCRIPTION_HEADING",
+	"subscription_subheading":              "CHATGPT2API_SUBSCRIPTION_SUBHEADING",
+	"subscription_safety_text":             "CHATGPT2API_SUBSCRIPTION_SAFETY_TEXT",
+	"subscription_agent_hint":              "CHATGPT2API_SUBSCRIPTION_AGENT_HINT",
+	"subscription_monthly_name":            "CHATGPT2API_SUBSCRIPTION_MONTHLY_NAME",
+	"subscription_monthly_desc":            "CHATGPT2API_SUBSCRIPTION_MONTHLY_DESC",
+	"subscription_monthly_badge":           "CHATGPT2API_SUBSCRIPTION_MONTHLY_BADGE",
+	"subscription_monthly_price_cents":     "CHATGPT2API_SUBSCRIPTION_MONTHLY_PRICE_CENTS",
+	"subscription_monthly_price_note":      "CHATGPT2API_SUBSCRIPTION_MONTHLY_PRICE_NOTE",
+	"subscription_monthly_features":        "CHATGPT2API_SUBSCRIPTION_MONTHLY_FEATURES",
+	"subscription_quarterly_name":          "CHATGPT2API_SUBSCRIPTION_QUARTERLY_NAME",
+	"subscription_quarterly_desc":          "CHATGPT2API_SUBSCRIPTION_QUARTERLY_DESC",
+	"subscription_quarterly_badge":         "CHATGPT2API_SUBSCRIPTION_QUARTERLY_BADGE",
+	"subscription_quarterly_price_cents":   "CHATGPT2API_SUBSCRIPTION_QUARTERLY_PRICE_CENTS",
+	"subscription_quarterly_price_note":    "CHATGPT2API_SUBSCRIPTION_QUARTERLY_PRICE_NOTE",
+	"subscription_quarterly_features":      "CHATGPT2API_SUBSCRIPTION_QUARTERLY_FEATURES",
+	"subscription_yearly_name":             "CHATGPT2API_SUBSCRIPTION_YEARLY_NAME",
+	"subscription_yearly_desc":             "CHATGPT2API_SUBSCRIPTION_YEARLY_DESC",
+	"subscription_yearly_badge":            "CHATGPT2API_SUBSCRIPTION_YEARLY_BADGE",
+	"subscription_yearly_price_cents":      "CHATGPT2API_SUBSCRIPTION_YEARLY_PRICE_CENTS",
+	"subscription_yearly_price_note":       "CHATGPT2API_SUBSCRIPTION_YEARLY_PRICE_NOTE",
+	"subscription_yearly_features":         "CHATGPT2API_SUBSCRIPTION_YEARLY_FEATURES",
+	"agency_material_qr_enabled":           "CHATGPT2API_AGENCY_MATERIAL_QR_ENABLED",
+	"agency_material_qr_x_percent":         "CHATGPT2API_AGENCY_MATERIAL_QR_X_PERCENT",
+	"agency_material_qr_y_percent":         "CHATGPT2API_AGENCY_MATERIAL_QR_Y_PERCENT",
+	"agency_material_qr_size_percent":      "CHATGPT2API_AGENCY_MATERIAL_QR_SIZE_PERCENT",
+	"agency_material_qr_logo_percent":      "CHATGPT2API_AGENCY_MATERIAL_QR_LOGO_PERCENT",
+	"yipay_enabled":                        "CHATGPT2API_YIPAY_ENABLED",
+	"yipay_pid":                            "CHATGPT2API_YIPAY_PID",
+	"yipay_key":                            "CHATGPT2API_YIPAY_KEY",
+	"yipay_submit_url":                     "CHATGPT2API_YIPAY_SUBMIT_URL",
+	"yipay_notify_url":                     "CHATGPT2API_YIPAY_NOTIFY_URL",
+	"yipay_return_url":                     "CHATGPT2API_YIPAY_RETURN_URL",
+	"yipay_site_name":                      "CHATGPT2API_YIPAY_SITE_NAME",
+	"paypal_enabled":                       "CHATGPT2API_PAYPAL_ENABLED",
+	"paypal_checkout_url":                  "CHATGPT2API_PAYPAL_CHECKOUT_URL",
+	"usdt_enabled":                         "CHATGPT2API_USDT_ENABLED",
+	"usdt_network":                         "CHATGPT2API_USDT_NETWORK",
+	"usdt_address":                         "CHATGPT2API_USDT_ADDRESS",
+	"usdt_payment_url":                     "CHATGPT2API_USDT_PAYMENT_URL",
+	"login_page_image_url":                 "CHATGPT2API_LOGIN_PAGE_IMAGE_URL",
+	"login_page_image_mode":                "CHATGPT2API_LOGIN_PAGE_IMAGE_MODE",
+	"login_page_image_zoom":                "CHATGPT2API_LOGIN_PAGE_IMAGE_ZOOM",
+	"login_page_image_position_x":          "CHATGPT2API_LOGIN_PAGE_IMAGE_POSITION_X",
+	"login_page_image_position_y":          "CHATGPT2API_LOGIN_PAGE_IMAGE_POSITION_Y",
+	"image_prompt_presets_json":            "CHATGPT2API_IMAGE_PROMPT_PRESETS_JSON",
+	"image_r2_enabled":                     "CHATGPT2API_IMAGE_R2_ENABLED",
+	"image_r2_endpoint":                    "CHATGPT2API_IMAGE_R2_ENDPOINT",
+	"image_r2_bucket":                      "CHATGPT2API_IMAGE_R2_BUCKET",
+	"image_r2_region":                      "CHATGPT2API_IMAGE_R2_REGION",
+	"image_r2_access_key_id":               "CHATGPT2API_IMAGE_R2_ACCESS_KEY_ID",
+	"image_r2_secret_access_key":           "CHATGPT2API_IMAGE_R2_SECRET_ACCESS_KEY",
+	"image_r2_public_base_url":             "CHATGPT2API_IMAGE_R2_PUBLIC_BASE_URL",
+	"image_r2_prefix":                      "CHATGPT2API_IMAGE_R2_PREFIX",
+	"image_r2_secondary_enabled":           "CHATGPT2API_IMAGE_R2_SECONDARY_ENABLED",
+	"image_r2_secondary_endpoint":          "CHATGPT2API_IMAGE_R2_SECONDARY_ENDPOINT",
+	"image_r2_secondary_bucket":            "CHATGPT2API_IMAGE_R2_SECONDARY_BUCKET",
+	"image_r2_secondary_region":            "CHATGPT2API_IMAGE_R2_SECONDARY_REGION",
+	"image_r2_secondary_access_key_id":     "CHATGPT2API_IMAGE_R2_SECONDARY_ACCESS_KEY_ID",
+	"image_r2_secondary_secret_access_key": "CHATGPT2API_IMAGE_R2_SECONDARY_SECRET_ACCESS_KEY",
+	"image_r2_secondary_public_base_url":   "CHATGPT2API_IMAGE_R2_SECONDARY_PUBLIC_BASE_URL",
+	"image_r2_secondary_prefix":            "CHATGPT2API_IMAGE_R2_SECONDARY_PREFIX",
+	"image_imgbed_enabled":                 "CHATGPT2API_IMAGE_IMGBED_ENABLED",
+	"image_imgbed_upload_url":              "CHATGPT2API_IMAGE_IMGBED_UPLOAD_URL",
+	"image_imgbed_auth_code":               "CHATGPT2API_IMAGE_IMGBED_AUTH_CODE",
+	"image_imgbed_upload_channel":          "CHATGPT2API_IMAGE_IMGBED_UPLOAD_CHANNEL",
 }
 
 var envKeyRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -690,6 +702,29 @@ func (s *Store) ImageObjectStorage() objectstore.Config {
 	}.Normalize()
 }
 
+func (s *Store) ImageSecondaryObjectStorage() objectstore.Config {
+	accountEndpoint := strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_secondary_endpoint", "")))
+	return objectstore.Config{
+		Enabled:         util.ToBool(s.settingValue("image_r2_secondary_enabled", false)),
+		Endpoint:        accountEndpoint,
+		Region:          strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_secondary_region", "auto"))),
+		Bucket:          strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_secondary_bucket", ""))),
+		AccessKeyID:     strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_secondary_access_key_id", ""))),
+		SecretAccessKey: strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_secondary_secret_access_key", ""))),
+		PublicBaseURL:   strings.TrimRight(strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_secondary_public_base_url", ""))), "/"),
+		Prefix:          strings.Trim(strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_secondary_prefix", "images"))), "/"),
+	}.Normalize()
+}
+
+func (s *Store) ImageExternalStorage() objectstore.ImgBedConfig {
+	return objectstore.ImgBedConfig{
+		Enabled:       util.ToBool(s.settingValue("image_imgbed_enabled", false)),
+		UploadURL:     strings.TrimSpace(fmt.Sprint(s.settingValue("image_imgbed_upload_url", ""))),
+		AuthCode:      strings.TrimSpace(fmt.Sprint(s.settingValue("image_imgbed_auth_code", ""))),
+		UploadChannel: strings.TrimSpace(fmt.Sprint(s.settingValue("image_imgbed_upload_channel", "cfr2"))),
+	}.Normalize()
+}
+
 func (s *Store) UpdateProxyURL() string {
 	if value := strings.TrimSpace(os.Getenv("CHATGPT2API_UPDATE_PROXY_URL")); value != "" {
 		return value
@@ -968,12 +1003,28 @@ func (s *Store) Get() map[string]any {
 	data["image_r2_secret_access_key_configured"] = imageR2.SecretAccessKey != ""
 	data["image_r2_public_base_url"] = imageR2.PublicBaseURL
 	data["image_r2_prefix"] = imageR2.Prefix
+	imageSecondaryR2 := s.ImageSecondaryObjectStorage()
+	data["image_r2_secondary_enabled"] = imageSecondaryR2.Enabled
+	data["image_r2_secondary_endpoint"] = imageSecondaryR2.Endpoint
+	data["image_r2_secondary_bucket"] = imageSecondaryR2.Bucket
+	data["image_r2_secondary_region"] = imageSecondaryR2.Region
+	data["image_r2_secondary_access_key_id"] = imageSecondaryR2.AccessKeyID
+	data["image_r2_secondary_secret_access_key_configured"] = imageSecondaryR2.SecretAccessKey != ""
+	data["image_r2_secondary_public_base_url"] = imageSecondaryR2.PublicBaseURL
+	data["image_r2_secondary_prefix"] = imageSecondaryR2.Prefix
+	imageImgBed := s.ImageExternalStorage()
+	data["image_imgbed_enabled"] = imageImgBed.Enabled
+	data["image_imgbed_upload_url"] = imageImgBed.UploadURL
+	data["image_imgbed_auth_code_configured"] = imageImgBed.AuthCode != ""
+	data["image_imgbed_upload_channel"] = imageImgBed.UploadChannel
 	delete(data, "linuxdo_client_secret")
 	delete(data, "update_github_token")
 	delete(data, "cf_turnstile_secret_key")
 	delete(data, "email_smtp_auth_code")
 	delete(data, "yipay_key")
 	delete(data, "image_r2_secret_access_key")
+	delete(data, "image_r2_secondary_secret_access_key")
+	delete(data, "image_imgbed_auth_code")
 	return data
 }
 
@@ -999,6 +1050,12 @@ func (s *Store) Update(data map[string]any) (map[string]any, error) {
 		if key == "image_r2_secret_access_key_configured" {
 			continue
 		}
+		if key == "image_r2_secondary_secret_access_key_configured" {
+			continue
+		}
+		if key == "image_imgbed_auth_code_configured" {
+			continue
+		}
 		if key == "linuxdo_client_secret" && strings.TrimSpace(fmt.Sprint(value)) == "" {
 			continue
 		}
@@ -1015,6 +1072,12 @@ func (s *Store) Update(data map[string]any) (map[string]any, error) {
 			continue
 		}
 		if key == "image_r2_secret_access_key" && strings.TrimSpace(fmt.Sprint(value)) == "" {
+			continue
+		}
+		if key == "image_r2_secondary_secret_access_key" && strings.TrimSpace(fmt.Sprint(value)) == "" {
+			continue
+		}
+		if key == "image_imgbed_auth_code" && strings.TrimSpace(fmt.Sprint(value)) == "" {
 			continue
 		}
 		next[key] = value
@@ -1221,6 +1284,53 @@ func (s *Store) validateSettingsUpdateLocked(data map[string]any) error {
 		}
 		if err := validateAbsoluteHTTPURL(imageR2.PublicBaseURL); err != nil {
 			return errors.New("R2 Public Base URL must be an absolute http(s) URL")
+		}
+	}
+	imageSecondaryR2 := objectstore.Config{
+		Enabled:         util.ToBool(util.ValueOr(data["image_r2_secondary_enabled"], false)),
+		Endpoint:        strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_secondary_endpoint"], ""))),
+		Region:          strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_secondary_region"], "auto"))),
+		Bucket:          strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_secondary_bucket"], ""))),
+		AccessKeyID:     strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_secondary_access_key_id"], ""))),
+		SecretAccessKey: strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_secondary_secret_access_key"], ""))),
+		PublicBaseURL:   strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_secondary_public_base_url"], ""))),
+		Prefix:          strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_r2_secondary_prefix"], "images"))),
+	}.Normalize()
+	if imageSecondaryR2.Enabled {
+		if imageSecondaryR2.Endpoint == "" {
+			return errors.New("Secondary R2 Endpoint is required when enabled")
+		}
+		if err := validateAbsoluteHTTPURL(imageSecondaryR2.Endpoint); err != nil {
+			return errors.New("Secondary R2 Endpoint must be an absolute http(s) URL")
+		}
+		if imageSecondaryR2.Bucket == "" {
+			return errors.New("Secondary R2 Bucket is required when enabled")
+		}
+		if imageSecondaryR2.AccessKeyID == "" {
+			return errors.New("Secondary R2 Access Key ID is required when enabled")
+		}
+		if imageSecondaryR2.SecretAccessKey == "" {
+			return errors.New("Secondary R2 Secret Access Key is required when enabled")
+		}
+		if imageSecondaryR2.PublicBaseURL == "" {
+			return errors.New("Secondary R2 Public Base URL is required when enabled")
+		}
+		if err := validateAbsoluteHTTPURL(imageSecondaryR2.PublicBaseURL); err != nil {
+			return errors.New("Secondary R2 Public Base URL must be an absolute http(s) URL")
+		}
+	}
+	imageImgBed := objectstore.ImgBedConfig{
+		Enabled:       util.ToBool(util.ValueOr(data["image_imgbed_enabled"], false)),
+		UploadURL:     strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_imgbed_upload_url"], ""))),
+		AuthCode:      strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_imgbed_auth_code"], ""))),
+		UploadChannel: strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_imgbed_upload_channel"], "cfr2"))),
+	}.Normalize()
+	if imageImgBed.Enabled {
+		if imageImgBed.UploadURL == "" {
+			return errors.New("Image external Upload URL is required when enabled")
+		}
+		if err := validateAbsoluteHTTPURL(imageImgBed.UploadURL); err != nil {
+			return errors.New("Image external Upload URL must be an absolute http(s) URL")
 		}
 	}
 

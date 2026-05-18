@@ -25,18 +25,21 @@ func (a *App) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if identity.Role == service.AuthRoleAdmin {
-		a.ensureSubscriptionTierRoles()
-	}
+	a.ensureSubscriptionTierRoles()
 
 	switch r.Method {
 	case http.MethodGet:
 		wallet := a.billing.GetWalletByIdentity(identity)
-		if wallet == nil {
-			util.WriteError(w, http.StatusForbidden, "email wallet permission required")
-			return
+		payChannels := a.availablePayChannels()
+		if wallet != nil {
+			payChannels = append([]string{"balance"}, payChannels...)
+		} else {
+			wallet = map[string]any{
+				"balance_cents":        0,
+				"total_recharge_cents": 0,
+				"total_consume_cents":  0,
+			}
 		}
-		payChannels := append([]string{"balance"}, a.availablePayChannels()...)
 		util.WriteJSON(w, http.StatusOK, map[string]any{
 			"plans":        subscriptionPlansPayload(a.subscriptionTiers()),
 			"status":       a.billing.SubscriptionStatusByIdentity(identity),
@@ -242,6 +245,15 @@ func (a *App) ensureSubscriptionTierRoles() {
 			service.APIPermissionKey("POST", "/api/pay/orders"),
 			service.APIPermissionKey("GET", "/api/subscriptions/plans"),
 			service.APIPermissionKey("POST", "/api/subscriptions/orders"),
+			service.APIPermissionKey("GET", "/api/agency"),
+			service.APIPermissionKey("GET", "/api/agency/commission"),
+			service.APIPermissionKey("GET", "/api/agency/withdrawals"),
+			service.APIPermissionKey("POST", "/api/agency/withdrawals"),
+			service.APIPermissionKey("GET", "/api/agency/withdraw-profile"),
+			service.APIPermissionKey("POST", "/api/agency/withdraw-profile"),
+			service.APIPermissionKey("POST", "/api/agency/withdraw-profile/upload"),
+			service.APIPermissionKey("POST", "/api/agency/join"),
+			service.APIPermissionKey("POST", "/api/agency/upgrade"),
 		}
 		payload := map[string]any{
 			"name":            tier.RoleName,

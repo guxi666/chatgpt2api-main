@@ -111,6 +111,12 @@ type savedImageLocation struct {
 	Path      string
 }
 
+type uploadedImageObject struct {
+	PublicURL string
+	ObjectKey string
+	Storage   string
+}
+
 func ImageOutputOptionsFromPayload(payload map[string]any) ImageOutputOptions {
 	format := NormalizeImageOutputFormat(util.Clean(payload["output_format"]))
 	options := ImageOutputOptions{Format: format}
@@ -1000,16 +1006,17 @@ func (e *Engine) SaveImageBytesForOwnerWithFormatInfo(imageData []byte, baseURL,
 		baseURL = e.Config.BaseURL()
 	}
 	localURL := strings.TrimRight(baseURL, "/") + "/images/" + filepath.ToSlash(rel)
-	remoteURL := e.uploadImageObject(rel, imageData, outputFormat)
-	if remoteURL != "" {
+	uploadedRemote := e.uploadImageObject(rel, imageData, outputFormat)
+	if uploadedRemote.PublicURL != "" {
 		width, height := imageBytesDimensions(imageData)
 		saveErr := service.SaveRemoteImageRecord(e.Storage, e.Config.ImagesDir(), service.RemoteImageRecord{
 			Path:         filepath.ToSlash(rel),
 			Name:         filename,
 			Date:         now.Format("2006-01-02"),
 			Size:         int64(len(imageData)),
-			URL:          remoteURL,
-			ObjectKey:    e.imageObjectKey(rel),
+			URL:          uploadedRemote.PublicURL,
+			Storage:      uploadedRemote.Storage,
+			ObjectKey:    uploadedRemote.ObjectKey,
 			CreatedAt:    now.Format("2006-01-02 15:04:05"),
 			Visibility:   service.ImageVisibilityPrivate,
 			OwnerID:      strings.TrimSpace(ownerID),
@@ -1021,7 +1028,7 @@ func (e *Engine) SaveImageBytesForOwnerWithFormatInfo(imageData []byte, baseURL,
 		if saveErr == nil {
 			_ = os.Remove(filePath)
 			removeEmptyImageParents(e.Config.ImagesDir(), filepath.Dir(filePath))
-			return savedImageLocation{URL: remoteURL, LocalURL: localURL, RemoteURL: remoteURL, Path: filepath.ToSlash(rel)}
+			return savedImageLocation{URL: uploadedRemote.PublicURL, LocalURL: localURL, RemoteURL: uploadedRemote.PublicURL, Path: filepath.ToSlash(rel)}
 		}
 		if e.Logger != nil {
 			e.Logger.Warning("R2 image index save failed", "path", filepath.ToSlash(rel), "error", saveErr.Error())
@@ -1030,48 +1037,78 @@ func (e *Engine) SaveImageBytesForOwnerWithFormatInfo(imageData []byte, baseURL,
 	return savedImageLocation{URL: localURL, LocalURL: localURL, Path: filepath.ToSlash(rel)}
 }
 
-func (e *Engine) uploadImageObject(rel string, data []byte, outputFormat string) string {
+func (e *Engine) uploadImageObject(rel string, data []byte, outputFormat string) uploadedImageObject {
 	if e == nil || e.Config == nil {
-		return ""
+		return uploadedImageObject{}
 	}
-	cfgProvider, ok := e.Config.(interface {
+	externalCfgProvider, hasExternal := e.Config.(interface {
+		ImageExternalStorage() objectstore.ImgBedConfig
+	})
+	if hasExternal {
+		externalCfg := externalCfgProvider.ImageExternalStorage()
+		if externalCfg.Ready() {
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+			publicURL, err := objectstore.UploadToImgBed(ctx, externalCfg, rel, data, imageContentType(outputFormat))
+			if err == nil && strings.TrimSpace(publicURL) != "" {
+				if e.Logger != nil {
+					e.Logger.Info("external image bed upload succeeded", "path", filepath.ToSlash(rel))
+				}
+				return uploadedImageObject{PublicURL: publicURL, Storage: "imgbed"}
+			}
+			if err != nil && e.Logger != nil {
+				e.Logger.Warning("external image bed upload failed, fallback to R2", "path", filepath.ToSlash(rel), "error", err.Error())
+			}
+		}
+	}
+	secondaryCfgProvider, hasSecondary := e.Config.(interface {
+		ImageSecondaryObjectStorage() objectstore.Config
+	})
+	if hasSecondary {
+		secondaryCfg := secondaryCfgProvider.ImageSecondaryObjectStorage()
+		if secondaryCfg.Ready() {
+			secondaryURL, secondaryErr := e.uploadImageToR2(rel, data, outputFormat, secondaryCfg, "secondary R2")
+			if secondaryErr == nil {
+				return uploadedImageObject{PublicURL: secondaryURL, ObjectKey: secondaryCfg.ObjectKey(rel), Storage: "r2_secondary"}
+			}
+			if e.Logger != nil {
+				e.Logger.Warning("secondary R2 image upload failed, fallback to primary R2", "path", filepath.ToSlash(rel), "error", secondaryErr.Error())
+			}
+		}
+	}
+
+	primaryCfgProvider, hasPrimary := e.Config.(interface {
 		ImageObjectStorage() objectstore.Config
 	})
-	if !ok {
-		return ""
+	if !hasPrimary {
+		return uploadedImageObject{}
 	}
-	cfg := cfgProvider.ImageObjectStorage()
-	if !cfg.Ready() {
-		return ""
+	primaryCfg := primaryCfgProvider.ImageObjectStorage()
+	if !primaryCfg.Ready() {
+		return uploadedImageObject{}
 	}
+	primaryURL, primaryErr := e.uploadImageToR2(rel, data, outputFormat, primaryCfg, "primary R2")
+	if primaryErr != nil {
+		if e.Logger != nil {
+			e.Logger.Warning("primary R2 image upload failed", "path", filepath.ToSlash(rel), "error", primaryErr.Error())
+		}
+		return uploadedImageObject{}
+	}
+	return uploadedImageObject{PublicURL: primaryURL, ObjectKey: primaryCfg.ObjectKey(rel), Storage: "r2_primary"}
+}
+
+func (e *Engine) uploadImageToR2(rel string, data []byte, outputFormat string, cfg objectstore.Config, storageName string) (string, error) {
 	key := cfg.ObjectKey(rel)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	publicURL, err := objectstore.Upload(ctx, cfg, key, data, imageContentType(outputFormat))
 	if err != nil {
-		if e.Logger != nil {
-			e.Logger.Warning("R2 image upload failed", "path", filepath.ToSlash(rel), "error", err.Error())
-		}
-		return ""
+		return "", err
 	}
 	if publicURL == "" && e.Logger != nil {
-		e.Logger.Info("R2 image uploaded", "path", filepath.ToSlash(rel), "key", key)
+		e.Logger.Info(storageName+" image uploaded", "path", filepath.ToSlash(rel), "key", key)
 	}
-	return publicURL
-}
-
-func (e *Engine) imageObjectKey(rel string) string {
-	if e == nil || e.Config == nil {
-		return ""
-	}
-	cfgProvider, ok := e.Config.(interface {
-		ImageObjectStorage() objectstore.Config
-	})
-	if !ok {
-		return ""
-	}
-	cfg := cfgProvider.ImageObjectStorage()
-	return cfg.ObjectKey(rel)
+	return publicURL, nil
 }
 
 func imageBytesDimensions(data []byte) (int, int) {
