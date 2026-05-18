@@ -116,7 +116,7 @@ export function canAccessPath(
   if (!session) {
     return false;
   }
-  if (path === "/profile") {
+  if (path === "/profile" || path === "/agency") {
     return true;
   }
   if (session.role === "admin") {

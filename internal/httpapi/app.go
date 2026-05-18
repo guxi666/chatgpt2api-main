@@ -1128,10 +1128,13 @@ func (a *App) isAllowedImageFetchHost(targetURL *url.URL, requestHost string) bo
 	}
 
 	allowedHosts := map[string]struct{}{}
+	imageExternal := a.config.ImageExternalStorage()
 	for _, candidate := range []string{
 		requestHost,
 		a.config.BaseURL(),
 		a.config.ImageObjectStorage().PublicBaseURL,
+		a.config.ImageSecondaryObjectStorage().PublicBaseURL,
+		imageExternal.UploadURL,
 	} {
 		host := normalizedHostname(candidate)
 		if host != "" {

@@ -38,7 +38,20 @@ async function downloadManagedImage(item: ManagedImage, index: number) {
   let href = item.url;
   let objectUrl = "";
   try {
-    const response = await fetch(item.url);
+    const sourceURL = String(item.url || "").trim();
+    const needsProxy =
+      /^https?:\/\//i.test(sourceURL) &&
+      (() => {
+        try {
+          return new URL(sourceURL, window.location.origin).origin !== window.location.origin;
+        } catch {
+          return false;
+        }
+      })();
+    const requestURL = needsProxy
+      ? `/api/images/fetch?url=${encodeURIComponent(sourceURL)}&name=${encodeURIComponent(buildManagedImageDownloadName(item, index))}`
+      : sourceURL;
+    const response = await fetch(requestURL, { credentials: "include" });
     if (response.ok) {
       const blob = await response.blob();
       objectUrl = URL.createObjectURL(blob);

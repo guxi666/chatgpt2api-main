@@ -227,6 +227,7 @@ func (a *App) ensureSubscriptionTierRoles() {
 			"/image-manager",
 			"/wallet",
 			"/subscription",
+			"/agency",
 		}
 		apiPermissions := []string{
 			service.APIPermissionKey("GET", "/v1/models"),
