@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 )
@@ -42,15 +43,13 @@ func UploadToImgBed(ctx context.Context, cfg ImgBedConfig, objectKey string, dat
 	if filename == "." || filename == "/" || filename == "" {
 		filename = "image.bin"
 	}
+	requestURL, err := normalizeImgBedUploadURL(cfg)
+	if err != nil {
+		return "", err
+	}
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	if cfg.AuthCode != "" {
-		_ = writer.WriteField("authCode", cfg.AuthCode)
-	}
-	if cfg.UploadChannel != "" {
-		_ = writer.WriteField("uploadChannel", cfg.UploadChannel)
-	}
 	fileWriter, err := writer.CreateFormFile("file", filename)
 	if err != nil {
 		_ = writer.Close()
@@ -64,7 +63,7 @@ func UploadToImgBed(ctx context.Context, cfg ImgBedConfig, objectKey string, dat
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.UploadURL, &body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, &body)
 	if err != nil {
 		return "", err
 	}
@@ -98,6 +97,24 @@ func UploadToImgBed(ctx context.Context, cfg ImgBedConfig, objectKey string, dat
 		base = strings.TrimSuffix(base, "/upload")
 	}
 	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(publicURL, "/"), nil
+}
+
+func normalizeImgBedUploadURL(cfg ImgBedConfig) (string, error) {
+	parsed, err := url.Parse(cfg.UploadURL)
+	if err != nil {
+		return "", err
+	}
+	query := parsed.Query()
+	if cfg.AuthCode != "" {
+		query.Set("authCode", cfg.AuthCode)
+	}
+	if cfg.UploadChannel != "" {
+		query.Set("uploadChannel", cfg.UploadChannel)
+	}
+	// Request absolute URLs to avoid parsing ambiguity across different ImgBed deployments.
+	query.Set("returnFormat", "full")
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
 }
 
 func extractImgBedURL(data []byte) string {
