@@ -408,6 +408,15 @@ func (a *App) shouldKeepCurrentRoleOnSubscription(userID string) bool {
 	if userID == "" {
 		return false
 	}
+	wallet := a.billing.GetWalletByUserID(userID)
+	if wallet != nil {
+		if util.ToBool(wallet["agency_enabled"]) {
+			return true
+		}
+		if strings.TrimSpace(util.Clean(wallet["agency_tier"])) != "" {
+			return true
+		}
+	}
 	roleID := ""
 	for _, user := range a.auth.ListUsers() {
 		if strings.TrimSpace(util.Clean(user["id"])) != userID {

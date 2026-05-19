@@ -164,7 +164,12 @@ function SubscriptionPageContent() {
   const [selectedPayType, setSelectedPayType] = useState<string>("balance");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const displayPlans = useMemo(() => normalizePlans(plans), [plans]);
+  const displayPlans = useMemo(() => {
+    if (plans.length === 0) {
+      return [];
+    }
+    return normalizePlans(plans);
+  }, [plans]);
 
   const reload = useCallback(async () => {
     const data = await fetchSubscriptionPlans();
@@ -213,6 +218,13 @@ function SubscriptionPageContent() {
         await reload();
       } catch (error) {
         if (active) {
+          setPlans((current) =>
+            current.length > 0 ? current : fallbackPlans,
+          );
+          setSelectedTier((current) =>
+            current || String(fallbackPlans[0]?.key || "monthly"),
+          );
+          setSelectedPayType((current) => current || "balance");
           toast.error(error instanceof Error ? error.message : "加载套餐失败");
         }
       } finally {

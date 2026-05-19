@@ -31,6 +31,7 @@ func (a *App) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		wallet := a.billing.GetWalletByIdentity(identity)
 		payChannels := a.availablePayChannels()
+		discountBP := subscriptionDiscountBasisPoint(wallet)
 		if wallet != nil {
 			payChannels = append([]string{"balance"}, payChannels...)
 		} else {
@@ -40,8 +41,21 @@ func (a *App) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
 				"total_consume_cents":  0,
 			}
 		}
+		plans := a.subscriptionTiers()
+		if discountBP > 0 {
+			for index := range plans {
+				basePrice := plans[index].PriceCents
+				plans[index].PriceCents = applySubscriptionDiscount(basePrice, discountBP)
+				discountHint := fmt.Sprintf("代理优惠 %.2f%%", float64(discountBP)/100.0)
+				if strings.TrimSpace(plans[index].PriceNote) == "" {
+					plans[index].PriceNote = discountHint
+				} else {
+					plans[index].PriceNote = strings.TrimSpace(plans[index].PriceNote) + " · " + discountHint
+				}
+			}
+		}
 		util.WriteJSON(w, http.StatusOK, map[string]any{
-			"plans":        subscriptionPlansPayload(a.subscriptionTiers()),
+			"plans":        subscriptionPlansPayload(plans),
 			"status":       a.billing.SubscriptionStatusByIdentity(identity),
 			"wallet":       wallet,
 			"pay_channels": uniqueNonEmptyStrings(payChannels),
@@ -62,9 +76,11 @@ func (a *App) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
 			util.WriteError(w, http.StatusBadRequest, "invalid subscription tier")
 			return
 		}
+		discountBP := subscriptionDiscountBasisPoint(a.billing.GetWalletByIdentity(identity))
+		payableCents := applySubscriptionDiscount(tier.PriceCents, discountBP)
 		payType := strings.ToLower(strings.TrimSpace(firstNonEmpty(util.Clean(body["pay_type"]), util.Clean(body["type"]), "alipay")))
 		if payType == "balance" {
-			order, orderErr := a.billing.CreateSubscriptionByBalance(identity, tier.Key, tier.PriceCents)
+			order, orderErr := a.billing.CreateSubscriptionByBalance(identity, tier.Key, payableCents)
 			if orderErr != nil {
 				util.WriteError(w, http.StatusBadRequest, orderErr.Error())
 				return
@@ -87,7 +103,7 @@ func (a *App) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		order, orderErr := a.billing.CreateSubscriptionYiPayOrder(identity, tier.Key, tier.PriceCents, payType, a.yiPayGatewayConfigForPath(r, "/subscription"))
+		order, orderErr := a.billing.CreateSubscriptionYiPayOrder(identity, tier.Key, payableCents, payType, a.yiPayGatewayConfigForPath(r, "/subscription"))
 		if orderErr != nil {
 			util.WriteError(w, http.StatusBadRequest, orderErr.Error())
 			return
@@ -101,6 +117,39 @@ func (a *App) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func subscriptionDiscountBasisPoint(wallet map[string]any) int {
+	if wallet == nil || !util.ToBool(wallet["agency_enabled"]) {
+		return 0
+	}
+	bp := util.ToInt(wallet["agency_discount_bp"], 0)
+	if bp < 0 {
+		return 0
+	}
+	if bp > 10000 {
+		return 10000
+	}
+	return bp
+}
+
+func applySubscriptionDiscount(priceCents, discountBP int) int {
+	priceCents = util.ToInt(priceCents, 0)
+	if priceCents < 1 {
+		return 1
+	}
+	discountBP = util.ToInt(discountBP, 0)
+	if discountBP <= 0 {
+		return priceCents
+	}
+	if discountBP >= 10000 {
+		return 1
+	}
+	discounted := priceCents * (10000 - discountBP) / 10000
+	if discounted < 1 {
+		return 1
+	}
+	return discounted
 }
 
 func (a *App) subscriptionTiers() []subscriptionTierRuntime {
