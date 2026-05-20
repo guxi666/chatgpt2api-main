@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
+import { LoaderCircle } from "lucide-react";
 import {
   Navigate,
   Route,
@@ -61,6 +62,14 @@ function PermissionRoute({ requiredPath, children }: { requiredPath?: string; ch
   return children;
 }
 
+function RouteFallback() {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center">
+      <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
+
 export function AnimatedRoutes() {
   const location = useLocation();
   const prefersReducedMotion = useReducedMotion();
@@ -81,7 +90,11 @@ export function AnimatedRoutes() {
             <Route
               key={route.path}
               path={route.path}
-              element={<PermissionRoute requiredPath={route.requiredPath}>{route.element}</PermissionRoute>}
+              element={
+                <PermissionRoute requiredPath={route.requiredPath}>
+                  <Suspense fallback={<RouteFallback />}>{route.element}</Suspense>
+                </PermissionRoute>
+              }
             />
           ))}
         </Routes>

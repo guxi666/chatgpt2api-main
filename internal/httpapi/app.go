@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -2185,5 +2186,53 @@ func firstNonEmpty(values ...string) string {
 }
 
 func (a *App) serveWeb(w http.ResponseWriter, r *http.Request) {
+	if isWebIndexRequest(r.URL.Path) && a.serveBrandedWebIndex(w) {
+		return
+	}
 	frontend.Handler().ServeHTTP(w, r)
+}
+
+func (a *App) serveBrandedWebIndex(w http.ResponseWriter) bool {
+	indexHTML, err := frontend.IndexHTML()
+	if err != nil {
+		return false
+	}
+	body := rewriteWebIndexBrand(string(indexHTML), a.config.BrandSiteName(), a.config.BrandSiteLogoURL())
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write([]byte(body))
+	return true
+}
+
+func isWebIndexRequest(rawPath string) bool {
+	clean := strings.Trim(strings.TrimPrefix(path.Clean("/"+rawPath), "/"), "/")
+	if clean == "" {
+		return true
+	}
+	last := path.Base(clean)
+	return !strings.HasPrefix(clean, "assets/") && !strings.Contains(last, ".")
+}
+
+func rewriteWebIndexBrand(indexHTML, siteName, iconURL string) string {
+	escapedSiteName := html.EscapeString(firstNonEmpty(strings.TrimSpace(siteName), "GPT生图站"))
+	escapedIconURL := html.EscapeString(firstNonEmpty(strings.TrimSpace(iconURL), "/logo-mark.svg"))
+	result := replaceHTMLTagContent(indexHTML, "<title>", "</title>", escapedSiteName)
+	replacement := `<link rel="icon" href="` + escapedIconURL + `" />`
+	result = strings.Replace(result, `<link rel="icon" href="/favicon.ico" />`, replacement, 1)
+	result = strings.Replace(result, `<link rel="icon" href="/logo-mark.svg" type="image/svg+xml" />`, replacement, 1)
+	return result
+}
+
+func replaceHTMLTagContent(src, startTag, endTag, replacement string) string {
+	start := strings.Index(src, startTag)
+	if start < 0 {
+		return src
+	}
+	contentStart := start + len(startTag)
+	end := strings.Index(src[contentStart:], endTag)
+	if end < 0 {
+		return src
+	}
+	contentEnd := contentStart + end
+	return src[:contentStart] + replacement + src[contentEnd:]
 }

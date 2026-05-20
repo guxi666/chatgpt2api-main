@@ -1411,7 +1411,7 @@ export default function AgencyPage() {
   }, [config]);
   const showAgencyPackage = isAdmin || !agencyEnabled;
   const currentTierName = tierLabel(currentTier, tiers);
-  const brandTitle = (appMeta.app_title || "chatgpt2api").trim() || "chatgpt2api";
+  const brandTitle = (appMeta.app_title || "GPT生图站").trim() || "GPT生图站";
   const brandLogoURL = resolveBrandAssetURL(appMeta.top_left_logo_url || "/logo-mark.svg") || "/logo-mark.svg";
 
   if (isLoading) {

@@ -24,7 +24,7 @@ export function PaymentSettingsCard() {
   const setYiPayReturnUrl = useSettingsStore((state) => state.setYiPayReturnUrl);
   const setYiPaySiteName = useSettingsStore((state) => state.setYiPaySiteName);
 
-  if (isLoadingConfig) {
+  if (isLoadingConfig && !config) {
     return (
       <SettingsCard icon={CreditCard} title="支付配置">
         <div className="flex items-center justify-center py-10">

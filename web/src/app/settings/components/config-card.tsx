@@ -201,7 +201,7 @@ export function ConfigCard() {
     }
   };
 
-  if (isLoadingConfig) {
+  if (isLoadingConfig && !config) {
     return (
       <SettingsCard
         icon={Settings2}
@@ -627,7 +627,7 @@ export function ConfigCard() {
                 id="settings-email-smtp-from-name"
                 value={String(config?.email_smtp_from_name || "")}
                 onChange={(event) => setEmailSMTPFromName(event.target.value)}
-                placeholder="chatgpt2api"
+                placeholder="GPT生图站"
                 className={settingsInputClassName}
               />
             </Field>

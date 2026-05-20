@@ -43,7 +43,6 @@ export function LoginPageImageCard() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingPreviewUrl, setPendingPreviewUrl] = useState("");
   const config = useSettingsStore((state) => state.config);
-  const isLoadingConfig = useSettingsStore((state) => state.isLoadingConfig);
   const isSavingConfig = useSettingsStore((state) => state.isSavingConfig);
   const setLoginPageImageUrl = useSettingsStore((state) => state.setLoginPageImageUrl);
   const setLoginPageImageMode = useSettingsStore((state) => state.setLoginPageImageMode);
@@ -59,7 +58,7 @@ export function LoginPageImageCard() {
     };
   }, [pendingPreviewUrl]);
 
-  if (isLoadingConfig || !config) {
+  if (!config) {
     return (
       <SettingsCard
         icon={ImageIcon}

@@ -22,6 +22,7 @@ func TestStoreUpdatePersistsRuntimeSettings(t *testing.T) {
 	unsetEnv(t, "CHATGPT2API_AUTO_REMOVE_INVALID_ACCOUNTS")
 	unsetEnv(t, "CHATGPT2API_AUTO_REMOVE_RATE_LIMITED_ACCOUNTS")
 	unsetEnv(t, "CHATGPT2API_REGISTRATION_ENABLED")
+	unsetEnv(t, "CHATGPT2API_SUBSCRIPTION_ENABLED")
 	unsetEnv(t, "CHATGPT2API_LOG_LEVELS")
 	unsetLinuxDoEnv(t)
 
@@ -41,6 +42,7 @@ func TestStoreUpdatePersistsRuntimeSettings(t *testing.T) {
 		"image_retention_days":            14,
 		"log_retention_days":              21,
 		"registration_enabled":            true,
+		"subscription_enabled":            false,
 		"log_levels":                      []any{"debug", "error"},
 	})
 	if err != nil {
@@ -50,6 +52,10 @@ func TestStoreUpdatePersistsRuntimeSettings(t *testing.T) {
 		t.Fatalf("BaseURL() = %q", store.BaseURL())
 	}
 	assertConfigValue(t, got, "registration_enabled", true)
+	assertConfigValue(t, got, "subscription_enabled", false)
+	if store.SubscriptionEnabled() {
+		t.Fatalf("SubscriptionEnabled() = true, want false")
+	}
 
 	envData, err := os.ReadFile(filepath.Join(root, ".env"))
 	if err != nil {
@@ -67,6 +73,7 @@ func TestStoreUpdatePersistsRuntimeSettings(t *testing.T) {
 		"CHATGPT2API_IMAGE_RETENTION_DAYS=14",
 		"CHATGPT2API_LOG_RETENTION_DAYS=21",
 		"CHATGPT2API_REGISTRATION_ENABLED=true",
+		"CHATGPT2API_SUBSCRIPTION_ENABLED=false",
 		"CHATGPT2API_LOG_LEVELS=debug,error",
 	} {
 		if !strings.Contains(envText, want) {

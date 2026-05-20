@@ -29,6 +29,28 @@ func (a *App) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		if !a.config.SubscriptionEnabled() {
+			wallet := a.billing.GetWalletByIdentity(identity)
+			if wallet == nil {
+				wallet = map[string]any{
+					"balance_cents":        0,
+					"total_recharge_cents": 0,
+					"total_consume_cents":  0,
+				}
+			}
+			util.WriteJSON(w, http.StatusOK, map[string]any{
+				"enabled":      false,
+				"plans":        subscriptionPlansPayload(a.subscriptionTiers()),
+				"status":       a.billing.SubscriptionStatusByIdentity(identity),
+				"wallet":       wallet,
+				"pay_channels": []string{},
+				"heading":      a.config.SubscriptionHeading(),
+				"subheading":   a.config.SubscriptionSubheading(),
+				"safety_text":  a.config.SubscriptionSafetyText(),
+				"agent_hint":   a.config.SubscriptionAgentHint(),
+			})
+			return
+		}
 		wallet := a.billing.GetWalletByIdentity(identity)
 		payChannels := a.availablePayChannels()
 		discountBP := subscriptionDiscountBasisPoint(wallet)
@@ -55,6 +77,7 @@ func (a *App) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		util.WriteJSON(w, http.StatusOK, map[string]any{
+			"enabled":      true,
 			"plans":        subscriptionPlansPayload(plans),
 			"status":       a.billing.SubscriptionStatusByIdentity(identity),
 			"wallet":       wallet,
@@ -65,6 +88,10 @@ func (a *App) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
 			"agent_hint":   a.config.SubscriptionAgentHint(),
 		})
 	case http.MethodPost:
+		if !a.config.SubscriptionEnabled() {
+			util.WriteError(w, http.StatusForbidden, "subscription is disabled")
+			return
+		}
 		body, err := readJSONMap(r)
 		if err != nil {
 			util.WriteError(w, http.StatusBadRequest, "invalid json body")

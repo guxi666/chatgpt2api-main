@@ -9,7 +9,7 @@ export function AppShell() {
   const appMeta = useAppMeta();
 
   useEffect(() => {
-    const siteName = (appMeta.project_name || appMeta.app_title || "chatgpt2api").trim() || "chatgpt2api";
+    const siteName = (appMeta.project_name || appMeta.app_title || "GPT生图站").trim() || "GPT生图站";
     document.title = siteName;
 
     const iconURL = resolveBrandAssetURL(appMeta.site_logo_url || "/logo-mark.svg") || "/logo-mark.svg";

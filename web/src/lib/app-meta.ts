@@ -26,8 +26,8 @@ export type AppMeta = {
 };
 
 export const defaultAppMeta: AppMeta = {
-  app_title: "chatgpt2api",
-  project_name: "chatgpt2api",
+  app_title: "GPT生图站",
+  project_name: "GPT生图站",
   top_left_logo_url: "/logo-mark.svg",
   site_logo_url: "/logo-mark.svg",
   image_single_count_limit: 10,

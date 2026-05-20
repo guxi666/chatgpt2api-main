@@ -29,7 +29,7 @@ export function R2StorageCard() {
   const setImageR2Prefix = useSettingsStore((state) => state.setImageR2Prefix);
   const setConfigField = useSettingsStore((state) => state.setConfigField);
 
-  if (isLoadingConfig) {
+  if (isLoadingConfig && !config) {
     return (
       <SettingsCard icon={CloudUpload} title="Cloudflare R2 图床">
         <div className="flex items-center justify-center py-10">

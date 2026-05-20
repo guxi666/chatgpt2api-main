@@ -69,6 +69,7 @@ var settingEnvKeys = map[string]string{
 	"agency_tier_basic_discount_bp":        "CHATGPT2API_AGENCY_TIER_BASIC_DISCOUNT_BP",
 	"agency_tier_pro_discount_bp":          "CHATGPT2API_AGENCY_TIER_PRO_DISCOUNT_BP",
 	"agency_tier_premium_discount_bp":      "CHATGPT2API_AGENCY_TIER_PREMIUM_DISCOUNT_BP",
+	"subscription_enabled":                 "CHATGPT2API_SUBSCRIPTION_ENABLED",
 	"subscription_heading":                 "CHATGPT2API_SUBSCRIPTION_HEADING",
 	"subscription_subheading":              "CHATGPT2API_SUBSCRIPTION_SUBHEADING",
 	"subscription_safety_text":             "CHATGPT2API_SUBSCRIPTION_SAFETY_TEXT",
@@ -430,6 +431,10 @@ func (s *Store) AgencyTierPremiumDiscountBP() int {
 	return clampAgencyBasisPoint(intSetting(s.settingValue("agency_tier_premium_discount_bp", 1500), 1500))
 }
 
+func (s *Store) SubscriptionEnabled() bool {
+	return util.ToBool(s.settingValue("subscription_enabled", true))
+}
+
 func (s *Store) SubscriptionHeading() string {
 	return strings.TrimSpace(fmt.Sprint(s.settingValue("subscription_heading", "选择适合你的订阅套餐")))
 }
@@ -553,7 +558,7 @@ func (s *Store) EmailSMTP() EmailSMTPConfig {
 		Username:  strings.TrimSpace(fmt.Sprint(s.settingValue("email_smtp_username", ""))),
 		Password:  strings.TrimSpace(fmt.Sprint(s.settingValue("email_smtp_auth_code", ""))),
 		FromEmail: strings.TrimSpace(fmt.Sprint(s.settingValue("email_smtp_from_email", ""))),
-		FromName:  strings.TrimSpace(fmt.Sprint(s.settingValue("email_smtp_from_name", "chatgpt2api"))),
+		FromName:  strings.TrimSpace(fmt.Sprint(s.settingValue("email_smtp_from_name", "GPT生图站"))),
 	}
 }
 
@@ -653,17 +658,17 @@ func (s *Store) BaseURL() string {
 }
 
 func (s *Store) BrandTopLeftName() string {
-	value := strings.TrimSpace(fmt.Sprint(s.settingValue("brand_top_left_name", "chatgpt2api")))
+	value := strings.TrimSpace(fmt.Sprint(s.settingValue("brand_top_left_name", "GPT生图站")))
 	if value == "" {
-		return "chatgpt2api"
+		return "GPT生图站"
 	}
 	return value
 }
 
 func (s *Store) BrandSiteName() string {
-	value := strings.TrimSpace(fmt.Sprint(s.settingValue("brand_site_name", "chatgpt2api")))
+	value := strings.TrimSpace(fmt.Sprint(s.settingValue("brand_site_name", "GPT生图站")))
 	if value == "" {
-		return "chatgpt2api"
+		return "GPT生图站"
 	}
 	return value
 }
@@ -803,7 +808,7 @@ func (s *Store) yiPayFromData(data map[string]any) YiPayConfig {
 		SubmitURL: strings.TrimSpace(fmt.Sprint(s.settingValueFromData(data, "yipay_submit_url", ""))),
 		NotifyURL: strings.TrimSpace(fmt.Sprint(s.settingValueFromData(data, "yipay_notify_url", ""))),
 		ReturnURL: strings.TrimSpace(fmt.Sprint(s.settingValueFromData(data, "yipay_return_url", ""))),
-		SiteName:  strings.TrimSpace(fmt.Sprint(s.settingValueFromData(data, "yipay_site_name", "chatgpt2api"))),
+		SiteName:  strings.TrimSpace(fmt.Sprint(s.settingValueFromData(data, "yipay_site_name", "GPT生图站"))),
 	}
 }
 
@@ -943,6 +948,7 @@ func (s *Store) Get() map[string]any {
 	data["agency_tier_basic_discount_bp"] = s.AgencyTierBasicDiscountBP()
 	data["agency_tier_pro_discount_bp"] = s.AgencyTierProDiscountBP()
 	data["agency_tier_premium_discount_bp"] = s.AgencyTierPremiumDiscountBP()
+	data["subscription_enabled"] = s.SubscriptionEnabled()
 	data["subscription_heading"] = s.SubscriptionHeading()
 	data["subscription_subheading"] = s.SubscriptionSubheading()
 	data["subscription_safety_text"] = s.SubscriptionSafetyText()

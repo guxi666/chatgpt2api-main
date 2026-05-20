@@ -1,20 +1,8 @@
-import type { ReactNode } from "react";
+import { createElement, lazy, type ComponentType, type ReactNode } from "react";
 
-import AccountsPage from "@/app/accounts/page";
-import AgencyPage from "@/app/agency/page";
-import AgencyCommissionPage from "@/app/agency-commission/page";
-import ImagePage from "@/app/image/page";
-import ImageManagerPage from "@/app/image-manager/page";
-import HomePage from "@/app/page";
-import LoginPage from "@/app/login/page";
-import LogsPage from "@/app/logs/page";
-import ProfilePage from "@/app/profile/page";
-import RBACPage from "@/app/rbac/page";
-import RegisterPage from "@/app/register/page";
-import SettingsPage from "@/app/settings/page";
-import SubscriptionPage from "@/app/subscription/page";
-import UsersPage from "@/app/users/page";
-import WalletPage from "@/app/wallet/page";
+function lazyPage(loader: () => Promise<{ default: ComponentType }>) {
+  return createElement(lazy(loader));
+}
 
 export type AppRouteConfig = {
   path: string;
@@ -23,32 +11,72 @@ export type AppRouteConfig = {
 };
 
 export const appRoutes: AppRouteConfig[] = [
-  { path: "/", element: <HomePage /> },
-  { path: "/login", element: <LoginPage /> },
-  { path: "/accounts", element: <AccountsPage />, requiredPath: "/accounts" },
-  { path: "/register", element: <RegisterPage />, requiredPath: "/register" },
+  { path: "/", element: lazyPage(() => import("@/app/page")) },
+  { path: "/login", element: lazyPage(() => import("@/app/login/page")) },
+  {
+    path: "/accounts",
+    element: lazyPage(() => import("@/app/accounts/page")),
+    requiredPath: "/accounts",
+  },
+  {
+    path: "/register",
+    element: lazyPage(() => import("@/app/register/page")),
+    requiredPath: "/register",
+  },
   {
     path: "/image-manager",
-    element: <ImageManagerPage />,
+    element: lazyPage(() => import("@/app/image-manager/page")),
     requiredPath: "/image-manager",
   },
-  { path: "/users", element: <UsersPage />, requiredPath: "/users" },
-  { path: "/profile", element: <ProfilePage />, requiredPath: "/profile" },
-  { path: "/wallet", element: <WalletPage />, requiredPath: "/wallet" },
+  {
+    path: "/users",
+    element: lazyPage(() => import("@/app/users/page")),
+    requiredPath: "/users",
+  },
+  {
+    path: "/profile",
+    element: lazyPage(() => import("@/app/profile/page")),
+    requiredPath: "/profile",
+  },
+  {
+    path: "/wallet",
+    element: lazyPage(() => import("@/app/wallet/page")),
+    requiredPath: "/wallet",
+  },
   {
     path: "/subscription",
-    element: <SubscriptionPage />,
+    element: lazyPage(() => import("@/app/subscription/page")),
     requiredPath: "/subscription",
   },
-  { path: "/agency", element: <AgencyPage />, requiredPath: "/agency" },
+  {
+    path: "/agency",
+    element: lazyPage(() => import("@/app/agency/page")),
+    requiredPath: "/agency",
+  },
   {
     path: "/agency-commission",
-    element: <AgencyCommissionPage />,
+    element: lazyPage(() => import("@/app/agency-commission/page")),
     requiredPath: "/agency-commission",
   },
-  { path: "/rbac", element: <RBACPage />, requiredPath: "/rbac" },
-  { path: "/logs", element: <LogsPage />, requiredPath: "/logs" },
-  { path: "/settings", element: <SettingsPage />, requiredPath: "/settings" },
-  { path: "/image", element: <ImagePage />, requiredPath: "/image" },
-  { path: "*", element: <HomePage /> },
+  {
+    path: "/rbac",
+    element: lazyPage(() => import("@/app/rbac/page")),
+    requiredPath: "/rbac",
+  },
+  {
+    path: "/logs",
+    element: lazyPage(() => import("@/app/logs/page")),
+    requiredPath: "/logs",
+  },
+  {
+    path: "/settings",
+    element: lazyPage(() => import("@/app/settings/page")),
+    requiredPath: "/settings",
+  },
+  {
+    path: "/image",
+    element: lazyPage(() => import("@/app/image/page")),
+    requiredPath: "/image",
+  },
+  { path: "*", element: lazyPage(() => import("@/app/page")) },
 ];

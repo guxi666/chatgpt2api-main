@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Gem, LoaderCircle, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -175,7 +176,7 @@ export function SubscriptionSettingsCard() {
   const saveConfig = useSettingsStore((state) => state.saveConfig);
   const setConfigField = useSettingsStore((state) => state.setConfigField);
 
-  if (isLoadingConfig) {
+  if (isLoadingConfig && !config) {
     return (
       <SettingsCard icon={Gem} title="套餐订阅配置">
         <div className="flex items-center justify-center py-10">
@@ -206,6 +207,19 @@ export function SubscriptionSettingsCard() {
       }
     >
       <div className="flex flex-col gap-4">
+        <label className="flex min-h-12 flex-col gap-2 rounded-[14px] border border-border/80 bg-background px-4 py-3 text-sm font-medium sm:flex-row sm:items-center sm:gap-3">
+          <Checkbox
+            checked={config?.subscription_enabled !== false}
+            onCheckedChange={(value) =>
+              setConfigField("subscription_enabled", Boolean(value))
+            }
+          />
+          <span>启用套餐订阅</span>
+          <span className="text-xs font-normal leading-5 text-muted-foreground sm:ml-auto">
+            关闭后用户仍可查看当前套餐状态，但不能购买新套餐
+          </span>
+        </label>
+
         <div className="grid gap-3 sm:grid-cols-2">
           <Field className="gap-1.5 sm:col-span-2">
             <FieldLabel htmlFor="subscription-heading">主标题</FieldLabel>

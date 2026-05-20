@@ -151,6 +151,7 @@ function tierLabel(tier?: string) {
 
 function SubscriptionPageContent() {
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
+  const [enabled, setEnabled] = useState(true);
   const [status, setStatus] = useState<SubscriptionStatus>({ active: false });
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
   const [channels, setChannels] = useState<string[]>([]);
@@ -177,6 +178,7 @@ function SubscriptionPageContent() {
     const incomingChannels = Array.isArray(data.pay_channels)
       ? data.pay_channels
       : [];
+    setEnabled(data.enabled !== false);
     const finalPlans = normalizePlans(
       incomingPlans.length > 0 ? incomingPlans : fallbackPlans,
     );
@@ -243,6 +245,10 @@ function SubscriptionPageContent() {
   );
 
   const handleBuy = async () => {
+    if (!enabled) {
+      toast.error("套餐订阅暂未开放");
+      return;
+    }
     if (!selectedPlan) {
       toast.error("请选择套餐");
       return;
@@ -305,6 +311,11 @@ function SubscriptionPageContent() {
         </CardHeader>
 
         <CardContent className="space-y-5 pt-3">
+          {!enabled ? (
+            <div className="mx-auto max-w-2xl rounded-[18px] border border-amber-200 bg-amber-50 px-5 py-4 text-center text-sm text-amber-800">
+              套餐订阅暂未开放，当前已开通套餐状态不受影响。
+            </div>
+          ) : null}
           <div className="mx-auto grid w-full max-w-[1120px] gap-4 lg:grid-cols-3">
             {displayPlans.map((plan) => {
                 const active = selectedTier === plan.key;
@@ -312,6 +323,7 @@ function SubscriptionPageContent() {
                   <button
                     type="button"
                     key={String(plan.key)}
+                    disabled={!enabled}
                     onClick={() => setSelectedTier(String(plan.key))}
                     className={`relative min-h-[260px] rounded-[20px] border p-5 text-left transition ${
                       active
@@ -395,7 +407,7 @@ function SubscriptionPageContent() {
 
             <Button
               className="h-11 min-w-[180px] rounded-[12px] bg-gradient-to-r from-indigo-600 to-violet-600 text-white hover:from-indigo-500 hover:to-violet-500"
-              disabled={isSubmitting || !selectedTier || !selectedPayType}
+              disabled={isSubmitting || !enabled || !selectedTier || !selectedPayType}
               onClick={() => void handleBuy()}
             >
               {isSubmitting ? (

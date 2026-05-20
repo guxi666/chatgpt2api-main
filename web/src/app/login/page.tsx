@@ -483,7 +483,7 @@ export default function LoginPage() {
               />
               <div className="grid min-w-0 leading-none">
                 <div className="truncate text-sm font-semibold tracking-[-0.02em] text-[#222222] dark:text-white">
-                  {appMeta.app_title || "chatgpt2api"}
+                  {appMeta.app_title || "GPT生图站"}
                 </div>
                 <div className="truncate text-[10px] font-medium tracking-[0.28em] text-[#8e8e93] uppercase dark:text-white/50">
                   {appMeta.project_name && appMeta.project_name !== appMeta.app_title ? appMeta.project_name : "Control Center"}

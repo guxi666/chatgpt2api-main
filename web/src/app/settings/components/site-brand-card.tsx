@@ -20,7 +20,7 @@ export function SiteBrandCard() {
   const setBrandSiteLogoURL = useSettingsStore((state) => state.setBrandSiteLogoURL);
   const saveConfig = useSettingsStore((state) => state.saveConfig);
 
-  if (isLoadingConfig) {
+  if (isLoadingConfig && !config) {
     return (
       <SettingsCard icon={Palette} title="站点品牌" tone="violet">
         <div className="flex items-center justify-center py-10">
@@ -49,7 +49,7 @@ export function SiteBrandCard() {
             id="settings-brand-top-left-name"
             value={String(config?.brand_top_left_name || "")}
             onChange={(event) => setBrandTopLeftName(event.target.value)}
-            placeholder="ChatGPT-image2"
+            placeholder="GPT生图站"
             className={settingsInputClassName}
           />
         </Field>

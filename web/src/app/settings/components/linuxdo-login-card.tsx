@@ -141,7 +141,7 @@ export function LinuxDoLoginCard() {
     }
   };
 
-  if (isLoadingConfig) {
+  if (isLoadingConfig && !config) {
     return (
       <SettingsCard
         icon={LogIn}

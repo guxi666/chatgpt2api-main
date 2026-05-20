@@ -99,7 +99,7 @@ export function LogGovernanceCard() {
     setCleanupDialogOpen(false);
   };
 
-  if (isLoadingConfig) {
+  if (isLoadingConfig && !config) {
     return (
       <SettingsCard
         icon={ScrollText}

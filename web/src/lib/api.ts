@@ -216,6 +216,7 @@ export type SettingsConfig = {
   agency_tier_basic_discount_bp?: number | string;
   agency_tier_pro_discount_bp?: number | string;
   agency_tier_premium_discount_bp?: number | string;
+  subscription_enabled?: boolean;
   subscription_heading?: string;
   subscription_subheading?: string;
   subscription_safety_text?: string;
@@ -837,6 +838,7 @@ export type SubscriptionStatus = {
 };
 
 export type SubscriptionPlansResponse = {
+  enabled?: boolean;
   plans: SubscriptionPlan[];
   status: SubscriptionStatus;
   wallet: WalletInfo;

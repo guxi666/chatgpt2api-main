@@ -10,8 +10,22 @@ import {
   type AppMeta,
 } from "@/lib/app-meta";
 
+function initialAppMeta(): AppMeta {
+  if (typeof document === "undefined") {
+    return defaultAppMeta;
+  }
+  const initialTitle = document.title.trim();
+  const initialIcon = document.querySelector<HTMLLinkElement>("link[rel='icon']")?.getAttribute("href")?.trim();
+  return normalizeAppMeta({
+    ...defaultAppMeta,
+    app_title: initialTitle || defaultAppMeta.app_title,
+    project_name: initialTitle || defaultAppMeta.project_name,
+    site_logo_url: initialIcon || defaultAppMeta.site_logo_url,
+  });
+}
+
 export function useAppMeta() {
-  const [appMeta, setAppMeta] = useState<AppMeta>(defaultAppMeta);
+  const [appMeta, setAppMeta] = useState<AppMeta>(() => initialAppMeta());
 
   useEffect(() => {
     let active = true;
@@ -24,7 +38,7 @@ export function useAppMeta() {
         }
       } catch {
         if (active) {
-          setAppMeta(defaultAppMeta);
+          setAppMeta((current) => current);
         }
       }
     };

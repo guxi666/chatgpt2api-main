@@ -91,11 +91,11 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     brand_top_left_name:
       typeof config.brand_top_left_name === "string"
         ? config.brand_top_left_name
-        : "chatgpt2api",
+        : "GPT生图站",
     brand_site_name:
       typeof config.brand_site_name === "string"
         ? config.brand_site_name
-        : "chatgpt2api",
+        : "GPT生图站",
     brand_top_left_logo_url:
       typeof config.brand_top_left_logo_url === "string"
         ? config.brand_top_left_logo_url
@@ -142,7 +142,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     email_smtp_from_name:
       typeof config.email_smtp_from_name === "string"
         ? config.email_smtp_from_name
-        : "chatgpt2api",
+        : "GPT生图站",
     image_price_cents: Number(config.image_price_cents || 8),
     image_price_1k_cents: centsToYuanInput(
       config.image_price_1k_cents || config.image_price_cents || 8,
@@ -161,6 +161,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     agency_tier_premium_cents: Number(
       config.agency_tier_premium_cents || 99900,
     ),
+    subscription_enabled: config.subscription_enabled !== false,
     subscription_heading:
       typeof config.subscription_heading === "string"
         ? config.subscription_heading
@@ -265,7 +266,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     yipay_site_name:
       typeof config.yipay_site_name === "string"
         ? config.yipay_site_name
-        : "chatgpt2api",
+        : "GPT生图站",
     paypal_enabled: Boolean(config.paypal_enabled),
     paypal_checkout_url:
       typeof config.paypal_checkout_url === "string"
@@ -561,7 +562,7 @@ type SettingsStore = {
 };
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
-  config: null,
+  config: normalizeConfig({ proxy: "" }),
   isLoadingConfig: true,
   isSavingConfig: false,
   logGovernance: null,
@@ -618,8 +619,12 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   saveConfig: async () => {
-    const { config } = get();
+    const { config, isLoadingConfig } = get();
     if (!config) {
+      return;
+    }
+    if (isLoadingConfig) {
+      toast.info("配置还在加载中，请稍后再保存");
       return;
     }
 
@@ -734,6 +739,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           0,
           Number(config.agency_tier_premium_cents) || 99900,
         ),
+        subscription_enabled: config.subscription_enabled !== false,
         subscription_heading: String(config.subscription_heading || "").trim(),
         subscription_subheading: String(
           config.subscription_subheading || "",
@@ -903,8 +909,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const nextConfig = normalizeConfig(data.config);
       set({ config: nextConfig });
       dispatchAppMetaUpdated({
-        app_title: String(nextConfig.brand_top_left_name || "chatgpt2api"),
-        project_name: String(nextConfig.brand_site_name || "chatgpt2api"),
+        app_title: String(nextConfig.brand_top_left_name || "GPT生图站"),
+        project_name: String(nextConfig.brand_site_name || "GPT生图站"),
         top_left_logo_url: String(
           nextConfig.brand_top_left_logo_url || "/logo-mark.svg",
         ),
@@ -1475,8 +1481,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const nextConfig = normalizeConfig(data.config);
       set({ config: nextConfig });
       dispatchAppMetaUpdated({
-        app_title: String(nextConfig.brand_top_left_name || "chatgpt2api"),
-        project_name: String(nextConfig.brand_site_name || "chatgpt2api"),
+        app_title: String(nextConfig.brand_top_left_name || "GPT生图站"),
+        project_name: String(nextConfig.brand_site_name || "GPT生图站"),
         top_left_logo_url: String(
           nextConfig.brand_top_left_logo_url || "/logo-mark.svg",
         ),
