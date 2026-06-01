@@ -84,8 +84,16 @@ function getManagedImageFormatLabel(item: ManagedImage) {
 }
 
 function formatOwner(item: ManagedImage) {
+  const ownerDisplay = String(item.owner_display || "").trim();
+  if (ownerDisplay) return ownerDisplay;
   const ownerName = String(item.owner_name || "").trim();
+  const ownerEmail = String(item.owner_email || "").trim();
+  const ownerUsername = String(item.owner_username || "").trim();
+  if (ownerName && ownerEmail && ownerName.toLowerCase() !== ownerEmail.toLowerCase()) return `${ownerName}（${ownerEmail}）`;
+  if (ownerName && ownerUsername && ownerName.toLowerCase() !== ownerUsername.toLowerCase()) return `${ownerName}（${ownerUsername}）`;
   if (ownerName) return ownerName;
+  if (ownerEmail) return ownerEmail;
+  if (ownerUsername) return ownerUsername;
   const ownerID = String(item.owner_id || "").trim();
   return ownerID || "-";
 }

@@ -1708,8 +1708,10 @@ func (a *App) recordGeneratedImagesForPayload(identity service.Identity, urls []
 
 func (a *App) decorateImageList(payload map[string]any) {
 	ownerNames := a.imageOwnerDisplayNames()
+	ownerProfiles := a.imageOwnerProfiles()
 	for _, item := range util.AsMapSlice(payload["items"]) {
 		a.decorateImageItem(item, ownerNames)
+		a.decorateImageOwnerIdentity(item, ownerProfiles)
 	}
 }
 
@@ -1834,6 +1836,73 @@ func (a *App) imageOwnerDisplayNames() map[string]string {
 		}
 	}
 	return names
+}
+
+type imageOwnerProfile struct {
+	Name     string
+	Username string
+	Email    string
+}
+
+func (a *App) decorateImageOwnerIdentity(item map[string]any, ownerProfiles map[string]imageOwnerProfile) {
+	if item == nil {
+		return
+	}
+	ownerID := util.Clean(item["owner_id"])
+	profile := ownerProfiles[ownerID]
+	ownerName := util.Clean(item["owner_name"])
+	if ownerName == "" {
+		ownerName = profile.Name
+	}
+	if profile.Email != "" {
+		item["owner_email"] = profile.Email
+	}
+	if profile.Username != "" {
+		item["owner_username"] = profile.Username
+	}
+	if display := imageOwnerDisplayLabel(ownerName, profile.Email, profile.Username, ownerID); display != "" {
+		item["owner_display"] = display
+	}
+}
+
+func imageOwnerDisplayLabel(name, email, username, ownerID string) string {
+	name = strings.TrimSpace(name)
+	email = managedUserEmailCandidate(email)
+	username = strings.TrimSpace(username)
+	ownerID = strings.TrimSpace(ownerID)
+	if name != "" && email != "" && !strings.EqualFold(name, email) {
+		return name + "（" + email + "）"
+	}
+	if name != "" && username != "" && !strings.EqualFold(name, username) {
+		return name + "（" + username + "）"
+	}
+	if name != "" {
+		return name
+	}
+	if email != "" {
+		return email
+	}
+	if username != "" {
+		return username
+	}
+	return ownerID
+}
+
+func (a *App) imageOwnerProfiles() map[string]imageOwnerProfile {
+	profiles := map[string]imageOwnerProfile{"admin": {Name: "管理员", Username: "admin"}}
+	for _, item := range a.auth.ListUsers() {
+		name := util.Clean(item["name"])
+		username := util.Clean(item["username"])
+		email := managedUserEmailCandidate(util.Clean(item["email"]), username)
+		profile := imageOwnerProfile{Name: firstNonEmpty(name, username, email), Username: username, Email: email}
+		if id := util.Clean(item["id"]); id != "" {
+			profiles[id] = profile
+		}
+		if ownerID := util.Clean(item["owner_id"]); ownerID != "" {
+			profiles[ownerID] = profile
+		}
+	}
+	return profiles
 }
 
 func (a *App) imageOwnerSearchIndex() map[string]string {

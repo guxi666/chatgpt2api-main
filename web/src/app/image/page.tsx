@@ -649,6 +649,35 @@ function buildTurnOutcomeMessage(successCount: number, failedCount: number, canc
   return parts.join("，");
 }
 
+function parseCreationTaskErrorPayload(message: string) {
+  const trimmed = String(message || "").trim();
+  const parseCandidate = (candidate: string) => {
+    try {
+      const parsed = JSON.parse(candidate);
+      const error = parsed?.error && typeof parsed.error === "object" ? parsed.error : parsed;
+      return {
+        message: typeof error?.message === "string" ? error.message : "",
+        code: typeof error?.code === "string" ? error.code : "",
+        status: Number(parsed?.status || error?.status || 0),
+      };
+    } catch {
+      return null;
+    }
+  };
+  const direct = parseCandidate(trimmed);
+  if (direct) return direct;
+  const objectMatch = trimmed.match(/\{[\s\S]*\}/);
+  if (objectMatch) {
+    const extracted = parseCandidate(objectMatch[0]);
+    if (extracted) return extracted;
+  }
+  return {
+    message: trimmed.match(/"message"\s*:\s*"([^"]+)"/i)?.[1] || "",
+    code: trimmed.match(/"code"\s*:\s*"([^"]+)"/i)?.[1] || "",
+    status: Number(trimmed.match(/"status"\s*:\s*(\d+)/i)?.[1] || 0),
+  };
+}
+
 function formatCreationTaskErrorMessage(message: string) {
   const trimmed = String(message || "").trim();
   if (!trimmed) {
@@ -656,6 +685,17 @@ function formatCreationTaskErrorMessage(message: string) {
   }
 
   const normalized = trimmed.toLowerCase();
+  const upstreamError = parseCreationTaskErrorPayload(trimmed);
+  const upstreamMessage = String(upstreamError?.message || "").toLowerCase();
+  const upstreamCode = String(upstreamError?.code || "").toLowerCase();
+  if (
+    upstreamCode === "token_expired"
+    || upstreamMessage.includes("authentication token is expired")
+    || normalized.includes("authentication token is expired")
+    || normalized.includes("token_expired")
+  ) {
+    return "对话模型账号登录状态已过期，请管理员刷新或更换号池账号后重试。";
+  }
   if (normalized.includes("an error occurred while processing your request")) {
     const requestId = trimmed.match(/request id\s+([a-z0-9-]+)/i)?.[1];
     return [

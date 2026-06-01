@@ -32,6 +32,7 @@ import {
   type ManagedUser,
   type PermissionMenu,
 } from "@/lib/api";
+import { formatBeijingDateTime, parseDateTime } from "@/lib/datetime";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import { cn } from "@/lib/utils";
 
@@ -63,6 +64,36 @@ function displayEmail(email?: string | null) {
   if (!raw) return "-";
   const match = raw.match(/^local[a-z0-9-]*_(.+@.+)$/i);
   return match?.[1] || raw;
+}
+
+function subscriptionTierLabel(tier?: string | null) {
+  switch (String(tier || "").trim()) {
+    case "monthly":
+      return "包月";
+    case "quarterly":
+      return "包季";
+    case "yearly":
+      return "包年";
+    default:
+      return "-";
+  }
+}
+
+function roleSubscriptionTier(role?: ManagedRole | null) {
+  return String(role?.subscription_tier || "").trim();
+}
+
+function subscriptionRemainingLabel(user: ManagedUser) {
+  if (!user.subscription_active) return "-";
+  const explicitDays = Number(user.subscription_remaining_days);
+  if (Number.isFinite(explicitDays) && explicitDays >= 0) {
+    return `${Math.trunc(explicitDays)} 天`;
+  }
+  const expireAt = parseDateTime(user.subscription_expire_at);
+  if (!expireAt) return "-";
+  const remainingMs = expireAt.getTime() - Date.now();
+  if (remainingMs <= 0) return "0 天";
+  return `${Math.ceil(remainingMs / 86400000)} 天`;
 }
 
 function RBACContent() {
@@ -136,6 +167,7 @@ function RBACContent() {
   }, [loadRBAC]);
 
   const selectedRole = useMemo(() => roles.find((item) => item.id === selectedRoleId) || null, [roles, selectedRoleId]);
+  const selectedRoleSubscriptionTier = useMemo(() => roleSubscriptionTier(selectedRole), [selectedRole]);
 
   const filteredRoles = useMemo(() => {
     const keyword = searchText.trim().toLowerCase();
@@ -146,20 +178,41 @@ function RBACContent() {
   const roleMembers = useMemo(() => {
     if (!selectedRoleId) return [];
     return users
-      .filter((user) => (user.role_id || "") === selectedRoleId)
+      .filter((user) => {
+        if ((user.role_id || "") === selectedRoleId) return true;
+        return Boolean(
+          selectedRoleSubscriptionTier
+          && user.subscription_active
+          && String(user.subscription_tier || "").trim() === selectedRoleSubscriptionTier,
+        );
+      })
       .sort((a, b) => (a.name || a.username || a.email || a.id || "").localeCompare(b.name || b.username || b.email || b.id || "", "zh-CN"));
-  }, [selectedRoleId, users]);
+  }, [selectedRoleId, selectedRoleSubscriptionTier, users]);
 
   const roleMemberPreviewByRoleID = useMemo(() => {
     const grouped = new Map<string, string[]>();
+    const subscriptionRoleIDByTier = new Map<string, string>();
+    for (const role of roles) {
+      const tier = roleSubscriptionTier(role);
+      if (tier) subscriptionRoleIDByTier.set(tier, role.id);
+    }
     for (const user of users) {
       const roleID = String(user.role_id || "").trim();
-      if (!roleID) continue;
       const name = String(user.name || user.username || displayEmail(user.email) || user.id || "").trim();
       if (!name) continue;
-      const list = grouped.get(roleID) || [];
-      list.push(name);
-      grouped.set(roleID, list);
+      if (roleID) {
+        const list = grouped.get(roleID) || [];
+        list.push(name);
+        grouped.set(roleID, list);
+      }
+      if (user.subscription_active) {
+        const subscriptionRoleID = subscriptionRoleIDByTier.get(String(user.subscription_tier || "").trim());
+        if (subscriptionRoleID && subscriptionRoleID !== roleID) {
+          const list = grouped.get(subscriptionRoleID) || [];
+          list.push(name);
+          grouped.set(subscriptionRoleID, list);
+        }
+      }
     }
     const out = new Map<string, string>();
     for (const [roleID, members] of grouped.entries()) {
@@ -167,7 +220,7 @@ function RBACContent() {
       out.set(roleID, members.length > 3 ? `${preview} 等 ${members.length} 人` : preview);
     }
     return out;
-  }, [users]);
+  }, [roles, users]);
 
   const isDirty = Boolean(selectedRole)
     && (roleName.trim() !== (selectedRole?.name || "")
@@ -373,11 +426,14 @@ function RBACContent() {
               {selectedRole ? (
                 roleMembers.length > 0 ? (
                   <div className="overflow-x-auto">
-                    <table className="min-w-[720px] w-full text-sm">
+                    <table className="min-w-[980px] w-full text-sm">
                       <thead>
                         <tr className="border-b border-border/60 text-left text-muted-foreground">
                           <th className="px-2 py-2 font-medium">用户</th>
                           <th className="px-2 py-2 font-medium">注册邮箱</th>
+                          <th className="px-2 py-2 font-medium">当前套餐</th>
+                          <th className="px-2 py-2 font-medium">剩余天数</th>
+                          <th className="px-2 py-2 font-medium">到期时间</th>
                           <th className="px-2 py-2 font-medium">当前等级</th>
                           <th className="px-2 py-2 font-medium">调整等级</th>
                           <th className="px-2 py-2 font-medium">管理</th>
@@ -391,8 +447,14 @@ function RBACContent() {
                             <tr key={user.id} className="border-b border-border/40">
                               <td className="px-2 py-2">
                                 <div className="font-medium text-foreground">{user.name || user.username || user.id}</div>
+                                <code className="mt-1 block font-mono text-[11px] text-muted-foreground">{user.id}</code>
                               </td>
                               <td className="px-2 py-2">{displayEmail(user.email)}</td>
+                              <td className="px-2 py-2">
+                                {user.subscription_active ? <Badge variant="secondary" className="rounded-md">{subscriptionTierLabel(user.subscription_tier)}</Badge> : <span className="text-muted-foreground">-</span>}
+                              </td>
+                              <td className="px-2 py-2">{subscriptionRemainingLabel(user)}</td>
+                              <td className="whitespace-nowrap px-2 py-2 text-xs text-muted-foreground">{user.subscription_active ? formatBeijingDateTime(user.subscription_expire_at) : "-"}</td>
                               <td className="px-2 py-2"><Badge variant="secondary" className="rounded-md">{user.role_name || "普通用户"}</Badge></td>
                               <td className="px-2 py-2">
                                 <Select value={roleID} onValueChange={(value) => { void handleUserRoleChange(user, value); }} disabled={pending}>

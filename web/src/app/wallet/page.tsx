@@ -77,6 +77,14 @@ function formatDateTime(value?: string | null) {
   return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
 
+function displayUserIdentity(item: { user_display?: string; user_email?: string; user_id?: string }) {
+  const display = String(item.user_display || "").trim();
+  if (display) return display;
+  const email = String(item.user_email || "").trim();
+  if (email && !email.toLowerCase().endsWith("@local.invalid")) return email;
+  return String(item.user_id || "").trim() || "-";
+}
+
 function isPendingOrderTimeout(order: PayOrder, nowMs: number) {
   if (order.status !== "pending") {
     return false;
@@ -970,7 +978,7 @@ function AdminWalletPageContent() {
                           {item.id}
                         </TableCell>
                         <TableCell className="text-xs">
-                          {item.user_email || item.user_id || "-"}
+                          {displayUserIdentity(item)}
                         </TableCell>
                         <TableCell className="font-medium">
                           ￥
@@ -1188,7 +1196,7 @@ function AdminWalletPageContent() {
                           {order.out_trade_no || order.id}
                         </TableCell>
                         <TableCell className="text-xs">
-                          {order.user_email || "-"}
+                          {displayUserIdentity(order)}
                         </TableCell>
                         <TableCell>
                           ￥

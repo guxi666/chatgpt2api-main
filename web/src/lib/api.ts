@@ -432,6 +432,9 @@ export type ManagedImage = {
   path: string;
   owner_id?: string;
   owner_name?: string;
+  owner_display?: string;
+  owner_email?: string;
+  owner_username?: string;
   visibility: ImageVisibility;
   date: string;
   size: number;
@@ -642,6 +645,7 @@ export type PayOrder = {
   trade_no?: string;
   user_id?: string;
   user_email?: string;
+  user_display?: string;
   pay_type?: PayType | string;
   amount_cents: number;
   amount_yuan?: string;
@@ -782,6 +786,7 @@ export type ManagedUser = {
   subscription_start_at?: string;
   subscription_expire_at?: string;
   subscription_active?: boolean;
+  subscription_remaining_days?: number;
   has_password?: boolean;
   menu_paths?: string[];
   api_permissions?: string[];
@@ -855,6 +860,8 @@ export type ManagedRole = {
   description?: string;
   builtin?: boolean;
   user_count?: number;
+  subscription_tier?: "monthly" | "quarterly" | "yearly" | string;
+  subscription_active_user_count?: number;
   created_at?: string | null;
   updated_at?: string | null;
   menu_paths?: string[];

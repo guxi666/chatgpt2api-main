@@ -361,7 +361,7 @@ func (a *App) handleAdminRoles(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == base {
 		switch r.Method {
 		case http.MethodGet:
-			util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.auth.ListRoles()})
+			util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.managedRolesWithSubscriptionCounts(a.auth.ListRoles())})
 		case http.MethodPost:
 			body, _ := readJSONMap(r)
 			item, err := a.auth.CreateRole(body)
@@ -369,7 +369,7 @@ func (a *App) handleAdminRoles(w http.ResponseWriter, r *http.Request) {
 				util.WriteError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			util.WriteJSON(w, http.StatusOK, map[string]any{"item": item, "items": a.auth.ListRoles()})
+			util.WriteJSON(w, http.StatusOK, map[string]any{"item": item, "items": a.managedRolesWithSubscriptionCounts(a.auth.ListRoles())})
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
@@ -394,7 +394,7 @@ func (a *App) handleAdminRoles(w http.ResponseWriter, r *http.Request) {
 			util.WriteError(w, status, err.Error())
 			return
 		}
-		util.WriteJSON(w, http.StatusOK, map[string]any{"item": item, "items": a.auth.ListRoles()})
+		util.WriteJSON(w, http.StatusOK, map[string]any{"item": item, "items": a.managedRolesWithSubscriptionCounts(a.auth.ListRoles())})
 	case http.MethodDelete:
 		deleted, err := a.auth.DeleteRole(roleID)
 		if err != nil {
@@ -409,7 +409,7 @@ func (a *App) handleAdminRoles(w http.ResponseWriter, r *http.Request) {
 			util.WriteError(w, http.StatusNotFound, "role not found")
 			return
 		}
-		util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.auth.ListRoles()})
+		util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.managedRolesWithSubscriptionCounts(a.auth.ListRoles())})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -656,6 +656,7 @@ func (a *App) managedUsers() []map[string]any {
 			item["subscription_start_at"] = util.Clean(billing["subscription_start_at"])
 			item["subscription_expire_at"] = util.Clean(billing["subscription_expire_at"])
 			item["subscription_active"] = util.ToBool(billing["subscription_active"])
+			item["subscription_remaining_days"] = subscriptionRemainingDays(util.Clean(billing["subscription_expire_at"]), util.ToBool(billing["subscription_active"]))
 			item["billing_user"] = true
 			item["image_price_cents"] = a.config.ImagePriceCents()
 			continue
@@ -679,10 +680,102 @@ func (a *App) managedUsers() []map[string]any {
 		item["subscription_start_at"] = ""
 		item["subscription_expire_at"] = ""
 		item["subscription_active"] = false
+		item["subscription_remaining_days"] = 0
 		item["billing_user"] = false
 		item["image_price_cents"] = a.config.ImagePriceCents()
 	}
 	return items
+}
+
+func (a *App) managedRolesWithSubscriptionCounts(roles []map[string]any) []map[string]any {
+	activeByTier := map[string]int{}
+	for _, user := range a.billing.ListUsersForAdmin() {
+		if !util.ToBool(user["subscription_active"]) {
+			continue
+		}
+		tier := strings.TrimSpace(util.Clean(user["subscription_tier"]))
+		if tier == "" {
+			continue
+		}
+		activeByTier[tier]++
+	}
+	roleTierByID := map[string]string{}
+	for _, tier := range []string{service.SubscriptionTierMonthly, service.SubscriptionTierQuarterly, service.SubscriptionTierYearly} {
+		if roleID, ok := a.subscriptionRoleIDByTier(tier); ok {
+			roleTierByID[roleID] = tier
+		}
+	}
+	out := make([]map[string]any, 0, len(roles))
+	for _, role := range roles {
+		item := util.CopyMap(role)
+		roleID := strings.TrimSpace(util.Clean(item["id"]))
+		if tier := roleTierByID[roleID]; tier != "" {
+			item["subscription_tier"] = tier
+			item["subscription_active_user_count"] = activeByTier[tier]
+			item["user_count"] = activeByTier[tier]
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func subscriptionRemainingDays(expireAt string, active bool) int {
+	if !active {
+		return 0
+	}
+	expire := parseFlexibleTime(expireAt)
+	if expire.IsZero() {
+		return 0
+	}
+	duration := expire.Sub(time.Now().UTC())
+	if duration <= 0 {
+		return 0
+	}
+	days := int(duration.Hours() / 24)
+	if duration > time.Duration(days)*24*time.Hour {
+		days++
+	}
+	return days
+}
+
+func (a *App) decorateAdminBillingOrderUsers(items []map[string]any) {
+	if len(items) == 0 {
+		return
+	}
+	usersByID := map[string]map[string]any{}
+	for _, user := range a.managedUsers() {
+		if id := strings.TrimSpace(util.Clean(user["id"])); id != "" {
+			usersByID[id] = user
+		}
+	}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		userID := strings.TrimSpace(util.Clean(item["user_id"]))
+		rawEmail := util.Clean(item["user_email"])
+		email := managedUserEmailCandidate(rawEmail)
+		display := ""
+		if user := usersByID[userID]; user != nil {
+			email = managedUserEmailCandidate(
+				util.Clean(user["email"]),
+				util.Clean(user["username"]),
+				rawEmail,
+			)
+			display = firstNonEmpty(
+				util.Clean(user["name"]),
+				email,
+				util.Clean(user["username"]),
+				userID,
+			)
+		}
+		if email == "" && isLocalInvalidEmail(rawEmail) {
+			item["user_email"] = ""
+		} else {
+			item["user_email"] = email
+		}
+		item["user_display"] = firstNonEmpty(display, email, userID)
+	}
 }
 
 func findManagedUser(items []map[string]any, id string) map[string]any {
@@ -828,6 +921,7 @@ func (a *App) handleAdminBilling(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		items, _ := a.billing.ListOrdersForAdmin(0)
+		a.decorateAdminBillingOrderUsers(items)
 		report := buildSubscriptionReport(items, adminSubscriptionReportFilter{
 			Status:  statusFilter,
 			Tier:    tierFilter,
@@ -943,6 +1037,7 @@ func (a *App) handleAdminBilling(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		limit := util.ToInt(query.Get("limit"), 0)
 		items, stats := a.billing.ListOrdersForAdmin(limit)
+		a.decorateAdminBillingOrderUsers(items)
 		statusFilter := strings.ToLower(strings.TrimSpace(query.Get("status")))
 		kindFilter := strings.ToLower(strings.TrimSpace(query.Get("order_kind")))
 		filtered := make([]map[string]any, 0, len(items))
