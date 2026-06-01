@@ -81,6 +81,15 @@ function roleLevelLabel(user: ManagedUser) {
   return (user.role_name || "").trim() || "普通用户";
 }
 
+function managedUserDisplayName(user: ManagedUser, duplicatedNames: Set<string>) {
+  const name = String(user.name || user.username || "").trim();
+  const email = displayEmail(user.email);
+  if (name && duplicatedNames.has(name.toLowerCase()) && email !== "-") {
+    return `${name}（${email}）`;
+  }
+  return name || email || user.id || "用户";
+}
+
 function userSearchText(user: ManagedUser) {
   return [
     user.id,
@@ -186,6 +195,16 @@ function UsersContent() {
       setIsLoading(false);
     }
   }, []);
+
+  const duplicatedUserNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const user of items) {
+      const name = String(user.name || user.username || "").trim().toLowerCase();
+      if (!name) continue;
+      counts.set(name, (counts.get(name) || 0) + 1);
+    }
+    return new Set(Array.from(counts.entries()).filter(([, count]) => count > 1).map(([name]) => name));
+  }, [items]);
 
   useEffect(() => {
     void loadUsers();
@@ -475,7 +494,7 @@ function UsersContent() {
                     <TableRow key={user.id}>
                       <TableCell>
                         <div className="space-y-1">
-                          <div className="truncate font-medium text-foreground">{user.name || user.username || "用户"}</div>
+                          <div className="truncate font-medium text-foreground">{managedUserDisplayName(user, duplicatedUserNames)}</div>
                           <div className="truncate text-xs text-muted-foreground">{`Email: ${displayEmail(user.email)}`}</div>
                           <div className="truncate text-xs text-muted-foreground">
                             密码状态: {user.has_password ? "已设置" : "未设置"}

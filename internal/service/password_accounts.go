@@ -129,6 +129,9 @@ func (s *AuthService) RegisterPasswordUser(username, password, name string) (*Id
 	if _, ok := passwordAccountByUsernameLocked(s.accounts, username); ok {
 		return nil, "", authError("username already exists")
 	}
+	if passwordAccountDisplayNameExistsLocked(s.accounts, "", name) {
+		return nil, "", authError("username already exists")
+	}
 	now := util.NowISO()
 	account := PasswordAccount{
 		ID:           "user_" + util.NewHex(12),
@@ -171,6 +174,9 @@ func (s *AuthService) RegisterPasswordEmailUser(email, password, name string) (*
 	defer s.mu.Unlock()
 	if _, ok := passwordAccountByUsernameLocked(s.accounts, email); ok {
 		return nil, "", authError("email already exists")
+	}
+	if passwordAccountDisplayNameExistsLocked(s.accounts, "", name) {
+		return nil, "", authError("username already exists")
 	}
 	now := util.NowISO()
 	account := PasswordAccount{
@@ -217,6 +223,9 @@ func (s *AuthService) CreatePasswordUser(username, password, name, roleID string
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := passwordAccountByUsernameLocked(s.accounts, username); ok {
+		return nil, authError("username already exists")
+	}
+	if passwordAccountDisplayNameExistsLocked(s.accounts, "", name) {
 		return nil, authError("username already exists")
 	}
 	role, ok := managedRoleByIDLocked(s.roles, roleID)
@@ -729,6 +738,22 @@ func passwordAccountByIDLocked(accounts []PasswordAccount, id string) (PasswordA
 func passwordAccountByUsernameLocked(accounts []PasswordAccount, username string) (PasswordAccount, bool) {
 	_, account, ok := passwordAccountIndexByUsernameLocked(accounts, username)
 	return account, ok
+}
+
+func passwordAccountDisplayNameExistsLocked(accounts []PasswordAccount, exceptID, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for _, account := range accounts {
+		if exceptID != "" && account.ID == exceptID {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(account.DisplayName()), name) {
+			return true
+		}
+	}
+	return false
 }
 
 func passwordAccountIndexByUsernameLocked(accounts []PasswordAccount, username string) (int, PasswordAccount, bool) {

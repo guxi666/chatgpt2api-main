@@ -78,10 +78,10 @@ function formatDateTime(value?: string | null) {
 }
 
 function displayUserIdentity(item: { user_display?: string; user_email?: string; user_id?: string }) {
-  const display = String(item.user_display || "").trim();
-  if (display) return display;
   const email = String(item.user_email || "").trim();
   if (email && !email.toLowerCase().endsWith("@local.invalid")) return email;
+  const display = String(item.user_display || "").trim();
+  if (display) return display;
   return String(item.user_id || "").trim() || "-";
 }
 

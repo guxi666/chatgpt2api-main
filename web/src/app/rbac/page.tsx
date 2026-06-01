@@ -66,6 +66,15 @@ function displayEmail(email?: string | null) {
   return match?.[1] || raw;
 }
 
+function managedUserDisplayName(user: ManagedUser, duplicatedNames: Set<string>) {
+  const name = String(user.name || user.username || user.id || "").trim();
+  const email = displayEmail(user.email);
+  if (name && duplicatedNames.has(name.toLowerCase()) && email !== "-") {
+    return `${name}（${email}）`;
+  }
+  return name || email || user.id;
+}
+
 function subscriptionTierLabel(tier?: string | null) {
   switch (String(tier || "").trim()) {
     case "monthly":
@@ -189,6 +198,16 @@ function RBACContent() {
       .sort((a, b) => (a.name || a.username || a.email || a.id || "").localeCompare(b.name || b.username || b.email || b.id || "", "zh-CN"));
   }, [selectedRoleId, selectedRoleSubscriptionTier, users]);
 
+  const duplicatedUserNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const user of users) {
+      const name = String(user.name || user.username || "").trim().toLowerCase();
+      if (!name) continue;
+      counts.set(name, (counts.get(name) || 0) + 1);
+    }
+    return new Set(Array.from(counts.entries()).filter(([, count]) => count > 1).map(([name]) => name));
+  }, [users]);
+
   const roleMemberPreviewByRoleID = useMemo(() => {
     const grouped = new Map<string, string[]>();
     const subscriptionRoleIDByTier = new Map<string, string>();
@@ -198,7 +217,7 @@ function RBACContent() {
     }
     for (const user of users) {
       const roleID = String(user.role_id || "").trim();
-      const name = String(user.name || user.username || displayEmail(user.email) || user.id || "").trim();
+      const name = managedUserDisplayName(user, duplicatedUserNames);
       if (!name) continue;
       if (roleID) {
         const list = grouped.get(roleID) || [];
@@ -220,7 +239,7 @@ function RBACContent() {
       out.set(roleID, members.length > 3 ? `${preview} 等 ${members.length} 人` : preview);
     }
     return out;
-  }, [roles, users]);
+  }, [duplicatedUserNames, roles, users]);
 
   const isDirty = Boolean(selectedRole)
     && (roleName.trim() !== (selectedRole?.name || "")
@@ -446,7 +465,7 @@ function RBACContent() {
                           return (
                             <tr key={user.id} className="border-b border-border/40">
                               <td className="px-2 py-2">
-                                <div className="font-medium text-foreground">{user.name || user.username || user.id}</div>
+                                <div className="font-medium text-foreground">{managedUserDisplayName(user, duplicatedUserNames)}</div>
                                 <code className="mt-1 block font-mono text-[11px] text-muted-foreground">{user.id}</code>
                               </td>
                               <td className="px-2 py-2">{displayEmail(user.email)}</td>

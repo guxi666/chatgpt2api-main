@@ -304,6 +304,39 @@ func (e *Engine) CollectText(ctx context.Context, client *backend.Client, reques
 	return strings.Join(parts, ""), <-errCh
 }
 
+func (e *Engine) CollectTextWithPool(ctx context.Context, request ConversationRequest) (string, error) {
+	var lastErr error
+	accounts := e.Accounts.ListAccounts()
+	start := 0
+	if len(accounts) > 0 {
+		start = int(time.Now().UnixNano() % int64(len(accounts)))
+	}
+	for offset := 0; offset < len(accounts); offset++ {
+		account := accounts[(start+offset)%len(accounts)]
+		token := util.Clean(account["access_token"])
+		if token == "" {
+			continue
+		}
+		status := util.Clean(account["status"])
+		if status == "禁用" || status == "异常" {
+			continue
+		}
+		text, err := e.CollectText(ctx, e.TextBackend(token), request)
+		if err == nil {
+			return text, nil
+		}
+		lastErr = err
+		if _, handled := e.Accounts.ApplyAccountError(token, "text_chat", err); handled {
+			continue
+		}
+		return "", err
+	}
+	if lastErr != nil {
+		return "", lastErr
+	}
+	return "", fmt.Errorf("no available chat account")
+}
+
 func (e *Engine) ConversationEvents(ctx context.Context, client *backend.Client, messages []map[string]any, model, prompt string, images []string, size, quality string, forceImageToolValues ...bool) (<-chan ConversationEvent, <-chan error) {
 	out := make(chan ConversationEvent)
 	errCh := make(chan error, 1)

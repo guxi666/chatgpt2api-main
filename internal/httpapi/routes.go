@@ -742,6 +742,12 @@ func (a *App) decorateAdminBillingOrderUsers(items []map[string]any) {
 	if len(items) == 0 {
 		return
 	}
+	billingUsersByID := map[string]map[string]any{}
+	for _, user := range a.billing.ListUsersForAdmin() {
+		if id := strings.TrimSpace(util.Clean(user["id"])); id != "" {
+			billingUsersByID[id] = user
+		}
+	}
 	usersByID := map[string]map[string]any{}
 	for _, user := range a.managedUsers() {
 		if id := strings.TrimSpace(util.Clean(user["id"])); id != "" {
@@ -756,10 +762,15 @@ func (a *App) decorateAdminBillingOrderUsers(items []map[string]any) {
 		rawEmail := util.Clean(item["user_email"])
 		email := managedUserEmailCandidate(rawEmail)
 		display := ""
+		if billingUser := billingUsersByID[userID]; billingUser != nil {
+			email = managedUserEmailCandidate(util.Clean(billingUser["email"]), rawEmail)
+			display = firstNonEmpty(util.Clean(billingUser["name"]), email, userID)
+		}
 		if user := usersByID[userID]; user != nil {
 			email = managedUserEmailCandidate(
 				util.Clean(user["email"]),
 				util.Clean(user["username"]),
+				email,
 				rawEmail,
 			)
 			display = firstNonEmpty(

@@ -157,6 +157,9 @@ func TestAuthServicePasswordAccountLoginAndRoleUpdates(t *testing.T) {
 	if _, _, err := auth.RegisterPasswordUser("alice", "Password123", "Alice again"); err == nil {
 		t.Fatal("duplicate username registration succeeded")
 	}
+	if _, _, err := auth.RegisterPasswordUser("charlie", "Password123", "Alice"); err == nil {
+		t.Fatal("duplicate display name registration succeeded")
+	}
 
 	created, err := auth.CreatePasswordUser("bob", "Password123", "Bob", DefaultManagedRoleID, false)
 	if err != nil {

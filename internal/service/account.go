@@ -280,13 +280,19 @@ func (s *AccountService) GetAccount(accessToken string) map[string]any {
 func (s *AccountService) GetTextAccessToken() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	candidates := make([]string, 0, len(s.items))
 	for _, item := range s.items {
 		status := util.Clean(item["status"])
 		if status != "禁用" && status != "异常" {
-			return util.Clean(item["access_token"])
+			if token := util.Clean(item["access_token"]); token != "" {
+				candidates = append(candidates, token)
+			}
 		}
 	}
-	return ""
+	if len(candidates) == 0 {
+		return ""
+	}
+	return candidates[int(time.Now().UnixNano()%int64(len(candidates)))]
 }
 
 func (s *AccountService) GetAvailableAccessToken(ctx context.Context) (string, error) {
@@ -846,7 +852,10 @@ func IsAccountInvalidErrorMessage(message string) bool {
 		return false
 	}
 	return strings.Contains(text, "token_invalidated") ||
+		strings.Contains(text, "token_expired") ||
 		strings.Contains(text, "token_revoked") ||
+		strings.Contains(text, "authentication token is expired") ||
+		strings.Contains(text, "provided authentication token is expired") ||
 		strings.Contains(text, "authentication token has been invalidated") ||
 		strings.Contains(text, "invalidated oauth token") ||
 		hasAccountHTTPStatus(text, http.StatusUnauthorized)
