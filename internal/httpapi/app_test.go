@@ -879,8 +879,18 @@ func TestRBACImageDeletePermissionAllowsDelegatedUser(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+rawKey)
 	res := httptest.NewRecorder()
 	app.Handler().ServeHTTP(res, req)
-	if res.Code != http.StatusForbidden {
+	if res.Code != http.StatusOK {
 		t.Fatalf("default user delete status = %d body = %s", res.Code, res.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("default delete json: %v", err)
+	}
+	if deleted, _ := payload["deleted"].(float64); int(deleted) != 0 {
+		t.Fatalf("default deleted = %#v body = %#v", payload["deleted"], payload)
+	}
+	if missing, _ := payload["missing"].(float64); int(missing) != 1 {
+		t.Fatalf("default missing = %#v body = %#v", payload["missing"], payload)
 	}
 
 	role, err := app.auth.CreateRole(map[string]any{
@@ -903,7 +913,7 @@ func TestRBACImageDeletePermissionAllowsDelegatedUser(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("granted user delete status = %d body = %s", res.Code, res.Body.String())
 	}
-	var payload map[string]any
+	payload = map[string]any{}
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("delete json: %v", err)
 	}
@@ -1123,26 +1133,40 @@ func TestImageManagementIsScopedByOwner(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+sessionKey)
 	res = httptest.NewRecorder()
 	app.Handler().ServeHTTP(res, req)
-	if res.Code != http.StatusForbidden {
+	if res.Code != http.StatusOK {
 		t.Fatalf("linuxdo delete images status = %d body = %s", res.Code, res.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(app.config.ImagesDir(), filepath.FromSlash(aliceRel))); err != nil {
-		t.Fatalf("alice image should not be deleted by Linuxdo user, stat error = %v", err)
+	var deleteBody map[string]any
+	if err := json.Unmarshal(res.Body.Bytes(), &deleteBody); err != nil {
+		t.Fatalf("linuxdo delete images json: %v", err)
+	}
+	if deleteBody["deleted"] != float64(1) || deleteBody["missing"] != float64(1) {
+		t.Fatalf("linuxdo delete images body = %#v", deleteBody)
+	}
+	if _, err := os.Stat(filepath.Join(app.config.ImagesDir(), filepath.FromSlash(aliceRel))); !os.IsNotExist(err) {
+		t.Fatalf("alice image should be deleted by owner, stat error = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(app.config.ImagesDir(), filepath.FromSlash(bobRel))); err != nil {
-		t.Fatalf("bob image should not be deleted, stat error = %v", err)
+		t.Fatalf("bob image should not be deleted by another user, stat error = %v", err)
 	}
 
 	_, localKey, err := app.auth.CreateAPIKey(service.AuthRoleUser, "local user", service.AuthOwner{})
 	if err != nil {
 		t.Fatalf("CreateAPIKey(local) error = %v", err)
 	}
-	req = httptest.NewRequest(http.MethodDelete, "/api/images", strings.NewReader(`{"paths":["`+aliceRel+`"]}`))
+	req = httptest.NewRequest(http.MethodDelete, "/api/images", strings.NewReader(`{"paths":["`+bobRel+`"]}`))
 	req.Header.Set("Authorization", "Bearer "+localKey)
 	res = httptest.NewRecorder()
 	app.Handler().ServeHTTP(res, req)
-	if res.Code != http.StatusForbidden {
+	if res.Code != http.StatusOK {
 		t.Fatalf("local user delete images status = %d body = %s", res.Code, res.Body.String())
+	}
+	deleteBody = map[string]any{}
+	if err := json.Unmarshal(res.Body.Bytes(), &deleteBody); err != nil {
+		t.Fatalf("local user delete images json: %v", err)
+	}
+	if deleteBody["deleted"] != float64(0) || deleteBody["missing"] != float64(1) {
+		t.Fatalf("local user delete images body = %#v", deleteBody)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/images", nil)
@@ -1155,26 +1179,26 @@ func TestImageManagementIsScopedByOwner(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &list); err != nil {
 		t.Fatalf("admin images json: %v", err)
 	}
-	if items := logItems(list); len(items) != 3 {
+	if items := logItems(list); len(items) != 2 {
 		t.Fatalf("admin should see owned and legacy images, got %#v", list)
 	}
 
-	req = httptest.NewRequest(http.MethodDelete, "/api/images", strings.NewReader(`{"paths":["`+aliceRel+`"]}`))
+	req = httptest.NewRequest(http.MethodDelete, "/api/images", strings.NewReader(`{"paths":["`+bobRel+`"]}`))
 	req.Header.Set("Authorization", adminAuthHeader(t, app))
 	res = httptest.NewRecorder()
 	app.Handler().ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
 		t.Fatalf("admin delete images status = %d body = %s", res.Code, res.Body.String())
 	}
-	var deleteBody map[string]any
+	deleteBody = map[string]any{}
 	if err := json.Unmarshal(res.Body.Bytes(), &deleteBody); err != nil {
 		t.Fatalf("admin delete images json: %v", err)
 	}
 	if deleteBody["deleted"] != float64(1) || deleteBody["missing"] != float64(0) {
 		t.Fatalf("admin delete images body = %#v", deleteBody)
 	}
-	if _, err := os.Stat(filepath.Join(app.config.ImagesDir(), filepath.FromSlash(aliceRel))); !os.IsNotExist(err) {
-		t.Fatalf("alice image should be deleted by admin, stat error = %v", err)
+	if _, err := os.Stat(filepath.Join(app.config.ImagesDir(), filepath.FromSlash(bobRel))); !os.IsNotExist(err) {
+		t.Fatalf("bob image should be deleted by admin, stat error = %v", err)
 	}
 }
 

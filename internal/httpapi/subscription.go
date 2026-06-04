@@ -315,6 +315,8 @@ func (a *App) ensureSubscriptionTierRoles() {
 			service.APIPermissionKey("GET", "/api/creation-tasks"),
 			service.APIPermissionKey("POST", "/api/creation-tasks"),
 			service.APIPermissionKey("GET", "/api/images"),
+			service.APIPermissionKey("GET", "/api/images/fetch"),
+			service.APIPermissionKey("DELETE", "/api/images"),
 			service.APIPermissionKey("PATCH", "/api/images/visibility"),
 			service.APIPermissionKey("GET", "/api/wallet"),
 			service.APIPermissionKey("POST", "/api/wallet/redeem"),

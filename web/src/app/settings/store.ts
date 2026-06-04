@@ -112,6 +112,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     registration_bonus_image_times: Number.isFinite(registrationBonusImageTimes)
       ? registrationBonusImageTimes
       : 20,
+    cf_turnstile_enabled: Boolean(config.cf_turnstile_enabled),
     cf_turnstile_site_key:
       typeof config.cf_turnstile_site_key === "string"
         ? config.cf_turnstile_site_key
@@ -463,6 +464,7 @@ type SettingsStore = {
   setRegistrationEnabled: (value: boolean) => void;
   setRegistrationAllowedEmailDomains: (value: string) => void;
   setRegistrationBonusImageTimes: (value: string) => void;
+  setCFTurnstileEnabled: (value: boolean) => void;
   setCFTurnstileSiteKey: (value: string) => void;
   setCFTurnstileSecretKey: (value: string) => void;
   setEmailSMTPEnabled: (value: boolean) => void;
@@ -562,7 +564,7 @@ type SettingsStore = {
 };
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
-  config: normalizeConfig({ proxy: "" }),
+  config: null,
   isLoadingConfig: true,
   isSavingConfig: false,
   logGovernance: null,
@@ -706,6 +708,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           0,
           Number(config.registration_bonus_image_times) || 0,
         ),
+        cf_turnstile_enabled: Boolean(config.cf_turnstile_enabled),
         cf_turnstile_site_key: String(
           config.cf_turnstile_site_key || "",
         ).trim(),
@@ -1112,6 +1115,14 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     set((state) =>
       state.config
         ? { config: { ...state.config, registration_bonus_image_times: value } }
+        : {},
+    );
+  },
+
+  setCFTurnstileEnabled: (value) => {
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, cf_turnstile_enabled: value } }
         : {},
     );
   },

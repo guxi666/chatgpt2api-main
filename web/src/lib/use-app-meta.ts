@@ -14,6 +14,9 @@ function initialAppMeta(): AppMeta {
   if (typeof document === "undefined") {
     return defaultAppMeta;
   }
+  if (window.__APP_META__) {
+    return normalizeAppMeta(window.__APP_META__);
+  }
   const initialTitle = document.title.trim();
   const initialIcon = document.querySelector<HTMLLinkElement>("link[rel='icon']")?.getAttribute("href")?.trim();
   return normalizeAppMeta({

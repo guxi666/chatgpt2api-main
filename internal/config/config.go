@@ -46,6 +46,7 @@ var settingEnvKeys = map[string]string{
 	"registration_enabled":                 "CHATGPT2API_REGISTRATION_ENABLED",
 	"registration_allowed_email_domains":   "CHATGPT2API_REGISTRATION_ALLOWED_EMAIL_DOMAINS",
 	"registration_bonus_image_times":       "CHATGPT2API_REGISTRATION_BONUS_IMAGE_TIMES",
+	"cf_turnstile_enabled":                 "CHATGPT2API_CF_TURNSTILE_ENABLED",
 	"cf_turnstile_site_key":                "CHATGPT2API_CF_TURNSTILE_SITE_KEY",
 	"cf_turnstile_secret_key":              "CHATGPT2API_CF_TURNSTILE_SECRET_KEY",
 	"email_smtp_enabled":                   "CHATGPT2API_EMAIL_SMTP_ENABLED",
@@ -314,7 +315,9 @@ func (s *Store) CFTurnstileSecretKey() string {
 }
 
 func (s *Store) CFTurnstileEnabled() bool {
-	return s.CFTurnstileSiteKey() != "" && s.CFTurnstileSecretKey() != ""
+	return util.ToBool(s.settingValue("cf_turnstile_enabled", s.CFTurnstileSiteKey() != "" && s.CFTurnstileSecretKey() != "")) &&
+		s.CFTurnstileSiteKey() != "" &&
+		s.CFTurnstileSecretKey() != ""
 }
 
 func (s *Store) RegistrationAllowedEmailDomains() []string {
@@ -924,6 +927,7 @@ func (s *Store) Get() map[string]any {
 	data["registration_enabled"] = s.RegistrationEnabled()
 	data["registration_allowed_email_domains"] = strings.Join(s.RegistrationAllowedEmailDomains(), ",")
 	data["registration_bonus_image_times"] = s.RegistrationBonusImageTimes()
+	data["cf_turnstile_enabled"] = s.CFTurnstileEnabled()
 	data["cf_turnstile_site_key"] = s.CFTurnstileSiteKey()
 	data["cf_turnstile_secret_key_configured"] = s.CFTurnstileSecretKey() != ""
 	emailSMTP := s.EmailSMTP()
@@ -1213,6 +1217,13 @@ func (s *Store) validateSettingsUpdateLocked(data map[string]any) error {
 	registrationBonusImageTimes := intSetting(util.ValueOr(data["registration_bonus_image_times"], 20), 20)
 	if registrationBonusImageTimes < 0 {
 		return errors.New("registration_bonus_image_times must be >= 0")
+	}
+	if util.ToBool(util.ValueOr(data["cf_turnstile_enabled"], false)) {
+		siteKey := strings.TrimSpace(fmt.Sprint(util.ValueOr(data["cf_turnstile_site_key"], "")))
+		secretKey := strings.TrimSpace(fmt.Sprint(util.ValueOr(data["cf_turnstile_secret_key"], "")))
+		if siteKey == "" || secretKey == "" {
+			return errors.New("Cloudflare Turnstile Site Key and Secret Key are required when enabled")
+		}
 	}
 	yipay := s.yiPayFromData(data)
 	if yipay.Enabled {

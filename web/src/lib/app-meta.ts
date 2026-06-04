@@ -11,6 +11,12 @@ import {
 export const APP_META_UPDATED_EVENT = "chatgpt2api:app-meta-updated";
 export const DEFAULT_LOGIN_PAGE_IMAGE = "/login-panel-illustration.svg";
 
+declare global {
+  interface Window {
+    __APP_META__?: Partial<AppMeta>;
+  }
+}
+
 export type AppMeta = {
   app_title: string;
   project_name: string;

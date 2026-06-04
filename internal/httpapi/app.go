@@ -2289,7 +2289,23 @@ func rewriteWebIndexBrand(indexHTML, siteName, iconURL string) string {
 	replacement := `<link rel="icon" href="` + escapedIconURL + `" />`
 	result = strings.Replace(result, `<link rel="icon" href="/favicon.ico" />`, replacement, 1)
 	result = strings.Replace(result, `<link rel="icon" href="/logo-mark.svg" type="image/svg+xml" />`, replacement, 1)
+	if script := initialAppMetaScript(siteName, iconURL); script != "" {
+		result = strings.Replace(result, "</head>", script+"</head>", 1)
+	}
 	return result
+}
+
+func initialAppMetaScript(siteName, iconURL string) string {
+	payload, err := json.Marshal(map[string]string{
+		"app_title":         firstNonEmpty(strings.TrimSpace(siteName), "GPT生图站"),
+		"project_name":      firstNonEmpty(strings.TrimSpace(siteName), "GPT生图站"),
+		"top_left_logo_url": firstNonEmpty(strings.TrimSpace(iconURL), "/logo-mark.svg"),
+		"site_logo_url":     firstNonEmpty(strings.TrimSpace(iconURL), "/logo-mark.svg"),
+	})
+	if err != nil {
+		return ""
+	}
+	return "<script>window.__APP_META__=" + string(payload) + ";</script>"
 }
 
 func replaceHTMLTagContent(src, startTag, endTag, replacement string) string {

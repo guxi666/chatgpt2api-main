@@ -174,6 +174,7 @@ func DefaultPermissionSetForRole(role string) PermissionSet {
 			APIPermissionKey("POST", "/api/creation-tasks"),
 			APIPermissionKey("GET", "/api/images"),
 			APIPermissionKey("GET", "/api/images/fetch"),
+			APIPermissionKey("DELETE", "/api/images"),
 			APIPermissionKey("PATCH", "/api/images/visibility"),
 			APIPermissionKey("GET", "/api/auth/users"),
 			APIPermissionKey("POST", "/api/auth/users"),

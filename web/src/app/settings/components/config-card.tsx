@@ -141,6 +141,9 @@ export function ConfigCard() {
   const setRegistrationBonusImageTimes = useSettingsStore(
     (state) => state.setRegistrationBonusImageTimes,
   );
+  const setCFTurnstileEnabled = useSettingsStore(
+    (state) => state.setCFTurnstileEnabled,
+  );
   const setCFTurnstileSiteKey = useSettingsStore(
     (state) => state.setCFTurnstileSiteKey,
   );
@@ -437,6 +440,13 @@ export function ConfigCard() {
             title="邮箱注册与 CF 验证"
             tip="配置注册邮箱白名单和 Cloudflare Turnstile。保存后会应用到登录/注册。"
           />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <ConfigOption
+              checked={Boolean(config?.cf_turnstile_enabled)}
+              label="启用 Cloudflare 验证"
+              onCheckedChange={setCFTurnstileEnabled}
+            />
+          </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field className={configFieldClassName}>
               <ConfigFieldLabel htmlFor="settings-registration-email-domains">

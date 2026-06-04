@@ -39,6 +39,11 @@ import {
   type WalletInfo,
 } from "@/lib/api";
 import { parseDateTime } from "@/lib/datetime";
+import {
+  closePaymentWindow,
+  openPaymentURL,
+  reservePaymentWindow,
+} from "@/lib/payment-window";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 
 const fallbackPlans: SubscriptionPlan[] = [
@@ -258,23 +263,25 @@ function SubscriptionPageContent() {
       return;
     }
     setIsSubmitting(true);
+    const paymentWindow =
+      selectedPayType === "balance" || selectedPayType === "usdt"
+        ? null
+        : reservePaymentWindow();
     try {
       const data = await createSubscriptionOrder({
         tier: selectedPlan.key as "monthly" | "quarterly" | "yearly",
         pay_type: selectedPayType as PayType | "balance",
       });
       if (data.order?.pay_url) {
-        window.open(
-          String(data.order.pay_url),
-          "_blank",
-          "noopener,noreferrer",
-        );
+        openPaymentURL(paymentWindow, String(data.order.pay_url));
         toast.success("订单已创建，请在新窗口完成支付");
       } else {
+        closePaymentWindow(paymentWindow);
         toast.success("套餐购买成功");
       }
       await reload();
     } catch (error) {
+      closePaymentWindow(paymentWindow);
       toast.error(error instanceof Error ? error.message : "购买失败");
     } finally {
       setIsSubmitting(false);

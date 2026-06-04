@@ -191,6 +191,7 @@ export type SettingsConfig = {
   registration_enabled?: boolean;
   registration_allowed_email_domains?: string;
   registration_bonus_image_times?: number | string;
+  cf_turnstile_enabled?: boolean;
   cf_turnstile_site_key?: string;
   cf_turnstile_secret_key?: string;
   cf_turnstile_secret_key_configured?: boolean;

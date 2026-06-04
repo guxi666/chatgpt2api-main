@@ -367,7 +367,11 @@ function RBACContent() {
           <CardContent className="p-0">
             <div className="border-b border-border px-5 py-4">
               <div className="mb-3 flex items-center justify-between text-sm text-muted-foreground">
-                <span>角色 {filteredRoles.length} / {roles.length}</span>
+                <span>
+                  {isLoading
+                    ? "角色加载中"
+                    : `角色 ${filteredRoles.length} / ${roles.length}`}
+                </span>
                 <ShieldCheck className="size-4" />
               </div>
               <div className="relative">
@@ -413,7 +417,7 @@ function RBACContent() {
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-2">
                     <ShieldCheck className="size-5 shrink-0 text-[#1456f0]" />
-                    <h2 className="truncate text-base font-semibold text-foreground">{selectedRole?.name || "未选择角色"}</h2>
+                    <h2 className="truncate text-base font-semibold text-foreground">{isLoading ? "加载中" : selectedRole?.name || "未选择角色"}</h2>
                   </div>
                   <code className="mt-1 block truncate font-mono text-xs text-muted-foreground">{selectedRole?.id || "-"}</code>
                 </div>
@@ -440,7 +444,7 @@ function RBACContent() {
             <div className="border-b border-border px-5 py-4">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-foreground">当前角色成员与等级管理</h3>
-                <Badge variant="secondary" className="rounded-md">{roleMembers.length} 用户</Badge>
+                  <Badge variant="secondary" className="rounded-md">{isLoading ? "-" : roleMembers.length} 用户</Badge>
               </div>
               {selectedRole ? (
                 roleMembers.length > 0 ? (

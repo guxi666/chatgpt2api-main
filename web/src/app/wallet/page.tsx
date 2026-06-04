@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -54,6 +54,11 @@ import {
   type WalletInfo,
 } from "@/lib/api";
 import { parseDateTime } from "@/lib/datetime";
+import {
+  closePaymentWindow,
+  openPaymentURL,
+  reservePaymentWindow,
+} from "@/lib/payment-window";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 
 const PAY_ORDER_PENDING_TIMEOUT_MS = 30 * 60 * 1000;
@@ -61,6 +66,26 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 
 function centsToYuan(cents: number) {
   return (Math.max(0, cents) / 100).toFixed(2);
+}
+
+function MetricValue({
+  children,
+  className = "text-3xl font-semibold text-foreground",
+  isLoading,
+}: {
+  children: ReactNode;
+  className?: string;
+  isLoading: boolean;
+}) {
+  return (
+    <div className={className}>
+      {isLoading ? (
+        <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
+      ) : (
+        children
+      )}
+    </div>
+  );
 }
 
 function formatDateTime(value?: string | null) {
@@ -244,6 +269,7 @@ function WalletPageContent() {
     }
 
     setIsSubmitting(true);
+    const paymentWindow = payType === "usdt" ? null : reservePaymentWindow();
     try {
       const data = await createPayOrder({
         amount: parsedAmount.toFixed(2),
@@ -253,15 +279,18 @@ function WalletPageContent() {
       const payUrl = String(createdOrder.pay_url || "");
       setLatestOrder(createdOrder);
       if (payUrl) {
-        window.open(payUrl, "_blank", "noopener,noreferrer");
+        openPaymentURL(paymentWindow, payUrl);
         toast.success("订单已创建，请在新窗口完成支付");
       } else if (createdOrder.pay_type === "usdt") {
+        closePaymentWindow(paymentWindow);
         toast.success("USDT 订单已创建，请按页面收款信息转账并等待到账。");
       } else {
+        closePaymentWindow(paymentWindow);
         toast.success("订单已创建");
       }
       await reload();
     } catch (error) {
+      closePaymentWindow(paymentWindow);
       toast.error(error instanceof Error ? error.message : "创建订单失败");
     } finally {
       setIsSubmitting(false);
@@ -350,9 +379,9 @@ function WalletPageContent() {
             <CardDescription>当前可用余额</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-semibold text-foreground">
+            <MetricValue isLoading={isLoading}>
               ￥{centsToYuan(wallet?.balance_cents || 0)}
-            </div>
+            </MetricValue>
           </CardContent>
         </Card>
         <Card className="rounded-[20px]">
@@ -361,9 +390,9 @@ function WalletPageContent() {
             <CardDescription>历史总充值</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-semibold text-foreground">
+            <MetricValue isLoading={isLoading}>
               ￥{centsToYuan(wallet?.total_recharge_cents || 0)}
-            </div>
+            </MetricValue>
           </CardContent>
         </Card>
         <Card className="rounded-[20px]">
@@ -372,9 +401,9 @@ function WalletPageContent() {
             <CardDescription>每次生图消耗</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-semibold text-foreground">
+            <MetricValue isLoading={isLoading}>
               ￥{centsToYuan(imagePriceCents)}
-            </div>
+            </MetricValue>
           </CardContent>
         </Card>
       </div>
@@ -386,17 +415,20 @@ function WalletPageContent() {
         </CardHeader>
         <CardContent className="flex flex-col gap-2 text-sm">
           <div className="font-mono text-foreground">
-            {wallet?.invite_code || "-"}
+            {isLoading ? "加载中..." : wallet?.invite_code || "-"}
           </div>
           <div className="text-muted-foreground">
-            我的邀请人：{wallet?.invited_by_email || wallet?.invited_by || "无"}
+            我的邀请人：
+            {isLoading
+              ? "加载中..."
+              : wallet?.invited_by_email || wallet?.invited_by || "无"}
           </div>
           <button
             type="button"
             className="mt-1 inline-flex w-fit items-center gap-1 text-primary hover:underline"
             onClick={() => setShowInviteUsers((value) => !value)}
           >
-            已邀请 {wallet?.invited_count || 0} 人{" "}
+            已邀请 {isLoading ? "-" : wallet?.invited_count || 0} 人{" "}
             {showInviteUsers ? (
               <ChevronUp className="size-4" />
             ) : (
@@ -868,9 +900,12 @@ function AdminWalletPageContent() {
             <CardTitle className="text-base">今日收益</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold">
+            <MetricValue
+              isLoading={isLoading}
+              className="text-2xl font-semibold"
+            >
               ￥{stats?.today_revenue_yuan || "0.00"}
-            </div>
+            </MetricValue>
           </CardContent>
         </Card>
         <Card className="rounded-[20px]">
@@ -878,9 +913,12 @@ function AdminWalletPageContent() {
             <CardTitle className="text-base">累计收益</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold">
+            <MetricValue
+              isLoading={isLoading}
+              className="text-2xl font-semibold"
+            >
               ￥{stats?.total_revenue_yuan || "0.00"}
-            </div>
+            </MetricValue>
           </CardContent>
         </Card>
         <Card className="rounded-[20px]">
@@ -888,9 +926,12 @@ function AdminWalletPageContent() {
             <CardTitle className="text-base">待支付订单</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold">
+            <MetricValue
+              isLoading={isLoading}
+              className="text-2xl font-semibold"
+            >
               {stats?.pending_count || 0}
-            </div>
+            </MetricValue>
           </CardContent>
         </Card>
         <Card className="rounded-[20px]">
@@ -898,7 +939,12 @@ function AdminWalletPageContent() {
             <CardTitle className="text-base">提现申请</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold">{withdrawals.length}</div>
+            <MetricValue
+              isLoading={isLoading}
+              className="text-2xl font-semibold"
+            >
+              {withdrawals.length}
+            </MetricValue>
           </CardContent>
         </Card>
       </div>
