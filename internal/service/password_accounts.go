@@ -271,9 +271,6 @@ func (s *AuthService) LoginPassword(username, password string) (*Identity, strin
 	account.UpdatedAt = now
 	s.accounts[index] = account
 	item, raw := s.issuePasswordSessionLocked(account, now)
-	if err := s.savePasswordAccountsLocked(); err != nil {
-		return nil, "", err
-	}
 	if err := s.saveAuthItemLocked(item); err != nil {
 		return nil, "", err
 	}
