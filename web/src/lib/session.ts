@@ -12,6 +12,19 @@ let cachedAuthSession: StoredAuthSession | null | undefined;
 let verifyAuthSessionPromise: Promise<StoredAuthSession | null> | null = null;
 let authSessionVersion = 0;
 export const AUTH_SESSION_CHANGE_EVENT = "chatgpt2api:auth-session-change";
+const AUTH_SESSION_VERIFY_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error("auth session verify timeout"));
+    }, timeoutMs);
+    promise
+      .then(resolve)
+      .catch(reject)
+      .finally(() => window.clearTimeout(timer));
+  });
+}
 
 export function authSessionFromLoginResponse(data: LoginResponse, key: string): StoredAuthSession {
   return {
@@ -44,7 +57,10 @@ export async function getVerifiedAuthSession(): Promise<StoredAuthSession | null
   }
 
   const verifyStartedAtVersion = authSessionVersion;
-  verifyAuthSessionPromise ??= verifyStoredAuthSession();
+  verifyAuthSessionPromise ??= withTimeout(
+    verifyStoredAuthSession(),
+    AUTH_SESSION_VERIFY_TIMEOUT_MS,
+  ).catch(() => null);
   try {
     const verifiedSession = await verifyAuthSessionPromise;
     if (verifyStartedAtVersion === authSessionVersion) {

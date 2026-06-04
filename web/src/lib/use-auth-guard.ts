@@ -27,7 +27,7 @@ export function useAuthGuard(allowedRoles?: AuthRole[], requiredPath?: string): 
 
     const load = async () => {
       const roleList = allowedRolesKey ? (allowedRolesKey.split(",") as AuthRole[]) : [];
-      const storedSession = await getVerifiedAuthSession();
+      const storedSession = await getVerifiedAuthSession().catch(() => null);
       if (!active) {
         return;
       }
@@ -74,7 +74,7 @@ export function useRedirectIfAuthenticated() {
     let active = true;
 
     const load = async () => {
-      const storedSession = await getVerifiedAuthSession();
+      const storedSession = await getVerifiedAuthSession().catch(() => null);
       if (!active) {
         return;
       }
