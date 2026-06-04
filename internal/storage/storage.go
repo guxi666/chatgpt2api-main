@@ -28,6 +28,10 @@ type Backend interface {
 	Info() map[string]any
 }
 
+type AuthKeyUpsertBackend interface {
+	SaveAuthKey(map[string]any) error
+}
+
 type JSONDocumentBackend interface {
 	LoadJSONDocument(name string) (any, error)
 	SaveJSONDocument(name string, value any) error
@@ -387,6 +391,25 @@ func (b *DatabaseBackend) LoadAuthKeys() ([]map[string]any, error) {
 
 func (b *DatabaseBackend) SaveAuthKeys(keys []map[string]any) error {
 	return b.saveRows("auth_keys", "key_id", keys)
+}
+
+func (b *DatabaseBackend) SaveAuthKey(item map[string]any) error {
+	key := strings.TrimSpace(fmt.Sprint(item["id"]))
+	if key == "" {
+		return errors.New("auth key id is required")
+	}
+	data, err := json.Marshal(item)
+	if err != nil {
+		return err
+	}
+	stmt := `INSERT INTO auth_keys (key_id, data) VALUES (?, ?) ON CONFLICT(key_id) DO UPDATE SET data = excluded.data`
+	if b.driver == "postgres" {
+		stmt = `INSERT INTO auth_keys (key_id, data) VALUES ($1, $2) ON CONFLICT(key_id) DO UPDATE SET data = EXCLUDED.data`
+	} else if b.driver == "mysql" {
+		stmt = `INSERT INTO auth_keys (key_id, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)`
+	}
+	_, err = b.db.Exec(stmt, key, string(data))
+	return err
 }
 
 func (b *DatabaseBackend) HealthCheck() map[string]any {

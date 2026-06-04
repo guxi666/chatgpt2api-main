@@ -862,7 +862,7 @@ func (s *AuthService) Authenticate(raw string) *Identity {
 		s.items[index] = next
 		id := util.Clean(next["id"])
 		if last, ok := s.lastUsedFlushAt[id]; !ok || now.Sub(last) >= time.Minute {
-			if s.saveLocked() == nil {
+			if s.saveAuthItemLocked(next) == nil {
 				s.lastUsedFlushAt[id] = now
 			}
 		}
@@ -909,6 +909,13 @@ func (s *AuthService) loadPasswordAccounts() []PasswordAccount {
 
 func (s *AuthService) saveLocked() error {
 	return s.storage.SaveAuthKeys(s.items)
+}
+
+func (s *AuthService) saveAuthItemLocked(item map[string]any) error {
+	if store, ok := s.storage.(storage.AuthKeyUpsertBackend); ok {
+		return store.SaveAuthKey(util.CopyMap(item))
+	}
+	return s.saveLocked()
 }
 
 func (s *AuthService) savePasswordAccountsLocked() error {

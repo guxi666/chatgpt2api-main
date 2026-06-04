@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -67,6 +68,40 @@ func TestDatabaseBackendStoresDocumentsAndLogs(t *testing.T) {
 	health := backend.HealthCheck()
 	if health["document_count"] != 1 || health["log_count"] != 2 {
 		t.Fatalf("HealthCheck() = %#v", health)
+	}
+}
+
+func TestDatabaseBackendSaveAuthKeyUpsertsSingleRow(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "chatgpt2api.db")
+	backend, err := NewDatabaseBackend("sqlite:///" + filepath.ToSlash(dbPath))
+	if err != nil {
+		t.Fatalf("NewDatabaseBackend() error = %v", err)
+	}
+	defer backend.db.Close()
+
+	if err := backend.SaveAuthKeys([]map[string]any{
+		{"id": "key-1", "key": "sk-one"},
+		{"id": "key-2", "key": "sk-two"},
+	}); err != nil {
+		t.Fatalf("SaveAuthKeys() error = %v", err)
+	}
+	if err := backend.SaveAuthKey(map[string]any{"id": "key-1", "key": "sk-updated"}); err != nil {
+		t.Fatalf("SaveAuthKey() error = %v", err)
+	}
+
+	keys, err := backend.LoadAuthKeys()
+	if err != nil {
+		t.Fatalf("LoadAuthKeys() error = %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("LoadAuthKeys() length = %d, want 2: %#v", len(keys), keys)
+	}
+	seen := map[string]string{}
+	for _, item := range keys {
+		seen[fmt.Sprint(item["id"])] = fmt.Sprint(item["key"])
+	}
+	if seen["key-1"] != "sk-updated" || seen["key-2"] != "sk-two" {
+		t.Fatalf("LoadAuthKeys() = %#v", keys)
 	}
 }
 

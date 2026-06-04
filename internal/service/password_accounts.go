@@ -150,7 +150,7 @@ func (s *AuthService) RegisterPasswordUser(username, password, name string) (*Id
 	if err := s.savePasswordAccountsLocked(); err != nil {
 		return nil, "", err
 	}
-	if err := s.saveLocked(); err != nil {
+	if err := s.saveAuthItemLocked(item); err != nil {
 		return nil, "", err
 	}
 	return identityForAuthItem(item), raw, nil
@@ -196,7 +196,7 @@ func (s *AuthService) RegisterPasswordEmailUser(email, password, name string) (*
 	if err := s.savePasswordAccountsLocked(); err != nil {
 		return nil, "", err
 	}
-	if err := s.saveLocked(); err != nil {
+	if err := s.saveAuthItemLocked(item); err != nil {
 		return nil, "", err
 	}
 	return identityForAuthItem(item), raw, nil
@@ -274,7 +274,7 @@ func (s *AuthService) LoginPassword(username, password string) (*Identity, strin
 	if err := s.savePasswordAccountsLocked(); err != nil {
 		return nil, "", err
 	}
-	if err := s.saveLocked(); err != nil {
+	if err := s.saveAuthItemLocked(item); err != nil {
 		return nil, "", err
 	}
 	return identityForAuthItem(item), raw, nil
