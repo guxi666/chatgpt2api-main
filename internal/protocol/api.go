@@ -125,7 +125,7 @@ func (e *Engine) HandleChatCompletions(ctx context.Context, body map[string]any)
 	if err != nil {
 		return nil, nil, err
 	}
-	text, err := e.CollectTextWithPool(ctx, ConversationRequest{Model: model, Messages: messages})
+	text, err := e.CollectTextWithPool(ctx, ConversationRequest{Model: model, Messages: messages, Images: util.AsStringSlice(body["images"])})
 	if err != nil {
 		return nil, nil, err
 	}

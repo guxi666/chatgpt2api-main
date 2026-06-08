@@ -176,7 +176,7 @@ func (s *ImageTaskService) SubmitEditWithOptions(ctx context.Context, identity I
 	return s.submitImageWithMetadataAndOptions(ctx, identity, clientTaskID, prompt, model, size, quality, baseURL, n, messages, metadata, "edit", images, options, visibilityValues...)
 }
 
-func (s *ImageTaskService) SubmitChat(ctx context.Context, identity Identity, clientTaskID, prompt, model string, messages any) (map[string]any, error) {
+func (s *ImageTaskService) SubmitChat(ctx context.Context, identity Identity, clientTaskID, prompt, model string, messages any, images any) (map[string]any, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return nil, fmt.Errorf("prompt is required")
@@ -185,6 +185,9 @@ func (s *ImageTaskService) SubmitChat(ctx context.Context, identity Identity, cl
 		return nil, fmt.Errorf("messages are required")
 	}
 	payload := map[string]any{"prompt": prompt, "model": model, "messages": messages, "n": 1, "visibility": ImageVisibilityPrivate}
+	if images != nil {
+		payload["images"] = images
+	}
 	return s.submit(ctx, identity, clientTaskID, "chat", payload)
 }
 

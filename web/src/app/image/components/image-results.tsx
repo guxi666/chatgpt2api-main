@@ -367,11 +367,19 @@ export function ImageResults({
           </div>
           <div className="hide-scrollbar flex gap-3 overflow-x-auto px-1 pb-1 text-left sm:grid sm:grid-cols-2 sm:overflow-visible lg:grid-cols-4">
             {promptPresets.map((preset) => (
-              <button
+              <div
                 key={preset.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 className="group w-[250px] shrink-0 overflow-hidden rounded-[22px] border border-[#f2f3f5] bg-white transition hover:-translate-y-0.5 hover:shadow-[0_12px_16px_-4px_rgba(36,36,36,0.08)] sm:w-auto"
                 onClick={() => void onApplyPromptPreset(preset)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") {
+                    return;
+                  }
+                  event.preventDefault();
+                  void onApplyPromptPreset(preset);
+                }}
                 aria-label={`套用预设：${preset.title}`}
               >
                 <div className="relative aspect-[16/9] overflow-hidden bg-[#f0f0f0]">
@@ -409,7 +417,7 @@ export function ImageResults({
                     ) : null}
                   </div>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </div>

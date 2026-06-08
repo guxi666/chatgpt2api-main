@@ -14,7 +14,7 @@ import (
 
 const (
 	passwordAccountsDocumentName = "auth_users.json"
-	passwordSessionName          = "鐧诲綍浼氳瘽"
+	passwordSessionName          = "密码登录会话"
 )
 
 var accountUsernameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{2,31}$`)
@@ -43,7 +43,7 @@ func (a PasswordAccount) DisplayName() string {
 	if username := util.Clean(a.Username); username != "" {
 		return username
 	}
-	return "鐢ㄦ埛"
+	return "用户"
 }
 
 func (a PasswordAccount) ManagedRoleID() string {
@@ -255,16 +255,16 @@ func (s *AuthService) CreatePasswordUser(username, password, name, roleID string
 func (s *AuthService) LoginPassword(username, password string) (*Identity, string, error) {
 	username, err := normalizeAccountIdentifier(username)
 	if err != nil {
-		return nil, "", authError("鐢ㄦ埛鍚嶆垨瀵嗙爜閿欒")
+		return nil, "", authError("用户名或密码错误")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	index, account, ok := passwordAccountIndexByUsernameLocked(s.accounts, username)
 	if !ok || !verifyAccountPassword(password, account.PasswordHash) {
-		return nil, "", authError("鐢ㄦ埛鍚嶆垨瀵嗙爜閿欒")
+		return nil, "", authError("用户名或密码错误")
 	}
 	if !account.Enabled {
-		return nil, "", authError("鐢ㄦ埛宸茶绂佺敤")
+		return nil, "", authError("账号已被禁用")
 	}
 	now := util.NowISO()
 	account.LastLoginAt = now
@@ -377,7 +377,7 @@ func (s *AuthService) ChangeProfilePassword(identity Identity, currentPassword, 
 			continue
 		}
 		if !verifyAccountPassword(currentPassword, account.PasswordHash) {
-			return authError("褰撳墠瀵嗙爜閿欒")
+			return authError("当前密码错误")
 		}
 		hash, err := hashAccountPassword(nextPassword)
 		if err != nil {
@@ -404,6 +404,63 @@ func (s *AuthService) HasPasswordEmailAccount(email string) bool {
 		}
 	}
 	return false
+}
+
+func (s *AuthService) EnsurePasswordEmailAccount(userID, email, name, passwordHash string, enabled bool, createdAt, updatedAt, lastLoginAt string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return authError("user id is required")
+	}
+	email, err := normalizeAccountEmail(email)
+	if err != nil {
+		return err
+	}
+	passwordHash = strings.TrimSpace(passwordHash)
+	if passwordHash == "" {
+		return authError("password hash is required")
+	}
+	if _, err := bcrypt.Cost([]byte(passwordHash)); err != nil {
+		return authError("password hash is invalid")
+	}
+	now := util.NowISO()
+	createdAt = firstNonEmpty(util.Clean(createdAt), now)
+	updatedAt = firstNonEmpty(util.Clean(updatedAt), createdAt)
+	name = normalizeAccountDisplayName(name, email)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := passwordAccountByIDLocked(s.accounts, userID); exists {
+		return nil
+	}
+	if _, exists := passwordAccountByUsernameLocked(s.accounts, email); exists {
+		return nil
+	}
+	roleID := DefaultManagedRoleID
+	if existingRoleID, ok := managedAuthRoleIDLocked(s.items, s.accounts, userID); ok && existingRoleID != "" {
+		roleID = existingRoleID
+	}
+	if _, ok := managedRoleByIDLocked(s.roles, roleID); !ok {
+		roleID = DefaultManagedRoleID
+	}
+	account := PasswordAccount{
+		ID:           userID,
+		Username:     email,
+		Email:        email,
+		Name:         name,
+		PasswordHash: passwordHash,
+		Role:         AuthRoleUser,
+		RoleID:       roleID,
+		Enabled:      enabled,
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
+		LastLoginAt:  util.Clean(lastLoginAt),
+	}
+	s.accounts = append(s.accounts, account)
+	s.syncPasswordAccountsToItems()
+	if err := s.savePasswordAccountsLocked(); err != nil {
+		return err
+	}
+	return s.saveLocked()
 }
 
 func (s *AuthService) ResetPasswordByEmail(email, nextPassword string) error {
@@ -448,7 +505,7 @@ func (s *AuthService) ResetPasswordByEmail(email, nextPassword string) error {
 		}
 		return s.saveLocked()
 	}
-	return authError("璇ラ偖绠辨湭娉ㄥ唽")
+	return authError("该邮箱未注册")
 }
 
 func (s *AuthService) AdminResetPasswordByUserID(userID, nextPassword string) error {

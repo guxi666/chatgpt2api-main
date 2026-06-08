@@ -5,6 +5,23 @@ import { History, ImagePlus, LoaderCircle, Plus, Trash2, X } from "lucide-react"
 import { toast } from "sonner";
 
 import { ImageComposer } from "@/app/image/components/image-composer";
+import { EcommerceComposerPanel } from "@/app/image/components/ecommerce-studio";
+import {
+  ECOMMERCE_CATEGORY_NAME,
+  ECOMMERCE_IMAGE_ACCEPT,
+  EFFECT_REFERENCE_IMAGE_LIMIT,
+  MATERIAL_IMAGE_LIMIT,
+  analyzeEcommerceProductImages,
+  buildEcommerceGenerationPrompt,
+  buildEcommerceReferenceImages,
+  ecommerceUploadKindLimit,
+  getEcommerceImageFiles,
+  isValidEcommerceUploadImage,
+  type EcommerceGenerateRequest,
+  type EcommerceLanguage,
+  type EcommerceProductInfo,
+  type EcommerceUploadKind,
+} from "@/app/image/ecommerce-utils";
 import { ImagePromptMarket } from "@/app/image/components/image-prompt-market";
 import { ImageResults, type ImageLightboxItem } from "@/app/image/components/image-results";
 import type { BananaPrompt } from "@/app/image/banana-prompts";
@@ -998,10 +1015,21 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
   const composerDockRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const ecommerceFileInputRef = useRef<HTMLInputElement>(null);
+  const pendingEcommerceUploadKindRef = useRef<EcommerceUploadKind>("material");
   const editFileInputRef = useRef<HTMLInputElement>(null);
   const promptApplyRequestIdRef = useRef(0);
 
   const [imagePrompt, setImagePrompt] = useState("");
+  const [isEcommerceMode, setIsEcommerceMode] = useState(false);
+  const [ecommerceUploadKind, setEcommerceUploadKind] = useState<EcommerceUploadKind>("material");
+  const [ecommerceMaterialImages, setEcommerceMaterialImages] = useState<StoredReferenceImage[]>([]);
+  const [ecommerceEffectReferenceImages, setEcommerceEffectReferenceImages] = useState<StoredReferenceImage[]>([]);
+  const [ecommerceProductInfo, setEcommerceProductInfo] = useState<EcommerceProductInfo | null>(null);
+  const [ecommerceLanguage, setEcommerceLanguage] = useState<EcommerceLanguage>("简体中文");
+  const [ecommerceCount, setEcommerceCount] = useState(1);
+  const [isEcommerceAnalyzing, setIsEcommerceAnalyzing] = useState(false);
+  const [isEcommerceGenerating, setIsEcommerceGenerating] = useState(false);
   const [composerMode, setComposerMode] = useState<ComposerMode>(getStoredComposerMode);
   const [imageModel, setImageModel] = useState<ImageModel>(getStoredImageModel);
   const [imageCount, setImageCount] = useState("1");
@@ -1332,6 +1360,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     const handleOpenConversation = (event: Event) => {
       const conversationId = (event as CustomEvent<{ conversationId?: string }>).detail?.conversationId;
       if (conversationId) {
+        setIsEcommerceMode(false);
         setSelectedConversationId(conversationId);
       }
     };
@@ -1480,9 +1509,26 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     clearComposerInputs();
   }, [clearComposerInputs]);
 
+  const clearEcommerceInputs = useCallback(() => {
+    pendingEcommerceUploadKindRef.current = "material";
+    setEcommerceUploadKind("material");
+    setEcommerceMaterialImages([]);
+    setEcommerceEffectReferenceImages([]);
+    setEcommerceProductInfo(null);
+    setEcommerceLanguage("简体中文");
+    setEcommerceCount(1);
+    setIsEcommerceAnalyzing(false);
+    setIsEcommerceGenerating(false);
+    if (ecommerceFileInputRef.current) {
+      ecommerceFileInputRef.current.value = "";
+    }
+  }, []);
+
   const handleComposerModeChange = useCallback((mode: ComposerMode) => {
     setComposerMode(mode);
     if (mode === "chat") {
+      setIsEcommerceMode(false);
+      clearEcommerceInputs();
       promptApplyRequestIdRef.current += 1;
       setDefaultImageVisibility("private");
       setReferenceImages([]);
@@ -1490,17 +1536,49 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
         fileInputRef.current.value = "";
       }
     }
-  }, []);
+  }, [clearEcommerceInputs]);
+
+  const handleOpenHome = () => {
+    setIsEcommerceMode(false);
+    clearEcommerceInputs();
+    setSelectedConversationId(null);
+    resetComposer();
+  };
 
   const handleCreateDraft = () => {
+    setIsEcommerceMode(false);
+    clearEcommerceInputs();
     setSelectedConversationId(null);
     resetComposer();
     textareaRef.current?.focus();
   };
 
+  const handleOpenEcommerce = () => {
+    setIsEcommerceMode(true);
+    setSelectedConversationId(null);
+    resetComposer();
+    clearEcommerceInputs();
+    setComposerMode("image");
+    setImageModel(DEFAULT_IMAGE_MODEL);
+    textareaRef.current?.focus();
+  };
+
+  const handlePickEcommerceUpload = useCallback((kind: EcommerceUploadKind) => {
+    pendingEcommerceUploadKindRef.current = kind;
+    setEcommerceUploadKind(kind);
+    window.setTimeout(() => ecommerceFileInputRef.current?.click(), 0);
+  }, []);
+
+  const handleSelectConversation = (id: string) => {
+    setIsEcommerceMode(false);
+    setSelectedConversationId(id);
+  };
+
   const handleApplyPromptPreset = useCallback(async (preset: ImagePromptPreset) => {
     const requestId = promptApplyRequestIdRef.current + 1;
     promptApplyRequestIdRef.current = requestId;
+    setIsEcommerceMode(false);
+    clearEcommerceInputs();
     setSelectedConversationId(null);
     setComposerMode("image");
     setImagePrompt(preset.prompt);
@@ -1539,13 +1617,15 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
       toast.dismiss(toastId);
       toast.error("已套用提示词，但参考图读取失败");
     }
-  }, []);
+  }, [clearEcommerceInputs]);
 
   const handleApplyMarketPrompt = useCallback(async (prompt: BananaPrompt) => {
     const referenceImageUrls = getPromptReferenceImageUrls(prompt);
     const requestId = promptApplyRequestIdRef.current + 1;
     promptApplyRequestIdRef.current = requestId;
 
+    setIsEcommerceMode(false);
+    clearEcommerceInputs();
     setSelectedConversationId(null);
     setComposerMode("image");
     setImagePrompt(prompt.prompt);
@@ -1591,7 +1671,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     } else {
       toast.error("已套用提示词，但参考图读取失败");
     }
-  }, []);
+  }, [clearEcommerceInputs]);
 
   const handleDeleteConversation = async (id: string) => {
     const nextConversations = conversations.filter((item) => item.id !== id);
@@ -1676,15 +1756,86 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     }
   }, []);
 
+  const analyzeEcommerceImages = useCallback(async (images: StoredReferenceImage[]) => {
+    if (images.length === 0) {
+      return;
+    }
+    setIsEcommerceAnalyzing(true);
+    setEcommerceProductInfo(null);
+    try {
+      const info = await analyzeEcommerceProductImages(images, ECOMMERCE_CATEGORY_NAME);
+      setEcommerceProductInfo(info);
+      toast.success("产品信息已识别");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "产品识别失败");
+    } finally {
+      setIsEcommerceAnalyzing(false);
+    }
+  }, []);
+
+  const appendEcommerceImages = useCallback(
+    async (files: File[], kind: EcommerceUploadKind = ecommerceUploadKind) => {
+      const imageFiles = getEcommerceImageFiles(files);
+      if (imageFiles.length === 0) {
+        toast.error("请上传 png、jpeg 或 webp 格式的图片");
+        return;
+      }
+      const validFiles = imageFiles.filter(isValidEcommerceUploadImage);
+      if (validFiles.length === 0) {
+        toast.error("图片格式仅支持 png、jpeg、webp，且单张不超过 15MB");
+        return;
+      }
+
+      try {
+        if (kind === "reference") {
+          const nextImages = await buildEcommerceReferenceImages(validFiles, EFFECT_REFERENCE_IMAGE_LIMIT);
+          setEcommerceEffectReferenceImages(nextImages);
+          if (validFiles.length > EFFECT_REFERENCE_IMAGE_LIMIT) {
+            toast.info("参考图片最多上传 1 张，已取第一张");
+          }
+          return;
+        }
+
+        const remaining = Math.max(0, MATERIAL_IMAGE_LIMIT - ecommerceMaterialImages.length);
+        if (remaining === 0) {
+          toast.error(`素材图片最多上传 ${MATERIAL_IMAGE_LIMIT} 张`);
+          return;
+        }
+        const uploadedImages = await buildEcommerceReferenceImages(validFiles, remaining);
+        const nextImages = [...ecommerceMaterialImages, ...uploadedImages];
+        setEcommerceMaterialImages(nextImages);
+        if (validFiles.length > remaining) {
+          toast.info(`素材图片最多上传 ${MATERIAL_IMAGE_LIMIT} 张，已取前 ${remaining} 张`);
+        }
+        await analyzeEcommerceImages(nextImages);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "读取图片失败");
+      } finally {
+        if (ecommerceFileInputRef.current) {
+          ecommerceFileInputRef.current.value = "";
+        }
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      }
+    },
+    [analyzeEcommerceImages, ecommerceMaterialImages, ecommerceUploadKind],
+  );
+
   const handleReferenceImageChange = useCallback(
     async (files: File[]) => {
       if (files.length === 0) {
         return;
       }
 
+      if (isEcommerceMode) {
+        await appendEcommerceImages(files, ecommerceUploadKind);
+        return;
+      }
+
       await appendReferenceImages(files);
     },
-    [appendReferenceImages],
+    [appendEcommerceImages, appendReferenceImages, ecommerceUploadKind, isEcommerceMode],
   );
 
   const handleRemoveReferenceImage = useCallback((index: number) => {
@@ -2538,8 +2689,125 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     [editingTurnDraft, runConversationQueue, updateConversation],
   );
 
+  const handleEcommerceGenerate = async (request: EcommerceGenerateRequest) => {
+    const prompt = request.prompt.trim();
+    if (!prompt) {
+      toast.error("请先生成产品信息模板");
+      return;
+    }
+    if (request.materialImages.length === 0) {
+      toast.error("请先上传素材图片");
+      return;
+    }
+    if (request.effectReferenceImages.length === 0) {
+      toast.error("请先上传参考图片");
+      return;
+    }
+    if (request.referenceImages.length === 0) {
+      toast.error("请先上传图片");
+      return;
+    }
+    if (request.count > imageSingleCountLimit) {
+      toast.error(`超出单次出图数量限制（最多 ${imageSingleCountLimit} 张）`);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const conversationId = createId();
+    const turnId = createId();
+    const sizeSelection = serializeImageSizeSelection({
+      mode: "auto",
+      aspectRatio: "",
+      resolution: "auto",
+      customRatio: DEFAULT_IMAGE_CUSTOM_RATIO,
+      customWidth: DEFAULT_IMAGE_CUSTOM_WIDTH,
+      customHeight: DEFAULT_IMAGE_CUSTOM_HEIGHT,
+    });
+    const draftTurn: ImageTurn = {
+      id: turnId,
+      prompt,
+      model: DEFAULT_IMAGE_MODEL,
+      mode: "image",
+      referenceImages: request.referenceImages,
+      count: request.count,
+      size: "",
+      sizeSelection,
+      quality: undefined,
+      outputFormat: DEFAULT_IMAGE_OUTPUT_FORMAT,
+      outputCompression: undefined,
+      visibility: defaultImageVisibility,
+      images: Array.from({ length: request.count }, (_, index) => ({
+        id: `${turnId}-${index}`,
+        taskId: imageTaskBatchId(turnId, index),
+        status: "loading" as const,
+        visibility: defaultImageVisibility,
+      })),
+      createdAt: now,
+      status: "queued",
+    };
+    const conversation: ImageConversation = {
+      id: conversationId,
+      title: buildConversationTitle(`电商 ${request.categoryName} ${request.language}`),
+      createdAt: now,
+      updatedAt: now,
+      turns: [draftTurn],
+    };
+
+    updateTurnProgress(conversationId, turnId, {
+      message: "正在创建电商生图任务",
+      detail: `准备生成 ${request.count} 张${request.language}电商图`,
+    });
+    setSelectedConversationId(conversationId);
+    setIsEcommerceMode(false);
+    await persistConversation(conversation);
+    void runConversationQueue(conversationId);
+    toast.success("电商生图任务已加入队列");
+  };
+
   const handleSubmit = async () => {
     if (isSubmitDispatchingRef.current) {
+      return;
+    }
+
+    if (isEcommerceMode) {
+      if (ecommerceMaterialImages.length === 0) {
+        toast.error("请先上传素材图片");
+        return;
+      }
+      if (ecommerceEffectReferenceImages.length === 0) {
+        toast.error("请先上传参考图片");
+        return;
+      }
+      if (!ecommerceProductInfo) {
+        toast.error("请先上传素材图片并完成识别");
+        return;
+      }
+      if (ecommerceProductInfo.nameCategory === "未识别" && ecommerceProductInfo.features === "未识别") {
+        toast.error("产品信息未识别成功，请重新上传更清晰的素材图片");
+        return;
+      }
+      isSubmitDispatchingRef.current = true;
+      setIsEcommerceGenerating(true);
+      try {
+        await handleEcommerceGenerate({
+          prompt: buildEcommerceGenerationPrompt({
+            productInfo: ecommerceProductInfo,
+            customCopy: imagePrompt,
+            language: ecommerceLanguage,
+          }),
+          count: ecommerceCount,
+          language: ecommerceLanguage,
+          categoryName: ECOMMERCE_CATEGORY_NAME,
+          materialImages: ecommerceMaterialImages,
+          effectReferenceImages: ecommerceEffectReferenceImages,
+          referenceImages: [...ecommerceMaterialImages, ...ecommerceEffectReferenceImages],
+        });
+      } catch (error) {
+        toast.error(formatCreationTaskError(error, "提交电商任务失败"));
+      } finally {
+        isSubmitDispatchingRef.current = false;
+        setIsEcommerceGenerating(false);
+      }
       return;
     }
 
@@ -2661,15 +2929,33 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
 
   return (
     <>
+      <input
+        ref={ecommerceFileInputRef}
+        type="file"
+        accept={ECOMMERCE_IMAGE_ACCEPT}
+        multiple={ecommerceUploadKind === "material"}
+        className="hidden"
+        onChange={(event) => {
+          const files = Array.from(event.target.files || []);
+          const uploadKind = pendingEcommerceUploadKindRef.current;
+          if (files.length > 0) {
+            void appendEcommerceImages(files, uploadKind);
+          }
+          event.currentTarget.value = "";
+        }}
+      />
       <section className="mx-auto grid h-[calc(100dvh-6.25rem)] min-h-0 w-full max-w-[1380px] grid-cols-1 gap-2 px-0 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:h-[calc(100dvh-5rem)] sm:gap-3 sm:px-3 sm:pb-6 lg:grid-cols-[240px_minmax(0,1fr)]">
         <div className="hidden h-full min-h-0 border-r border-[#f2f3f5] pr-3 lg:block">
           <ImageSidebar
             conversations={conversations}
             isLoadingHistory={isLoadingHistory}
             selectedConversationId={selectedConversationId}
+            onOpenHome={handleOpenHome}
             onCreateDraft={handleCreateDraft}
             onClearHistory={openClearHistoryConfirm}
-            onSelectConversation={setSelectedConversationId}
+            onOpenEcommerce={handleOpenEcommerce}
+            isEcommerceActive={isEcommerceMode}
+            onSelectConversation={handleSelectConversation}
             onDeleteConversation={openDeleteConversationConfirm}
             formatConversationTime={formatConversationTime}
           />
@@ -2694,7 +2980,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                 }}
                 onClearHistory={openClearHistoryConfirm}
                 onSelectConversation={(id) => {
-                  setSelectedConversationId(id);
+                  handleSelectConversation(id);
                   setIsHistoryOpen(false);
                 }}
                 onDeleteConversation={openDeleteConversationConfirm}
@@ -3113,24 +3399,26 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
             className="hide-scrollbar min-h-0 flex-1 overflow-y-auto px-1 pt-2 pb-[14rem] sm:px-4 sm:pt-4 sm:pb-[15rem]"
             style={composerDockHeight > 0 ? { paddingBottom: composerDockHeight + 24 } : undefined}
           >
-            <ImageResults
-              selectedConversation={selectedConversation}
-              progressByTurnKey={progressByTurnKey}
-              progressNow={progressNow}
-              promptPresets={promptPresets}
-              canEditPromptTemplates={canEditPromptTemplates}
-              onUpdatePromptPreset={handleUpdatePromptPreset}
-              onOpenLightbox={openLightbox}
-              onApplyPromptPreset={handleApplyPromptPreset}
-              onContinueEdit={handleContinueEdit}
-              onEditTurn={openEditTurnDialog}
-              onCancelTurn={handleCancelTurn}
-              onRegenerateTurn={handleRegenerateTurn}
-              onRetryImage={handleRetryImage}
-              onImageVisibilityChange={handleImageVisibilityChange}
-              visibilityMutatingImageKey={visibilityMutatingImageKey}
-              formatConversationTime={formatConversationTime}
-            />
+            {!isEcommerceMode ? (
+              <ImageResults
+                selectedConversation={selectedConversation}
+                progressByTurnKey={progressByTurnKey}
+                progressNow={progressNow}
+                promptPresets={promptPresets}
+                canEditPromptTemplates={canEditPromptTemplates}
+                onUpdatePromptPreset={handleUpdatePromptPreset}
+                onOpenLightbox={openLightbox}
+                onApplyPromptPreset={handleApplyPromptPreset}
+                onContinueEdit={handleContinueEdit}
+                onEditTurn={openEditTurnDialog}
+                onCancelTurn={handleCancelTurn}
+                onRegenerateTurn={handleRegenerateTurn}
+                onRetryImage={handleRetryImage}
+                onImageVisibilityChange={handleImageVisibilityChange}
+                visibilityMutatingImageKey={visibilityMutatingImageKey}
+                formatConversationTime={formatConversationTime}
+              />
+            ) : null}
           </div>
 
           <div
@@ -3162,6 +3450,61 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                 imageOutputCompression={imageOutputCompression}
                 imageOutputHint={imageOutputHint}
                 referenceImages={referenceImages}
+                uploadButtonPlacement={isEcommerceMode ? "prompt" : "toolbar"}
+                hideToolbarControls={isEcommerceMode}
+                uploadOptions={
+                  isEcommerceMode
+                    ? [
+                        {
+                          label: "上传素材图片",
+                          description: `用户自己的产品图片，最多 ${MATERIAL_IMAGE_LIMIT} 张`,
+                          active: ecommerceUploadKind === "material",
+                          onSelect: () => handlePickEcommerceUpload("material"),
+                        },
+                        {
+                          label: "上传参考图片",
+                          description: `别人产品的效果参考，最多 ${EFFECT_REFERENCE_IMAGE_LIMIT} 张`,
+                          active: ecommerceUploadKind === "reference",
+                          onSelect: () => handlePickEcommerceUpload("reference"),
+                        },
+                      ]
+                    : undefined
+                }
+                extraPanel={
+                  isEcommerceMode ? (
+                    <EcommerceComposerPanel
+                      materialImages={ecommerceMaterialImages}
+                      effectReferenceImages={ecommerceEffectReferenceImages}
+                      productInfo={ecommerceProductInfo}
+                      customCopy={imagePrompt}
+                      language={ecommerceLanguage}
+                      count={ecommerceCount}
+                      imageCountLimit={imageSingleCountLimit}
+                      isAnalyzing={isEcommerceAnalyzing}
+                      onClearMaterialImages={() => {
+                        setEcommerceMaterialImages([]);
+                        setEcommerceProductInfo(null);
+                      }}
+                      onClearEffectReferenceImages={() => setEcommerceEffectReferenceImages([])}
+                      onReanalyze={() => void analyzeEcommerceImages(ecommerceMaterialImages)}
+                      onLanguageChange={setEcommerceLanguage}
+                      onCountChange={setEcommerceCount}
+                    />
+                  ) : undefined
+                }
+                promptPlaceholder={isEcommerceMode ? "输入自定义文案，可留空" : undefined}
+                submitDisabled={
+                  isEcommerceMode
+                    ? isEcommerceAnalyzing ||
+                      isEcommerceGenerating ||
+                      ecommerceMaterialImages.length === 0 ||
+                      ecommerceEffectReferenceImages.length === 0 ||
+                      !ecommerceProductInfo
+                    : undefined
+                }
+                submitLabelOverride={isEcommerceMode ? "生成电商图" : undefined}
+                fileAccept={isEcommerceMode ? ECOMMERCE_IMAGE_ACCEPT : undefined}
+                fileMultiple={isEcommerceMode ? ecommerceUploadKind === "material" : undefined}
                 textareaRef={textareaRef}
                 fileInputRef={fileInputRef}
                 onComposerModeChange={handleComposerModeChange}

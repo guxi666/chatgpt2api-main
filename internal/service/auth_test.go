@@ -448,6 +448,66 @@ func TestAuthServiceManagedUsersGroupAndControlCredentials(t *testing.T) {
 	}
 }
 
+func TestEmailBillingServiceSyncsStoredEmailUsersToPasswordAccounts(t *testing.T) {
+	dir := t.TempDir()
+	backend := storage.NewJSONBackend(
+		filepath.Join(dir, "accounts.json"),
+		filepath.Join(dir, "auth_keys.json"),
+	)
+	auth := NewAuthService(backend)
+
+	userID := "email:user-1"
+	apiKey, _, err := auth.CreateAPIKey(AuthRoleUser, "Alice", AuthOwner{
+		ID:       userID,
+		Name:     "Alice",
+		Provider: AuthProviderEmail,
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIKey() error = %v", err)
+	}
+	authKeyID, _ := apiKey["id"].(string)
+	passwordHash, err := hashAccountPassword("Password123")
+	if err != nil {
+		t.Fatalf("hashAccountPassword() error = %v", err)
+	}
+	if err := backend.SaveJSONDocument("billing.json", map[string]any{
+		"users": []map[string]any{{
+			"id":            userID,
+			"email":         "alice@qq.com",
+			"provider":      AuthProviderEmail,
+			"name":          "Alice",
+			"invite_code":   "ALICE1",
+			"password_hash": passwordHash,
+			"auth_key_id":   authKeyID,
+			"enabled":       true,
+			"created_at":    "2026-06-01T00:00:00Z",
+			"updated_at":    "2026-06-01T00:00:00Z",
+		}},
+	}); err != nil {
+		t.Fatalf("SaveJSONDocument(billing) error = %v", err)
+	}
+	if auth.HasPasswordEmailAccount("alice@qq.com") {
+		t.Fatal("email user unexpectedly had a password account before billing load")
+	}
+
+	_ = NewEmailBillingService(dir, backend, auth)
+
+	if !auth.HasPasswordEmailAccount("alice@qq.com") {
+		t.Fatal("stored email user was not synced to a password account")
+	}
+	identity, rawSession, err := auth.LoginPassword("alice@qq.com", "Password123")
+	if err != nil {
+		t.Fatalf("LoginPassword(email) error = %v", err)
+	}
+	if identity == nil || identity.ID != userID || identity.Name != "Alice" || identity.Provider != AuthProviderLocal || rawSession == "" {
+		t.Fatalf("synced login identity=%#v raw=%q", identity, rawSession)
+	}
+	user := findAuthUser(auth.ListUsers(), userID)
+	if user == nil || user["username"] != "alice@qq.com" || user["email"] != "alice@qq.com" {
+		t.Fatalf("synced managed user = %#v in %#v", user, auth.ListUsers())
+	}
+}
+
 func findAuthUser(users []map[string]any, id string) map[string]any {
 	for _, user := range users {
 		if user["id"] == id {

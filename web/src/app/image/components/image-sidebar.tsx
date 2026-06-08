@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, MessageSquarePlus, Trash2 } from "lucide-react";
+import { Home as HomeIcon, LoaderCircle, MessageSquarePlus, ShoppingCart, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -10,9 +10,12 @@ type ImageSidebarProps = {
   conversations: ImageConversation[];
   isLoadingHistory: boolean;
   selectedConversationId: string | null;
+  onOpenHome?: () => void;
   onCreateDraft: () => void;
   onClearHistory: () => void | Promise<void>;
   onSelectConversation: (id: string) => void;
+  onOpenEcommerce?: () => void;
+  isEcommerceActive?: boolean;
   onDeleteConversation: (id: string) => void | Promise<void>;
   formatConversationTime: (value: string) => string;
   hideActionButtons?: boolean;
@@ -22,9 +25,12 @@ export function ImageSidebar({
   conversations,
   isLoadingHistory,
   selectedConversationId,
+  onOpenHome,
   onCreateDraft,
   onClearHistory,
   onSelectConversation,
+  onOpenEcommerce,
+  isEcommerceActive = false,
   onDeleteConversation,
   formatConversationTime,
   hideActionButtons = false,
@@ -34,16 +40,43 @@ export function ImageSidebar({
       <div className="flex h-full min-h-0 flex-col gap-2 py-1 sm:gap-3 sm:py-2">
         {!hideActionButtons && (
           <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <Button className="h-10 flex-1 rounded-full" onClick={onCreateDraft}>
+            <Button
+              className="h-10 w-full justify-start rounded-full bg-[#181e25] text-white shadow-sm hover:bg-[#2a323d]"
+              onClick={onOpenHome || onCreateDraft}
+            >
+              <HomeIcon className="size-4" />
+              首页
+            </Button>
+            <Button
+              className="h-10 w-full justify-start rounded-full bg-[#181e25] text-white shadow-sm hover:bg-[#2a323d]"
+              onClick={onCreateDraft}
+            >
                 <MessageSquarePlus className="size-4" />
                 新建对话
-              </Button>
+            </Button>
+            {onOpenEcommerce ? (
               <Button
                 variant="outline"
-                className="h-10 rounded-full border-[#e5e7eb] bg-white px-3 text-[#45515e] hover:bg-black/[0.05]"
+                className={cn(
+                  "h-10 w-full justify-start rounded-full",
+                  isEcommerceActive
+                    ? "border-[#f2c3a3] bg-[#fff0e4] text-[#d7651f] hover:bg-[#fff0e4] hover:text-[#d7651f]"
+                    : "border-[#f2c3a3] bg-[#fff7f1] text-[#d7651f] hover:bg-[#fff0e4] hover:text-[#d7651f]",
+                )}
+                onClick={onOpenEcommerce}
+              >
+                  <ShoppingCart className="size-4" />
+                  电商专区
+              </Button>
+            ) : null}
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                className="h-9 rounded-full border-[#e5e7eb] bg-white px-3 text-[#45515e] hover:bg-black/[0.05]"
                 onClick={() => void onClearHistory()}
                 disabled={conversations.length === 0}
+                aria-label="清空历史记录"
+                title="清空历史记录"
               >
                 <Trash2 className="size-4" />
               </Button>

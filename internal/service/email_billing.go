@@ -218,8 +218,44 @@ func NewEmailBillingService(dataDir string, backend storage.Backend, auth *AuthS
 	}
 	s.mu.Lock()
 	s.loadLocked()
+	users := s.billingUsersSnapshotLocked()
 	s.mu.Unlock()
+	s.syncPasswordAccountsForUsers(users)
 	return s
+}
+
+func (s *EmailBillingService) billingUsersSnapshotLocked() []*billingUser {
+	users := make([]*billingUser, 0, len(s.users))
+	for _, user := range s.users {
+		if user == nil {
+			continue
+		}
+		copyUser := *user
+		users = append(users, &copyUser)
+	}
+	return users
+}
+
+func (s *EmailBillingService) syncPasswordAccountsForUsers(users []*billingUser) {
+	for _, user := range users {
+		_ = s.syncPasswordAccountForUser(user)
+	}
+}
+
+func (s *EmailBillingService) syncPasswordAccountForUser(user *billingUser) error {
+	if s == nil || s.auth == nil || user == nil {
+		return nil
+	}
+	return s.auth.EnsurePasswordEmailAccount(
+		user.ID,
+		user.Email,
+		user.Name,
+		user.PasswordHash,
+		user.Enabled,
+		user.CreatedAt,
+		user.UpdatedAt,
+		user.LastLoginAt,
+	)
 }
 
 func (s *EmailBillingService) RegisterEmailUser(email, password, name, verifyCode, inviteCode string, imagePriceCents int, registerBonusTimes int, allowedDomains []string, smtpConfig EmailSMTPConfig) (map[string]any, string, error) {
@@ -373,6 +409,9 @@ func (s *EmailBillingService) RegisterEmailUser(email, password, name, verifyCod
 			Kind:    AuthKindAPIKey,
 			OwnerID: userID,
 		})
+		return nil, "", err
+	}
+	if err := s.syncPasswordAccountForUser(user); err != nil {
 		return nil, "", err
 	}
 	return publicBillingUser(user), rawKey, nil

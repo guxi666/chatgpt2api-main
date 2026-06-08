@@ -173,7 +173,16 @@ func (c *Client) StreamConversation(ctx context.Context, messages []map[string]a
 			return
 		}
 		path, timezoneName := c.chatTarget()
-		payload := c.conversationPayload(messages, model, timezoneName, systemHints)
+		var references []UploadedFile
+		for index, imageRef := range images {
+			uploaded, err := c.uploadImage(ctx, imageRef, fmt.Sprintf("image_%d.png", index+1))
+			if err != nil {
+				errCh <- err
+				return
+			}
+			references = append(references, uploaded)
+		}
+		payload := c.conversationPayloadWithReferences(messages, model, timezoneName, references, systemHints)
 		resp, err := c.postJSON(ctx, path, payload, c.conversationHeaders(path, reqs), true)
 		if err != nil {
 			errCh <- err
@@ -602,7 +611,11 @@ func (c *Client) chatTarget() (string, string) {
 }
 
 func (c *Client) conversationPayload(messages []map[string]any, model, timezoneName string, systemHintsValues ...[]string) map[string]any {
-	conversationMessages := []map[string]any{conversationUserMessage(conversationPrompt(messages))}
+	return c.conversationPayloadWithReferences(messages, model, timezoneName, nil, systemHintsValues...)
+}
+
+func (c *Client) conversationPayloadWithReferences(messages []map[string]any, model, timezoneName string, references []UploadedFile, systemHintsValues ...[]string) map[string]any {
+	conversationMessages := []map[string]any{conversationUserMessage(conversationPrompt(messages), references)}
 	var systemHints []any
 	if len(systemHintsValues) > 0 {
 		for _, hint := range systemHintsValues[0] {
@@ -696,17 +709,43 @@ func conversationRoleLabel(role string) string {
 	}
 }
 
-func conversationUserMessage(content string) map[string]any {
+func conversationUserMessage(content string, references []UploadedFile) map[string]any {
+	messageContent := map[string]any{"content_type": "text", "parts": []any{content}}
+	metadata := map[string]any{
+		"selected_github_repos":     []any{},
+		"selected_all_github_repos": false,
+		"serialization_metadata":    map[string]any{"custom_symbol_offsets": []any{}},
+	}
+	if len(references) > 0 {
+		parts := make([]any, 0, len(references)+1)
+		attachments := make([]any, 0, len(references))
+		for _, item := range references {
+			parts = append(parts, map[string]any{
+				"content_type":  "image_asset_pointer",
+				"asset_pointer": "file-service://" + item.FileID,
+				"width":         item.Width,
+				"height":        item.Height,
+				"size_bytes":    item.FileSize,
+			})
+			attachments = append(attachments, map[string]any{
+				"id":       item.FileID,
+				"mimeType": item.MimeType,
+				"name":     item.FileName,
+				"size":     item.FileSize,
+				"width":    item.Width,
+				"height":   item.Height,
+			})
+		}
+		parts = append(parts, content)
+		messageContent = map[string]any{"content_type": "multimodal_text", "parts": parts}
+		metadata["attachments"] = attachments
+	}
 	return map[string]any{
 		"id":          util.NewUUID(),
 		"author":      map[string]any{"role": "user"},
 		"create_time": float64(time.Now().UnixNano()) / 1e9,
-		"content":     map[string]any{"content_type": "text", "parts": []any{content}},
-		"metadata": map[string]any{
-			"selected_github_repos":     []any{},
-			"selected_all_github_repos": false,
-			"serialization_metadata":    map[string]any{"custom_symbol_offsets": []any{}},
-		},
+		"content":     messageContent,
+		"metadata":    metadata,
 	}
 }
 

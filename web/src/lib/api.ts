@@ -554,7 +554,7 @@ export type CreationTask = {
 
 export type CreationTaskMessage = {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  content: string | Array<{ type: string; text?: string; image_url?: { url: string } | string }>;
 };
 
 export type ChatCompletionResponse = {
@@ -1391,6 +1391,7 @@ export async function createChatCompletionTask(
   prompt: string,
   model: ImageModel,
   messages: CreationTaskMessage[],
+  images?: string[],
 ) {
   return httpRequest<CreationTask>("/api/creation-tasks/chat-completions", {
     method: "POST",
@@ -1399,6 +1400,7 @@ export async function createChatCompletionTask(
       prompt,
       model,
       messages,
+      ...(images?.length ? { images } : {}),
     },
   });
 }

@@ -130,7 +130,7 @@ func TestImageTaskServiceRejectsBlankPromptBeforeQueueing(t *testing.T) {
 			return svc.SubmitEdit(context.Background(), identity, "task-2", "\t", "gpt-image-2", "1024x1024", "high", "https://base.test", []any{"image"}, 1, nil)
 		},
 		"chat": func() (map[string]any, error) {
-			return svc.SubmitChat(context.Background(), identity, "task-3", " ", "auto", []map[string]any{{"role": "user", "content": "hello"}})
+			return svc.SubmitChat(context.Background(), identity, "task-3", " ", "auto", []map[string]any{{"role": "user", "content": "hello"}}, nil)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -223,7 +223,7 @@ func TestImageTaskServiceSubmitsChatTasks(t *testing.T) {
 	identity := Identity{ID: "alice", Name: "Alice", Role: "user"}
 	messages := []map[string]any{{"role": "user", "content": "hello"}}
 
-	if _, err := svc.SubmitChat(context.Background(), identity, "chat-1", "hello", "auto", messages); err != nil {
+	if _, err := svc.SubmitChat(context.Background(), identity, "chat-1", "hello", "auto", messages, nil); err != nil {
 		t.Fatalf("SubmitChat() error = %v", err)
 	}
 	waitForTaskStatus(t, svc, identity, "chat-1", TaskStatusSuccess)

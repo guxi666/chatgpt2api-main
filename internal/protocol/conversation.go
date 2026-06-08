@@ -270,7 +270,7 @@ func (e *Engine) StreamTextDeltas(ctx context.Context, client *backend.Client, r
 	go func() {
 		defer close(out)
 		defer close(errCh)
-		events, convErr := e.ConversationEvents(ctx, client, request.Messages, request.Model, request.Prompt, nil, "", "")
+		events, convErr := e.ConversationEvents(ctx, client, request.Messages, request.Model, request.Prompt, request.Images, "", "")
 		for event := range events {
 			if event["type"] != "conversation.delta" {
 				continue
@@ -359,6 +359,7 @@ func (e *Engine) ConversationEvents(ctx context.Context, client *backend.Client,
 			systemHints = []string{"picture_v2"}
 			streamImages = images
 		} else {
+			streamImages = images
 			historyText = AssistantHistoryText(normalized)
 			historyMessages = AssistantHistoryMessages(normalized)
 		}

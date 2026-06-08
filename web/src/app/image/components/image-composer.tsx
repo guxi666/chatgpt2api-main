@@ -64,6 +64,20 @@ type ImageComposerProps = {
   imageOutputCompression: string;
   imageOutputHint: ReactNode;
   referenceImages: Array<{ name: string; dataUrl: string }>;
+  extraPanel?: ReactNode;
+  uploadOptions?: ReadonlyArray<{
+    label: string;
+    description: string;
+    active?: boolean;
+    onSelect: () => void;
+  }>;
+  uploadButtonPlacement?: "toolbar" | "prompt";
+  hideToolbarControls?: boolean;
+  promptPlaceholder?: string;
+  submitDisabled?: boolean;
+  submitLabelOverride?: string;
+  fileAccept?: string;
+  fileMultiple?: boolean;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   fileInputRef: RefObject<HTMLInputElement | null>;
   onComposerModeChange: (mode: "chat" | "image") => void;
@@ -153,6 +167,15 @@ export function ImageComposer({
   imageOutputCompression,
   imageOutputHint,
   referenceImages,
+  extraPanel,
+  uploadOptions,
+  uploadButtonPlacement = "toolbar",
+  hideToolbarControls = false,
+  promptPlaceholder,
+  submitDisabled,
+  submitLabelOverride,
+  fileAccept = "image/*",
+  fileMultiple = true,
   textareaRef,
   fileInputRef,
   onComposerModeChange,
@@ -181,6 +204,7 @@ export function ImageComposer({
   const [isQualityMenuOpen, setIsQualityMenuOpen] = useState(false);
   const [isOutputHintOpen, setIsOutputHintOpen] = useState(false);
   const [isImageSettingsOpen, setIsImageSettingsOpen] = useState(false);
+  const [isUploadMenuOpen, setIsUploadMenuOpen] = useState(false);
   const [promptAreaHeight, setPromptAreaHeight] = useState(PROMPT_AREA_DEFAULT_HEIGHT);
   const [isPromptAreaResizing, setIsPromptAreaResizing] = useState(false);
   const [isReferenceImageDragActive, setIsReferenceImageDragActive] = useState(false);
@@ -214,7 +238,7 @@ export function ImageComposer({
     IMAGE_OUTPUT_FORMAT_OPTIONS.find((option) => option.value === imageOutputFormat)?.label || imageOutputFormat.toUpperCase();
   const compressionDisabled = imageOutputFormat === "png";
   const supportsQuality = false;
-  const submitLabel = composerMode === "chat" ? "发送对话" : referenceImages.length > 0 ? "编辑图片" : "生成图片";
+  const submitLabel = submitLabelOverride || (composerMode === "chat" ? "发送对话" : referenceImages.length > 0 ? "编辑图片" : "生成图片");
   const computedImageSize = useMemo(
     () =>
       buildImageSize({
@@ -467,13 +491,90 @@ export function ImageComposer({
     }
   };
 
+  const renderUploadControl = (placement: "toolbar" | "prompt") => {
+    const inPrompt = placement === "prompt";
+    const buttonClassName = inPrompt
+      ? cn(
+          "inline-flex size-9 items-center justify-center rounded-full border border-[#e5e7eb] bg-white text-[#45515e] shadow-sm transition hover:border-[#bfdbfe] hover:text-[#1456f0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1456f0]/30",
+          isUploadMenuOpen && "border-[#bfdbfe] bg-[#eef4ff] text-[#1456f0]",
+        )
+      : cn(
+          "inline-flex size-11 items-center justify-center rounded-full text-[#686b73] transition hover:bg-black/[0.05] dark:text-muted-foreground dark:hover:bg-accent/60 dark:hover:text-foreground sm:size-10 sm:border sm:border-[#e5e7eb] sm:bg-white sm:text-[#45515e] sm:dark:border-border sm:dark:bg-background/70 sm:dark:text-muted-foreground",
+          isUploadMenuOpen &&
+            "bg-[#eef4ff] text-[#1456f0] sm:border-[#bfdbfe] sm:bg-[#eef4ff] sm:text-[#1456f0]",
+        );
+
+    if (uploadOptions && uploadOptions.length > 0) {
+      return (
+        <Popover open={isUploadMenuOpen} onOpenChange={setIsUploadMenuOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={buttonClassName}
+              aria-label="选择上传图片类型"
+              title="上传图片"
+            >
+              <ImagePlus className={cn(inPrompt ? "size-4" : "hidden size-4 sm:block")} />
+              {!inPrompt ? <Plus className="size-6 sm:hidden" /> : null}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            align={inPrompt ? "start" : "end"}
+            side="top"
+            sideOffset={8}
+            className="z-[80] w-[min(calc(100vw-1rem),18rem)] rounded-[18px] border-[#e5e7eb] bg-white p-2 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)]"
+            onOpenAutoFocus={(event) => event.preventDefault()}
+          >
+            <div className="grid gap-1">
+              {uploadOptions.map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  className={cn(
+                    "flex w-full items-start gap-2 rounded-xl px-3 py-2 text-left transition hover:bg-black/[0.04]",
+                    option.active && "bg-[#eef4ff]",
+                  )}
+                  onClick={() => {
+                    setIsUploadMenuOpen(false);
+                    option.onSelect();
+                  }}
+                >
+                  <ImagePlus className={cn("mt-0.5 size-4 shrink-0", option.active ? "text-[#1456f0]" : "text-[#686b73]")} />
+                  <span className="min-w-0">
+                    <span className={cn("block text-sm font-semibold", option.active ? "text-[#1456f0]" : "text-[#181e25]")}>
+                      {option.label}
+                    </span>
+                    <span className="mt-0.5 block text-xs leading-5 text-[#686b73]">{option.description}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
+      );
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={handlePickReferenceImage}
+        className={buttonClassName}
+        aria-label="上传参考图"
+        title="上传参考图"
+      >
+        <ImagePlus className={cn(inPrompt ? "size-4" : "hidden size-4 sm:block")} />
+        {!inPrompt ? <Plus className="size-6 sm:hidden" /> : null}
+      </button>
+    );
+  };
+
   return (
     <ImageComposerDock>
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
-        multiple
+        accept={fileAccept}
+        multiple={fileMultiple}
         className="hidden"
         onChange={(event) => {
           const files = Array.from(event.target.files || []);
@@ -572,27 +673,43 @@ export function ImageComposer({
             onOpenChange={setLightboxOpen}
             onIndexChange={setLightboxIndex}
           />
-          <Textarea
-            ref={textareaRef}
-            value={prompt}
-            onChange={(event) => onPromptChange(event.target.value)}
-            onPaste={handleTextareaPaste}
-            placeholder={
-              composerMode === "chat"
-                ? "输入消息与AI聊天"
-                : referenceImages.length > 0
-                ? "描述你希望如何修改参考图"
-                : "输入你想要生成的画面，也可直接粘贴图片"
-            }
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void onSubmit();
+          {extraPanel ? (
+            <div className="px-3 pt-3 sm:px-4" onClick={(event) => event.stopPropagation()}>
+              {extraPanel}
+            </div>
+          ) : null}
+          <div className="relative">
+            {uploadButtonPlacement === "prompt" ? (
+              <div className="absolute left-4 top-4 z-10 sm:left-4 sm:top-3.5" onClick={(event) => event.stopPropagation()}>
+                {renderUploadControl("prompt")}
+              </div>
+            ) : null}
+            <Textarea
+              ref={textareaRef}
+              value={prompt}
+              onChange={(event) => onPromptChange(event.target.value)}
+              onPaste={handleTextareaPaste}
+              placeholder={
+                promptPlaceholder ||
+                (composerMode === "chat"
+                  ? "输入消息与AI聊天"
+                  : referenceImages.length > 0
+                  ? "描述你希望如何修改参考图"
+                  : "输入你想要生成的画面，也可直接粘贴图片")
               }
-            }}
-            className="min-h-[96px] resize-none rounded-none border-0 bg-transparent px-6 pt-6 pb-2 text-[17px] leading-7 text-[#222222] shadow-none placeholder:text-[#8e8e93] focus-visible:ring-0 dark:text-foreground dark:placeholder:text-muted-foreground sm:min-h-0 sm:px-5 sm:py-4 sm:text-[15px] sm:leading-6"
-            style={{ height: promptAreaHeight }}
-          />
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void onSubmit();
+                }
+              }}
+              className={cn(
+                "min-h-[96px] resize-none rounded-none border-0 bg-transparent px-6 pt-6 pb-2 text-[17px] leading-7 text-[#222222] shadow-none placeholder:text-[#8e8e93] focus-visible:ring-0 dark:text-foreground dark:placeholder:text-muted-foreground sm:min-h-0 sm:px-5 sm:py-4 sm:text-[15px] sm:leading-6",
+                uploadButtonPlacement === "prompt" && "pl-16 sm:pl-16",
+              )}
+              style={{ height: promptAreaHeight }}
+            />
+          </div>
 
           <div
             ref={composerToolbarRef}
@@ -601,6 +718,8 @@ export function ImageComposer({
           >
             <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:gap-3">
               <div className="flex min-w-0 flex-nowrap items-center gap-1.5 sm:gap-2">
+                {!hideToolbarControls ? (
+                  <>
                 <div className="inline-flex h-9 shrink-0 items-center rounded-full bg-transparent p-0 text-xs font-medium text-[#45515e] dark:text-muted-foreground sm:h-8 sm:bg-[#f0f0f0] sm:p-0.5 sm:dark:bg-muted/70">
                   {[
                     { value: "chat" as const, label: "对话", icon: MessageCircle },
@@ -1145,24 +1264,17 @@ export function ImageComposer({
                     </PopoverContent>
                   </Popover>
                   ) : null}
+                  </>
+                ) : null}
               </div>
 
               <div className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handlePickReferenceImage}
-                  className="inline-flex size-11 items-center justify-center rounded-full text-[#686b73] transition hover:bg-black/[0.05] dark:text-muted-foreground dark:hover:bg-accent/60 dark:hover:text-foreground sm:size-10 sm:border sm:border-[#e5e7eb] sm:bg-white sm:text-[#45515e] sm:dark:border-border sm:dark:bg-background/70 sm:dark:text-muted-foreground"
-                  aria-label="上传参考图"
-                  title="上传参考图"
-                >
-                  <Plus className="size-6 sm:hidden" />
-                  <ImagePlus className="hidden size-4 sm:block" />
-                </button>
+                {uploadButtonPlacement === "toolbar" ? renderUploadControl("toolbar") : null}
 
                 <button
                   type="button"
                   onClick={() => void onSubmit()}
-                  disabled={!prompt.trim()}
+                  disabled={submitDisabled ?? !prompt.trim()}
                   className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-[#181e25] text-white shadow-[0_4px_10px_rgba(24,30,37,0.12)] transition hover:bg-[#2a323d] disabled:cursor-not-allowed disabled:bg-[#e1e2e4] disabled:text-[#73777f] dark:bg-foreground dark:text-background dark:hover:bg-foreground/90 dark:disabled:bg-muted dark:disabled:text-muted-foreground sm:size-10"
                   aria-label={submitLabel}
                   title={submitLabel}
