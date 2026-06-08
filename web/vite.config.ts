@@ -35,6 +35,7 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       output: {
+        codeSplitting: false,
         entryFileNames: (chunk) => `assets/e${buildFileSuffix}${hashName(chunkKey(chunk))}.js`,
         chunkFileNames: (chunk) => `assets/c${buildFileSuffix}${hashName(chunkKey(chunk))}.js`,
         assetFileNames: (asset) => {
