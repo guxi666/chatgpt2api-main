@@ -154,6 +154,14 @@ const DEFAULT_IMAGE_OUTPUT_FORMAT: ImageOutputFormat = "png";
 const activeConversationQueueIds = new Set<string>();
 const EMPTY_IMAGE_ASPECT_RATIO_SELECT_VALUE = "__empty_aspect_ratio__";
 const MISSING_RECOVERABLE_TASK_ID_ERROR = "页面刷新或任务中断，未找到可恢复的任务 ID";
+const ECOMMERCE_ANALYZING_PRODUCT_INFO: EcommerceProductInfo = {
+  nameCategory: "识别中",
+  features: "识别中",
+};
+const ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO: EcommerceProductInfo = {
+  nameCategory: "未识别",
+  features: "未识别",
+};
 
 type ComposerMode = "chat" | "image";
 
@@ -1026,6 +1034,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
   const [ecommerceMaterialImages, setEcommerceMaterialImages] = useState<StoredReferenceImage[]>([]);
   const [ecommerceEffectReferenceImages, setEcommerceEffectReferenceImages] = useState<StoredReferenceImage[]>([]);
   const [ecommerceProductInfo, setEcommerceProductInfo] = useState<EcommerceProductInfo | null>(null);
+  const [ecommerceAnalyzeError, setEcommerceAnalyzeError] = useState("");
   const [ecommerceLanguage, setEcommerceLanguage] = useState<EcommerceLanguage>("简体中文");
   const [ecommerceCount, setEcommerceCount] = useState(1);
   const [isEcommerceAnalyzing, setIsEcommerceAnalyzing] = useState(false);
@@ -1515,6 +1524,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     setEcommerceMaterialImages([]);
     setEcommerceEffectReferenceImages([]);
     setEcommerceProductInfo(null);
+    setEcommerceAnalyzeError("");
     setEcommerceLanguage("简体中文");
     setEcommerceCount(1);
     setIsEcommerceAnalyzing(false);
@@ -1758,16 +1768,22 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
 
   const analyzeEcommerceImages = useCallback(async (images: StoredReferenceImage[]) => {
     if (images.length === 0) {
+      setEcommerceProductInfo(null);
+      setEcommerceAnalyzeError("");
       return;
     }
     setIsEcommerceAnalyzing(true);
-    setEcommerceProductInfo(null);
+    setEcommerceAnalyzeError("");
+    setEcommerceProductInfo(ECOMMERCE_ANALYZING_PRODUCT_INFO);
     try {
       const info = await analyzeEcommerceProductImages(images, ECOMMERCE_CATEGORY_NAME);
       setEcommerceProductInfo(info);
       toast.success("产品信息已识别");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "产品识别失败");
+      const message = error instanceof Error ? error.message : "产品识别失败";
+      setEcommerceProductInfo(ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO);
+      setEcommerceAnalyzeError(message);
+      toast.error(message);
     } finally {
       setIsEcommerceAnalyzing(false);
     }
@@ -2699,10 +2715,6 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
       toast.error("请先上传素材图片");
       return;
     }
-    if (request.effectReferenceImages.length === 0) {
-      toast.error("请先上传参考图片");
-      return;
-    }
     if (request.referenceImages.length === 0) {
       toast.error("请先上传图片");
       return;
@@ -2772,10 +2784,6 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     if (isEcommerceMode) {
       if (ecommerceMaterialImages.length === 0) {
         toast.error("请先上传素材图片");
-        return;
-      }
-      if (ecommerceEffectReferenceImages.length === 0) {
-        toast.error("请先上传参考图片");
         return;
       }
       if (!ecommerceProductInfo) {
@@ -3463,7 +3471,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                         },
                         {
                           label: "上传参考图片",
-                          description: `别人产品的效果参考，最多 ${EFFECT_REFERENCE_IMAGE_LIMIT} 张`,
+                          description: `可选：别人产品的效果参考，最多 ${EFFECT_REFERENCE_IMAGE_LIMIT} 张`,
                           active: ecommerceUploadKind === "reference",
                           onSelect: () => handlePickEcommerceUpload("reference"),
                         },
@@ -3481,9 +3489,11 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                       count={ecommerceCount}
                       imageCountLimit={imageSingleCountLimit}
                       isAnalyzing={isEcommerceAnalyzing}
+                      analyzeError={ecommerceAnalyzeError}
                       onClearMaterialImages={() => {
                         setEcommerceMaterialImages([]);
                         setEcommerceProductInfo(null);
+                        setEcommerceAnalyzeError("");
                       }}
                       onClearEffectReferenceImages={() => setEcommerceEffectReferenceImages([])}
                       onReanalyze={() => void analyzeEcommerceImages(ecommerceMaterialImages)}
@@ -3498,7 +3508,6 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                     ? isEcommerceAnalyzing ||
                       isEcommerceGenerating ||
                       ecommerceMaterialImages.length === 0 ||
-                      ecommerceEffectReferenceImages.length === 0 ||
                       !ecommerceProductInfo
                     : undefined
                 }

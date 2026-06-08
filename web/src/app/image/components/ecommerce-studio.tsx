@@ -24,6 +24,7 @@ type EcommerceComposerPanelProps = {
   count: number;
   imageCountLimit: number;
   isAnalyzing: boolean;
+  analyzeError: string;
   onClearMaterialImages: () => void;
   onClearEffectReferenceImages: () => void;
   onReanalyze: () => void;
@@ -87,6 +88,7 @@ export function EcommerceComposerPanel({
   count,
   imageCountLimit,
   isAnalyzing,
+  analyzeError,
   onClearMaterialImages,
   onClearEffectReferenceImages,
   onReanalyze,
@@ -114,6 +116,11 @@ export function EcommerceComposerPanel({
           <div className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap text-xs leading-5 text-[#45515e]">
             {productInfo ? template : "上传素材图片后自动生成产品名称、品类和核心特征。自定义文案在下方输入框填写。"}
           </div>
+          {analyzeError ? (
+            <div className="mt-1 rounded-lg bg-[#fff7ed] px-2 py-1 text-xs leading-5 text-[#b45309]">
+              识别失败：{analyzeError}。可以点击重新识别，或上传更清晰的素材图片。
+            </div>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-2 gap-2 sm:w-[22rem]">
@@ -193,7 +200,7 @@ export function EcommerceComposerPanel({
       <div className="grid gap-2 lg:grid-cols-2">
         <UploadPreviewStrip label="素材图片" images={materialImages} limit={MATERIAL_IMAGE_LIMIT} onClear={onClearMaterialImages} />
         <UploadPreviewStrip
-          label="参考图片"
+          label="参考图片（可选）"
           images={effectReferenceImages}
           limit={EFFECT_REFERENCE_IMAGE_LIMIT}
           onClear={onClearEffectReferenceImages}
