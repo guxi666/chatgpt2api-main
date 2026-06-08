@@ -292,6 +292,8 @@ type DatabaseBackend struct {
 	db          *sql.DB
 }
 
+var databaseOperationTimeout = 10 * time.Second
+
 func NewDatabaseBackend(databaseURL string) (*DatabaseBackend, error) {
 	driver, dsn, err := parseDatabaseURL(databaseURL)
 	if err != nil {
@@ -408,7 +410,9 @@ func (b *DatabaseBackend) SaveAuthKey(item map[string]any) error {
 	} else if b.driver == "mysql" {
 		stmt = `INSERT INTO auth_keys (key_id, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)`
 	}
-	_, err = b.db.Exec(stmt, key, string(data))
+	ctx, cancel := context.WithTimeout(context.Background(), databaseOperationTimeout)
+	defer cancel()
+	_, err = b.db.ExecContext(ctx, stmt, key, string(data))
 	return err
 }
 
@@ -439,7 +443,9 @@ func (b *DatabaseBackend) Info() map[string]any {
 }
 
 func (b *DatabaseBackend) loadRows(table string) ([]map[string]any, error) {
-	rows, err := b.db.Query("SELECT data FROM " + table)
+	ctx, cancel := context.WithTimeout(context.Background(), databaseOperationTimeout)
+	defer cancel()
+	rows, err := b.db.QueryContext(ctx, "SELECT data FROM "+table)
 	if err != nil {
 		return nil, err
 	}
@@ -459,14 +465,16 @@ func (b *DatabaseBackend) loadRows(table string) ([]map[string]any, error) {
 }
 
 func (b *DatabaseBackend) saveRows(table, keyColumn string, items []map[string]any) error {
-	tx, err := b.db.Begin()
+	ctx, cancel := context.WithTimeout(context.Background(), databaseOperationTimeout)
+	defer cancel()
+	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		_ = tx.Rollback()
 	}()
-	if _, err := tx.Exec("DELETE FROM " + table); err != nil {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 		return err
 	}
 	sourceKey := "access_token"
@@ -477,7 +485,7 @@ func (b *DatabaseBackend) saveRows(table, keyColumn string, items []map[string]a
 	if b.driver == "postgres" {
 		stmtText = "INSERT INTO " + table + " (" + keyColumn + ", data) VALUES ($1, $2)"
 	}
-	stmt, err := tx.Prepare(stmtText)
+	stmt, err := tx.PrepareContext(ctx, stmtText)
 	if err != nil {
 		return err
 	}
@@ -491,7 +499,7 @@ func (b *DatabaseBackend) saveRows(table, keyColumn string, items []map[string]a
 		if err != nil {
 			continue
 		}
-		if _, err := stmt.Exec(key, string(data)); err != nil {
+		if _, err := stmt.ExecContext(ctx, key, string(data)); err != nil {
 			return err
 		}
 	}
@@ -499,8 +507,10 @@ func (b *DatabaseBackend) saveRows(table, keyColumn string, items []map[string]a
 }
 
 func (b *DatabaseBackend) count(table string) int {
+	ctx, cancel := context.WithTimeout(context.Background(), databaseOperationTimeout)
+	defer cancel()
 	var count int
-	_ = b.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
+	_ = b.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count)
 	return count
 }
 
@@ -510,7 +520,9 @@ func (b *DatabaseBackend) LoadJSONDocument(name string) (any, error) {
 		return nil, err
 	}
 	var text string
-	err = b.db.QueryRow("SELECT data FROM json_documents WHERE name = "+b.placeholder(1), rel).Scan(&text)
+	ctx, cancel := context.WithTimeout(context.Background(), databaseOperationTimeout)
+	defer cancel()
+	err = b.db.QueryRowContext(ctx, "SELECT data FROM json_documents WHERE name = "+b.placeholder(1), rel).Scan(&text)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -539,7 +551,9 @@ func (b *DatabaseBackend) SaveJSONDocument(name string, value any) error {
 	default:
 		stmt = "INSERT INTO json_documents (name, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at"
 	}
-	_, err = b.db.Exec(stmt, rel, string(data), now)
+	ctx, cancel := context.WithTimeout(context.Background(), databaseOperationTimeout)
+	defer cancel()
+	_, err = b.db.ExecContext(ctx, stmt, rel, string(data), now)
 	return err
 }
 
@@ -548,7 +562,9 @@ func (b *DatabaseBackend) DeleteJSONDocument(name string) error {
 	if err != nil {
 		return err
 	}
-	_, err = b.db.Exec("DELETE FROM json_documents WHERE name = "+b.placeholder(1), rel)
+	ctx, cancel := context.WithTimeout(context.Background(), databaseOperationTimeout)
+	defer cancel()
+	_, err = b.db.ExecContext(ctx, "DELETE FROM json_documents WHERE name = "+b.placeholder(1), rel)
 	return err
 }
 
@@ -570,7 +586,9 @@ func (b *DatabaseBackend) AppendLog(item map[string]any) error {
 	if day == "" {
 		day = time.Now().Format("2006-01-02")
 	}
-	_, err = b.db.Exec(
+	ctx, cancel := context.WithTimeout(context.Background(), databaseOperationTimeout)
+	defer cancel()
+	_, err = b.db.ExecContext(ctx,
 		"INSERT INTO logs (created_at, type, day, data) VALUES ("+b.placeholder(1)+", "+b.placeholder(2)+", "+b.placeholder(3)+", "+b.placeholder(4)+")",
 		createdAt,
 		logType,
@@ -600,7 +618,9 @@ func (b *DatabaseBackend) QueryLogs(startDate, endDate string, limit int) ([]map
 		args = append(args, limit)
 		query += " LIMIT " + b.placeholder(len(args))
 	}
-	rows, err := b.db.Query(query, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), databaseOperationTimeout)
+	defer cancel()
+	rows, err := b.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -627,7 +647,9 @@ func (b *DatabaseBackend) DeleteLogsBefore(day string) (int, error) {
 	if day == "" {
 		return 0, nil
 	}
-	result, err := b.db.Exec("DELETE FROM logs WHERE day < "+b.placeholder(1), day)
+	ctx, cancel := context.WithTimeout(context.Background(), databaseOperationTimeout)
+	defer cancel()
+	result, err := b.db.ExecContext(ctx, "DELETE FROM logs WHERE day < "+b.placeholder(1), day)
 	if err != nil {
 		return 0, err
 	}
