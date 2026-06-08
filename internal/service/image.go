@@ -118,7 +118,6 @@ func NewImageService(config ImageConfig, backend ...storage.Backend) *ImageServi
 }
 
 func (s *ImageService) ListImages(baseURL, startDate, endDate string, scope ImageAccessScope) map[string]any {
-	s.config.CleanupOldImages()
 	root := s.config.ImagesDir()
 	items := make([]map[string]any, 0)
 	localPaths := map[string]struct{}{}
