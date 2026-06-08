@@ -31,6 +31,7 @@ function errorMessageFromValue(value: unknown): string {
 const request = axios.create({
     baseURL: webConfig.apiUrl.replace(/\/$/, ""),
     withCredentials: true,
+    timeout: 12000,
 });
 
 request.interceptors.request.use(async (config) => {
@@ -63,12 +64,20 @@ request.interceptors.response.use(
         }
 
         const payload = error.response?.data;
-        const message =
+        const rawMessage =
             errorMessageFromValue(payload?.detail) ||
             errorMessageFromValue(payload?.error) ||
             payload?.message ||
             error.message ||
             `请求失败 (${status || 500})`;
+        const normalized = String(rawMessage || "").trim();
+        const normalizedLower = normalized.toLowerCase();
+        let message = normalized || `请求失败 (${status || 500})`;
+        if (error.code === "ECONNABORTED" || normalizedLower.includes("timeout")) {
+            message = "请求超时，请稍后重试";
+        } else if (!error.response || normalizedLower === "network error") {
+            message = "网络连接异常，请稍后重试";
+        }
         return Promise.reject(new Error(message));
     },
 );

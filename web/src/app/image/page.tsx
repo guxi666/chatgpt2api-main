@@ -12,9 +12,11 @@ import {
   EFFECT_REFERENCE_IMAGE_LIMIT,
   MATERIAL_IMAGE_LIMIT,
   analyzeEcommerceProductImages,
-  buildEcommerceGenerationPrompt,
+  buildEcommerceGenerationPromptFromPrompt,
+  buildEcommerceProductTemplate,
   buildEcommerceReferenceImages,
   ecommerceUploadKindLimit,
+  extractEcommerceCustomCopy,
   getEcommerceImageFiles,
   isValidEcommerceUploadImage,
   type EcommerceGenerateRequest,
@@ -710,6 +712,12 @@ function formatCreationTaskErrorMessage(message: string) {
   }
 
   const normalized = trimmed.toLowerCase();
+  if (normalized === "network error") {
+    return "网络连接异常，请稍后重试。";
+  }
+  if (normalized.includes("timeout")) {
+    return "请求超时，请稍后重试。";
+  }
   const upstreamError = parseCreationTaskErrorPayload(trimmed);
   const upstreamMessage = String(upstreamError?.message || "").toLowerCase();
   const upstreamCode = String(upstreamError?.code || "").toLowerCase();
@@ -1775,15 +1783,17 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     setIsEcommerceAnalyzing(true);
     setEcommerceAnalyzeError("");
     setEcommerceProductInfo(ECOMMERCE_ANALYZING_PRODUCT_INFO);
+    setImagePrompt((current) => buildEcommerceProductTemplate(ECOMMERCE_ANALYZING_PRODUCT_INFO, extractEcommerceCustomCopy(current)));
     try {
       const info = await analyzeEcommerceProductImages(images, ECOMMERCE_CATEGORY_NAME);
       setEcommerceProductInfo(info);
+      setImagePrompt((current) => buildEcommerceProductTemplate(info, extractEcommerceCustomCopy(current)));
       toast.success("产品信息已识别");
     } catch (error) {
       const message = error instanceof Error ? error.message : "产品识别失败";
       setEcommerceProductInfo(ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO);
       setEcommerceAnalyzeError(message);
-      toast.error(message);
+      setImagePrompt((current) => buildEcommerceProductTemplate(ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO, extractEcommerceCustomCopy(current)));
     } finally {
       setIsEcommerceAnalyzing(false);
     }
@@ -2770,7 +2780,6 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
       detail: `准备生成 ${request.count} 张${request.language}电商图`,
     });
     setSelectedConversationId(conversationId);
-    setIsEcommerceMode(false);
     await persistConversation(conversation);
     void runConversationQueue(conversationId);
     toast.success("电商生图任务已加入队列");
@@ -2786,21 +2795,16 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
         toast.error("请先上传素材图片");
         return;
       }
-      if (!ecommerceProductInfo) {
-        toast.error("请先上传素材图片并完成识别");
-        return;
-      }
-      if (ecommerceProductInfo.nameCategory === "未识别" && ecommerceProductInfo.features === "未识别") {
-        toast.error("产品信息未识别成功，请重新上传更清晰的素材图片");
+      if (!imagePrompt.trim()) {
+        toast.error("请先等待产品信息写入输入框，或手动填写产品文案");
         return;
       }
       isSubmitDispatchingRef.current = true;
       setIsEcommerceGenerating(true);
       try {
         await handleEcommerceGenerate({
-          prompt: buildEcommerceGenerationPrompt({
-            productInfo: ecommerceProductInfo,
-            customCopy: imagePrompt,
+          prompt: buildEcommerceGenerationPromptFromPrompt({
+            prompt: imagePrompt,
             language: ecommerceLanguage,
           }),
           count: ecommerceCount,
@@ -3484,7 +3488,6 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                       materialImages={ecommerceMaterialImages}
                       effectReferenceImages={ecommerceEffectReferenceImages}
                       productInfo={ecommerceProductInfo}
-                      customCopy={imagePrompt}
                       language={ecommerceLanguage}
                       count={ecommerceCount}
                       imageCountLimit={imageSingleCountLimit}
@@ -3494,6 +3497,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                         setEcommerceMaterialImages([]);
                         setEcommerceProductInfo(null);
                         setEcommerceAnalyzeError("");
+                        setImagePrompt("");
                       }}
                       onClearEffectReferenceImages={() => setEcommerceEffectReferenceImages([])}
                       onReanalyze={() => void analyzeEcommerceImages(ecommerceMaterialImages)}
@@ -3508,7 +3512,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                     ? isEcommerceAnalyzing ||
                       isEcommerceGenerating ||
                       ecommerceMaterialImages.length === 0 ||
-                      !ecommerceProductInfo
+                      !imagePrompt.trim()
                     : undefined
                 }
                 submitLabelOverride={isEcommerceMode ? "生成电商图" : undefined}

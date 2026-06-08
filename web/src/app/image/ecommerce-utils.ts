@@ -223,17 +223,24 @@ export function buildEcommerceProductTemplate(info: EcommerceProductInfo, custom
   ].join("\n");
 }
 
-export function buildEcommerceGenerationPrompt({
-  productInfo,
-  customCopy,
+export function extractEcommerceCustomCopy(prompt: string) {
+  const match = prompt.match(/3、\s*自定义文案：\s*【([\s\S]*?)】/);
+  if (match) {
+    return match[1].trim();
+  }
+  const trimmed = prompt.trim();
+  return trimmed.startsWith("【产品信息】") ? "" : trimmed;
+}
+
+export function buildEcommerceGenerationPromptFromPrompt({
+  prompt,
   language,
 }: {
-  productInfo: EcommerceProductInfo;
-  customCopy: string;
+  prompt: string;
   language: EcommerceLanguage;
 }) {
   return [
-    buildEcommerceProductTemplate(productInfo, customCopy),
+    prompt.trim(),
     "",
     "请根据以上产品信息和素材图片生成电商效果图。",
     `画面中的标题、卖点短句、标签和所有可见文案必须使用${language}。`,

@@ -63,6 +63,23 @@ import { useAuthGuard } from "@/lib/use-auth-guard";
 
 const PAY_ORDER_PENDING_TIMEOUT_MS = 30 * 60 * 1000;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
+const EMPTY_ADMIN_BILLING_STATS: AdminBillingStats = {
+  today_revenue_cents: 0,
+  today_revenue_yuan: "0.00",
+  today_paid_count: 0,
+  total_revenue_cents: 0,
+  total_revenue_yuan: "0.00",
+  total_paid_count: 0,
+  pending_count: 0,
+  failed_count: 0,
+  record_count: 0,
+};
+
+function logBackgroundLoadError(label: string, error: unknown) {
+  if (import.meta.env.DEV) {
+    console.warn(label, error);
+  }
+}
 
 function centsToYuan(cents: number) {
   return (Math.max(0, cents) / 100).toFixed(2);
@@ -207,22 +224,32 @@ function WalletPageContent() {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const reload = useCallback(async () => {
-    const [walletData, orderData] = await Promise.all([
+    const [walletResult, orderResult] = await Promise.allSettled([
       fetchWallet(),
       fetchPayOrders({ limit: 500 }),
     ]);
-    setWallet(walletData.wallet);
-    setImagePriceCents(walletData.image_price);
-    const channels = Array.isArray(walletData.pay_channels)
-      ? walletData.pay_channels
-      : [];
-    setPayChannels(channels);
-    setPayType((current) =>
-      channels.length > 0 && !channels.includes(current)
-        ? defaultPayType(channels)
-        : current,
-    );
-    setOrders(Array.isArray(orderData.items) ? orderData.items : []);
+    if (walletResult.status === "fulfilled") {
+      const walletData = walletResult.value;
+      setWallet(walletData.wallet);
+      setImagePriceCents(walletData.image_price);
+      const channels = Array.isArray(walletData.pay_channels)
+        ? walletData.pay_channels
+        : [];
+      setPayChannels(channels);
+      setPayType((current) =>
+        channels.length > 0 && !channels.includes(current)
+          ? defaultPayType(channels)
+          : current,
+      );
+    } else {
+      logBackgroundLoadError("加载钱包失败", walletResult.reason);
+    }
+    if (orderResult.status === "fulfilled") {
+      setOrders(Array.isArray(orderResult.value.items) ? orderResult.value.items : []);
+    } else {
+      setOrders([]);
+      logBackgroundLoadError("加载充值订单失败", orderResult.reason);
+    }
   }, []);
 
   useEffect(() => {
@@ -233,7 +260,7 @@ function WalletPageContent() {
         await reload();
       } catch (error) {
         if (active) {
-          toast.error(error instanceof Error ? error.message : "加载钱包失败");
+          logBackgroundLoadError("加载钱包失败", error);
         }
       } finally {
         if (active) {
@@ -791,13 +818,15 @@ function AdminWalletPageContent() {
   const [withdrawStatus, setWithdrawStatus] = useState<
     "all" | "pending" | "approved" | "paid" | "rejected"
   >("all");
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [processingWithdrawalID, setProcessingWithdrawalID] = useState("");
 
-  const load = useCallback(async () => {
-    setIsLoading(true);
+  const load = useCallback(async (showLoading = false) => {
+    if (showLoading) {
+      setIsLoading(true);
+    }
     try {
-      const [orderData, withdrawalData] = await Promise.all([
+      const [orderResult, withdrawalResult] = await Promise.allSettled([
         fetchAdminBillingOrders({
           limit: 0,
           status: orderStatus,
@@ -807,26 +836,39 @@ function AdminWalletPageContent() {
         }),
         fetchAgencyAdminWithdrawals(500),
       ]);
-      setOrders(Array.isArray(orderData.items) ? orderData.items : []);
-      setStats(orderData.stats || null);
-      setOrderTotal(Number(orderData.total || 0));
-      setOrderTotalPages(Math.max(1, Number(orderData.total_page || 1)));
-      const nextWithdrawals = Array.isArray(withdrawalData.items)
-        ? withdrawalData.items
-        : [];
-      setWithdrawals(nextWithdrawals);
-      setWithdrawalNotes((current) => {
-        const next = { ...current };
-        for (const item of nextWithdrawals) {
-          if (next[item.id] === undefined)
-            next[item.id] = item.admin_note || "";
-        }
-        return next;
-      });
+      if (orderResult.status === "fulfilled") {
+        const orderData = orderResult.value;
+        setOrders(Array.isArray(orderData.items) ? orderData.items : []);
+        setStats(orderData.stats || EMPTY_ADMIN_BILLING_STATS);
+        setOrderTotal(Number(orderData.total || 0));
+        setOrderTotalPages(Math.max(1, Number(orderData.total_page || 1)));
+      } else {
+        setOrders([]);
+        setStats(EMPTY_ADMIN_BILLING_STATS);
+        setOrderTotal(0);
+        setOrderTotalPages(1);
+        logBackgroundLoadError("加载充值和收益明细失败", orderResult.reason);
+      }
+
+      if (withdrawalResult.status === "fulfilled") {
+        const nextWithdrawals = Array.isArray(withdrawalResult.value.items)
+          ? withdrawalResult.value.items
+          : [];
+        setWithdrawals(nextWithdrawals);
+        setWithdrawalNotes((current) => {
+          const next = { ...current };
+          for (const item of nextWithdrawals) {
+            if (next[item.id] === undefined)
+              next[item.id] = item.admin_note || "";
+          }
+          return next;
+        });
+      } else {
+        setWithdrawals([]);
+        logBackgroundLoadError("加载提现申请失败", withdrawalResult.reason);
+      }
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "加载提现和收益明细失败",
-      );
+      logBackgroundLoadError("加载提现和收益明细失败", error);
     } finally {
       setIsLoading(false);
     }
@@ -883,7 +925,7 @@ function AdminWalletPageContent() {
           <Button
             variant="outline"
             className="h-10 rounded-lg"
-            onClick={() => void load()}
+            onClick={() => void load(true)}
             disabled={isLoading}
           >
             <RefreshCw

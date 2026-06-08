@@ -7,7 +7,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   EFFECT_REFERENCE_IMAGE_LIMIT,
   MATERIAL_IMAGE_LIMIT,
-  buildEcommerceProductTemplate,
   ecommerceLanguageOptions,
   type EcommerceLanguage,
   type EcommerceProductInfo,
@@ -19,7 +18,6 @@ type EcommerceComposerPanelProps = {
   materialImages: StoredReferenceImage[];
   effectReferenceImages: StoredReferenceImage[];
   productInfo: EcommerceProductInfo | null;
-  customCopy: string;
   language: EcommerceLanguage;
   count: number;
   imageCountLimit: number;
@@ -83,7 +81,6 @@ export function EcommerceComposerPanel({
   materialImages,
   effectReferenceImages,
   productInfo,
-  customCopy,
   language,
   count,
   imageCountLimit,
@@ -97,7 +94,11 @@ export function EcommerceComposerPanel({
 }: EcommerceComposerPanelProps) {
   const [isQuantityOpen, setIsQuantityOpen] = useState(false);
   const availableQuantities = useMemo(() => quantityOptions(imageCountLimit), [imageCountLimit]);
-  const template = productInfo ? buildEcommerceProductTemplate(productInfo, customCopy) : "";
+  const productInfoStatus = productInfo
+    ? analyzeError
+      ? "识别没有完成，已把可编辑模板放到下方输入框。"
+      : "产品信息已写入下方输入框，可直接编辑自定义文案。"
+    : "上传素材图片后，产品信息会自动写入下方输入框。";
 
   return (
     <div className="grid gap-2 border-b border-[#f2f3f5] px-1 pb-3">
@@ -114,7 +115,7 @@ export function EcommerceComposerPanel({
             ) : null}
           </div>
           <div className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap text-xs leading-5 text-[#45515e]">
-            {productInfo ? template : "上传素材图片后自动生成产品名称、品类和核心特征。自定义文案在下方输入框填写。"}
+            {productInfoStatus}
           </div>
           {analyzeError ? (
             <div className="mt-1 rounded-lg bg-[#fff7ed] px-2 py-1 text-xs leading-5 text-[#b45309]">
