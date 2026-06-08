@@ -3502,7 +3502,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                     />
                   ) : undefined
                 }
-                promptPlaceholder={isEcommerceMode ? "输入自定义文案，可留空" : undefined}
+                promptPlaceholder={isEcommerceMode ? "上传底图后等待提示词生成即可创作，语言和数量在上方可选" : undefined}
                 submitDisabled={
                   isEcommerceMode
                     ? isEcommerceAnalyzing ||
