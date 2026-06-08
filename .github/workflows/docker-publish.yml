@@ -40,6 +40,15 @@ jobs:
       - name: Normalize image owner
         run: echo "IMAGE_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
+      - name: Resolve image version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.0.0-${GITHUB_SHA::7}"
+          fi
+          echo "IMAGE_VERSION=${VERSION}" >> "$GITHUB_ENV"
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -60,6 +69,8 @@ jobs:
           target: app
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            VERSION=${{ env.IMAGE_VERSION }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
