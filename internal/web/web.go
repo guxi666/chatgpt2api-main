@@ -4,7 +4,9 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -14,7 +16,10 @@ var dist embed.FS
 var staticFS = mustSubFS(dist, "dist")
 
 func IndexHTML() ([]byte, error) {
-	return fs.ReadFile(staticFS, "index.html")
+	if data, err := fs.ReadFile(staticFS, "index.html"); err == nil {
+		return data, nil
+	}
+	return fs.ReadFile(diskStaticFS(), "index.html")
 }
 
 func Handler() http.Handler {
@@ -40,13 +45,15 @@ func serveAsset(w http.ResponseWriter, r *http.Request, name string) bool {
 		name = "index.html"
 	}
 	for _, candidate := range assetCandidates(name) {
-		info, err := fs.Stat(staticFS, candidate)
-		if err == nil && !info.IsDir() {
-			if candidate == "index.html" {
-				w.Header().Set("Cache-Control", "no-store")
+		for _, currentFS := range []fs.FS{staticFS, diskStaticFS()} {
+			info, err := fs.Stat(currentFS, candidate)
+			if err == nil && !info.IsDir() {
+				if candidate == "index.html" {
+					w.Header().Set("Cache-Control", "no-store")
+				}
+				http.ServeFileFS(w, r, currentFS, candidate)
+				return true
 			}
-			http.ServeFileFS(w, r, staticFS, candidate)
-			return true
 		}
 	}
 	return false
@@ -65,4 +72,12 @@ func mustSubFS(fsys fs.FS, dir string) fs.FS {
 		panic(err)
 	}
 	return sub
+}
+
+func diskStaticFS() fs.FS {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return os.DirFS(".")
+	}
+	return os.DirFS(filepath.Join(cwd, "internal", "web", "dist"))
 }

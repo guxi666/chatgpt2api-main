@@ -10,6 +10,7 @@ import {
   MessageCircle,
   Plus,
   SlidersHorizontal,
+  Sparkles,
   Store,
   X,
 } from "lucide-react";
@@ -76,6 +77,10 @@ type ImageComposerProps = {
   promptPlaceholder?: string;
   submitDisabled?: boolean;
   submitLabelOverride?: string;
+  secondaryActionLabel?: string;
+  secondaryActionDisabled?: boolean;
+  secondaryActionLoading?: boolean;
+  onSecondaryAction?: () => void | Promise<void>;
   fileAccept?: string;
   fileMultiple?: boolean;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -174,6 +179,10 @@ export function ImageComposer({
   promptPlaceholder,
   submitDisabled,
   submitLabelOverride,
+  secondaryActionLabel,
+  secondaryActionDisabled = false,
+  secondaryActionLoading = false,
+  onSecondaryAction,
   fileAccept = "image/*",
   fileMultiple = true,
   textareaRef,
@@ -1270,6 +1279,19 @@ export function ImageComposer({
 
               <div className="flex shrink-0 items-center gap-2">
                 {uploadButtonPlacement === "toolbar" ? renderUploadControl("toolbar") : null}
+                {secondaryActionLabel && onSecondaryAction ? (
+                  <button
+                    type="button"
+                    onClick={() => void onSecondaryAction()}
+                    disabled={secondaryActionDisabled || secondaryActionLoading}
+                    className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-full border border-[#d9e3ff] bg-[#f7f9ff] px-3 text-sm font-semibold text-[#315efb] shadow-[0_4px_10px_rgba(49,94,251,0.08)] transition hover:bg-[#eef3ff] disabled:cursor-not-allowed disabled:border-[#e5e7eb] disabled:bg-[#f7f7f8] disabled:text-[#9aa0a6] sm:h-10 sm:px-3"
+                    aria-label={secondaryActionLabel}
+                    title={secondaryActionLabel}
+                  >
+                    {secondaryActionLoading ? <Bot className="size-4 animate-pulse" /> : <Sparkles className="size-4" />}
+                    <span className="hidden sm:inline">{secondaryActionLabel}</span>
+                  </button>
+                ) : null}
 
                 <button
                   type="button"

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { History, ImagePlus, LoaderCircle, Plus, Trash2, X } from "lucide-react";
+import { History, ImageIcon, ImagePlus, LoaderCircle, Plus, ShoppingCart, Tags, Trash2, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import { ImageComposer } from "@/app/image/components/image-composer";
@@ -12,16 +12,20 @@ import {
   EFFECT_REFERENCE_IMAGE_LIMIT,
   MATERIAL_IMAGE_LIMIT,
   analyzeEcommerceProductImages,
+  buildEmptyEcommerceProductInfo,
+  buildEcommerceDesignSpecText,
   buildEcommerceGenerationPromptFromPrompt,
+  buildEcommercePromptPlans,
   buildEcommerceProductTemplate,
   buildEcommerceReferenceImages,
   ecommerceUploadKindLimit,
-  extractEcommerceCustomCopy,
   getEcommerceImageFiles,
   isValidEcommerceUploadImage,
   type EcommerceGenerateRequest,
   type EcommerceLanguage,
+  type EcommercePromptPlan,
   type EcommerceProductInfo,
+  type EcommerceSizePreset,
   type EcommerceUploadKind,
 } from "@/app/image/ecommerce-utils";
 import { ImagePromptMarket } from "@/app/image/components/image-prompt-market";
@@ -153,17 +157,29 @@ const IMAGE_PROMPT_PRESETS_SETTINGS_KEY = "image_prompt_presets_json";
 const QUOTA_REFRESH_EVENT = "chatgpt2api:quota-refresh";
 const DEFAULT_IMAGE_QUALITY: ImageQuality = "high";
 const DEFAULT_IMAGE_OUTPUT_FORMAT: ImageOutputFormat = "png";
+const DEFAULT_ECOMMERCE_SIZE_PRESET: EcommerceSizePreset = "auto";
 const activeConversationQueueIds = new Set<string>();
 const EMPTY_IMAGE_ASPECT_RATIO_SELECT_VALUE = "__empty_aspect_ratio__";
 const MISSING_RECOVERABLE_TASK_ID_ERROR = "页面刷新或任务中断，未找到可恢复的任务 ID";
-const ECOMMERCE_ANALYZING_PRODUCT_INFO: EcommerceProductInfo = {
-  nameCategory: "识别中",
-  features: "识别中",
-};
-const ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO: EcommerceProductInfo = {
-  nameCategory: "未识别",
-  features: "未识别",
-};
+const ECOMMERCE_ANALYZING_PRODUCT_INFO = buildEmptyEcommerceProductInfo("识别中");
+const ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO = buildEmptyEcommerceProductInfo("未识别");
+const ECOMMERCE_HERO_FEATURES = [
+  {
+    icon: ImageIcon,
+    title: "高质量生成",
+    description: "高清细节，质感真实",
+  },
+  {
+    icon: Tags,
+    title: "多场景适配",
+    description: "主图/详情/海报多场景",
+  },
+  {
+    icon: Zap,
+    title: "高效出图",
+    description: "快速生成，提升效率",
+  },
+];
 
 type ComposerMode = "chat" | "image";
 
@@ -188,6 +204,17 @@ type EditingTurnDraft = {
 };
 
 type CreationTaskDataItem = NonNullable<CreationTask["data"]>[number];
+
+function buildEcommerceSizeSelection(sizePreset: EcommerceSizePreset): ImageSizeSelection {
+  return {
+    mode: sizePreset === "auto" ? "auto" : "ratio",
+    aspectRatio: sizePreset === "auto" ? "" : (sizePreset as ImageAspectRatio),
+    resolution: "auto",
+    customRatio: DEFAULT_IMAGE_CUSTOM_RATIO,
+    customWidth: DEFAULT_IMAGE_CUSTOM_WIDTH,
+    customHeight: DEFAULT_IMAGE_CUSTOM_HEIGHT,
+  };
+}
 
 function buildConversationTitle(prompt: string) {
   const trimmed = prompt.trim();
@@ -1045,6 +1072,10 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
   const [ecommerceAnalyzeError, setEcommerceAnalyzeError] = useState("");
   const [ecommerceLanguage, setEcommerceLanguage] = useState<EcommerceLanguage>("简体中文");
   const [ecommerceCount, setEcommerceCount] = useState(1);
+  const [ecommerceDesignSpecText, setEcommerceDesignSpecText] = useState("");
+  const [ecommercePromptPlans, setEcommercePromptPlans] = useState<EcommercePromptPlan[]>([]);
+  const [ecommerceSizePreset, setEcommerceSizePreset] = useState<EcommerceSizePreset>(DEFAULT_ECOMMERCE_SIZE_PRESET);
+  const [ecommerceOutputFormat, setEcommerceOutputFormat] = useState<ImageOutputFormat>(DEFAULT_IMAGE_OUTPUT_FORMAT);
   const [isEcommerceAnalyzing, setIsEcommerceAnalyzing] = useState(false);
   const [isEcommerceGenerating, setIsEcommerceGenerating] = useState(false);
   const [composerMode, setComposerMode] = useState<ComposerMode>(getStoredComposerMode);
@@ -1127,6 +1158,11 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
       }),
     [imageAspectRatio, imageCustomHeight, imageCustomRatio, imageCustomWidth, imageResolution, imageSizeMode],
   );
+  const ecommerceSizeSelection = useMemo(
+    () => buildEcommerceSizeSelection(ecommerceSizePreset),
+    [ecommerceSizePreset],
+  );
+  const ecommerceSize = useMemo(() => buildImageSize(ecommerceSizeSelection), [ecommerceSizeSelection]);
   const editingDraftImageSize = useMemo(() => {
     if (!editingTurnDraft || editingTurnDraft.mode === "chat") {
       return "";
@@ -1535,6 +1571,10 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     setEcommerceAnalyzeError("");
     setEcommerceLanguage("简体中文");
     setEcommerceCount(1);
+    setEcommerceDesignSpecText("");
+    setEcommercePromptPlans([]);
+    setEcommerceSizePreset(DEFAULT_ECOMMERCE_SIZE_PRESET);
+    setEcommerceOutputFormat(DEFAULT_IMAGE_OUTPUT_FORMAT);
     setIsEcommerceAnalyzing(false);
     setIsEcommerceGenerating(false);
     if (ecommerceFileInputRef.current) {
@@ -1783,21 +1823,25 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     setIsEcommerceAnalyzing(true);
     setEcommerceAnalyzeError("");
     setEcommerceProductInfo(ECOMMERCE_ANALYZING_PRODUCT_INFO);
-    setImagePrompt((current) => buildEcommerceProductTemplate(ECOMMERCE_ANALYZING_PRODUCT_INFO, extractEcommerceCustomCopy(current)));
+    setImagePrompt(buildEcommerceProductTemplate(ECOMMERCE_ANALYZING_PRODUCT_INFO));
     try {
       const info = await analyzeEcommerceProductImages(images, ECOMMERCE_CATEGORY_NAME);
       setEcommerceProductInfo(info);
-      setImagePrompt((current) => buildEcommerceProductTemplate(info, extractEcommerceCustomCopy(current)));
+      setEcommerceDesignSpecText(buildEcommerceDesignSpecText(info));
+      setEcommercePromptPlans(buildEcommercePromptPlans(info, ecommerceCount));
+      setImagePrompt(buildEcommerceProductTemplate(info));
       toast.success("产品信息已识别");
     } catch (error) {
       const message = error instanceof Error ? error.message : "产品识别失败";
       setEcommerceProductInfo(ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO);
       setEcommerceAnalyzeError(message);
-      setImagePrompt((current) => buildEcommerceProductTemplate(ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO, extractEcommerceCustomCopy(current)));
+      setEcommerceDesignSpecText(buildEcommerceDesignSpecText(ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO));
+      setEcommercePromptPlans(buildEcommercePromptPlans(ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO, ecommerceCount));
+      setImagePrompt(buildEcommerceProductTemplate(ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO));
     } finally {
       setIsEcommerceAnalyzing(false);
     }
-  }, []);
+  }, [ecommerceCount]);
 
   const appendEcommerceImages = useCallback(
     async (files: File[], kind: EcommerceUploadKind = ecommerceUploadKind) => {
@@ -1830,10 +1874,11 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
         const uploadedImages = await buildEcommerceReferenceImages(validFiles, remaining);
         const nextImages = [...ecommerceMaterialImages, ...uploadedImages];
         setEcommerceMaterialImages(nextImages);
+        setEcommerceProductInfo(null);
+        setEcommerceAnalyzeError("");
         if (validFiles.length > remaining) {
           toast.info(`素材图片最多上传 ${MATERIAL_IMAGE_LIMIT} 张，已取前 ${remaining} 张`);
         }
-        await analyzeEcommerceImages(nextImages);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "读取图片失败");
       } finally {
@@ -1845,7 +1890,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
         }
       }
     },
-    [analyzeEcommerceImages, ecommerceMaterialImages, ecommerceUploadKind],
+    [ecommerceMaterialImages, ecommerceUploadKind],
   );
 
   const handleReferenceImageChange = useCallback(
@@ -1870,6 +1915,55 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
       if (next.length === 0 && fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+      return next;
+    });
+  }, []);
+
+  const handleEcommerceAssistWrite = useCallback(async () => {
+    if (ecommerceMaterialImages.length === 0) {
+      toast.error("请先上传素材图片");
+      return;
+    }
+    await analyzeEcommerceImages(ecommerceMaterialImages);
+    textareaRef.current?.focus();
+  }, [analyzeEcommerceImages, ecommerceMaterialImages]);
+
+  const handleEcommerceCountChange = useCallback(
+    (nextCount: number) => {
+      setEcommerceCount(nextCount);
+      setEcommercePromptPlans((current) => {
+        const nextDefaults = buildEcommercePromptPlans(ecommerceProductInfo ?? ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO, nextCount);
+        return nextDefaults.map((item, index) => {
+          const existing = current[index];
+          return existing ? { ...item, id: existing.id, title: existing.title, prompt: existing.prompt } : item;
+        });
+      });
+    },
+    [ecommerceProductInfo],
+  );
+
+  const handleEcommerceDesignSpecChange = useCallback((value: string) => {
+    setEcommerceDesignSpecText(value);
+  }, []);
+
+  const handleEcommercePromptPlanSave = useCallback((planId: string, nextPlan: Pick<EcommercePromptPlan, "title" | "prompt">) => {
+    setEcommercePromptPlans((current) =>
+      current.map((item) =>
+        item.id === planId
+          ? {
+              ...item,
+              title: nextPlan.title,
+              prompt: nextPlan.prompt,
+            }
+          : item,
+      ),
+    );
+  }, []);
+
+  const handleEcommercePromptPlanDelete = useCallback((planId: string) => {
+    setEcommercePromptPlans((current) => {
+      const next = current.filter((item) => item.id !== planId);
+      setEcommerceCount(Math.max(1, next.length));
       return next;
     });
   }, []);
@@ -2736,53 +2830,69 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
 
     const now = new Date().toISOString();
     const conversationId = createId();
-    const turnId = createId();
-    const sizeSelection = serializeImageSizeSelection({
-      mode: "auto",
-      aspectRatio: "",
-      resolution: "auto",
-      customRatio: DEFAULT_IMAGE_CUSTOM_RATIO,
-      customWidth: DEFAULT_IMAGE_CUSTOM_WIDTH,
-      customHeight: DEFAULT_IMAGE_CUSTOM_HEIGHT,
-    });
-    const draftTurn: ImageTurn = {
-      id: turnId,
-      prompt,
-      model: DEFAULT_IMAGE_MODEL,
-      mode: "image",
-      referenceImages: request.referenceImages,
-      count: request.count,
-      size: "",
-      sizeSelection,
-      quality: undefined,
-      outputFormat: DEFAULT_IMAGE_OUTPUT_FORMAT,
-      outputCompression: undefined,
-      visibility: defaultImageVisibility,
-      images: Array.from({ length: request.count }, (_, index) => ({
-        id: `${turnId}-${index}`,
-        taskId: imageTaskBatchId(turnId, index),
-        status: "loading" as const,
+    const sizeSelection = serializeImageSizeSelection(request.sizeSelection);
+    const effectivePlans =
+      request.promptPlans.length > 0
+        ? request.promptPlans.slice(0, request.count)
+        : [{ id: "plan-1", title: "产品展示：主视觉主图", prompt: "突出产品主体与核心卖点，形成第一眼购买吸引力。" }];
+    const draftTurns: ImageTurn[] = effectivePlans.map((plan, index) => {
+      const turnId = createId();
+      const composedPrompt = [
+        prompt,
+        "",
+        request.designSpecText.trim(),
+        "",
+        `单张方案标题：${plan.title}`,
+        plan.prompt.trim(),
+      ]
+        .filter(Boolean)
+        .join("\n");
+      return {
+        id: turnId,
+        prompt: buildEcommerceGenerationPromptFromPrompt({
+          prompt: composedPrompt,
+          language: request.language as EcommerceLanguage,
+        }),
+        model: DEFAULT_IMAGE_MODEL,
+        mode: "image",
+        referenceImages: request.referenceImages,
+        count: 1,
+        size: request.size,
+        sizeSelection,
+        quality: undefined,
+        outputFormat: request.outputFormat,
+        outputCompression: request.outputCompression,
         visibility: defaultImageVisibility,
-      })),
-      createdAt: now,
-      status: "queued",
-    };
+        images: [
+          {
+            id: `${turnId}-0`,
+            taskId: imageTaskBatchId(turnId, 0),
+            status: "loading" as const,
+            visibility: defaultImageVisibility,
+          },
+        ],
+        createdAt: now,
+        status: "queued",
+      };
+    });
     const conversation: ImageConversation = {
       id: conversationId,
-      title: buildConversationTitle(`电商 ${request.categoryName} ${request.language}`),
+      title: buildConversationTitle(`电商 ${request.categoryName} ${request.language} ${effectivePlans.length}张`),
       createdAt: now,
       updatedAt: now,
-      turns: [draftTurn],
+      turns: draftTurns,
     };
 
-    updateTurnProgress(conversationId, turnId, {
-      message: "正在创建电商生图任务",
-      detail: `准备生成 ${request.count} 张${request.language}电商图`,
+    draftTurns.forEach((turn, index) => {
+      updateTurnProgress(conversationId, turn.id, {
+        message: "正在创建电商生图任务",
+        detail: `准备生成第 ${index + 1} 张${request.language}电商图`,
+      });
     });
     setSelectedConversationId(conversationId);
     await persistConversation(conversation);
     void runConversationQueue(conversationId);
-    toast.success("电商生图任务已加入队列");
+    toast.success(`电商生图任务已加入队列，共 ${draftTurns.length} 张`);
   };
 
   const handleSubmit = async () => {
@@ -2803,13 +2913,16 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
       setIsEcommerceGenerating(true);
       try {
         await handleEcommerceGenerate({
-          prompt: buildEcommerceGenerationPromptFromPrompt({
-            prompt: imagePrompt,
-            language: ecommerceLanguage,
-          }),
+          prompt: imagePrompt,
           count: ecommerceCount,
           language: ecommerceLanguage,
           categoryName: ECOMMERCE_CATEGORY_NAME,
+          designSpecText: ecommerceDesignSpecText,
+          promptPlans: ecommercePromptPlans,
+          size: ecommerceSize,
+          sizeSelection: ecommerceSizeSelection,
+          outputFormat: ecommerceOutputFormat,
+          outputCompression: imageOutputCompressionForFormat(ecommerceOutputFormat, undefined),
           materialImages: ecommerceMaterialImages,
           effectReferenceImages: ecommerceEffectReferenceImages,
           referenceImages: [...ecommerceMaterialImages, ...ecommerceEffectReferenceImages],
@@ -3377,23 +3490,41 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
           </Dialog>
         ) : null}
 
-        <div className="relative flex min-h-0 flex-col gap-2 sm:gap-4">
+        <div
+          className={cn(
+            "relative flex min-h-0 flex-col gap-2 sm:gap-4",
+            isEcommerceMode && "overflow-hidden rounded-[28px] bg-[#f5f7fb]",
+          )}
+        >
           <div className="flex items-center justify-between gap-2 px-1 sm:px-4">
-            <div className="flex min-w-0 flex-1 items-center gap-2 lg:hidden">
+            <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-1.5 lg:hidden">
               <Button
                 variant="outline"
-                className="h-10 min-w-0 flex-1 shrink rounded-full border-[#e5e7eb] bg-white text-[#45515e] shadow-sm"
+                className="h-10 min-w-0 rounded-full border-[#e5e7eb] bg-white px-3 text-xs text-[#45515e] shadow-sm"
                 onClick={() => setIsHistoryOpen(true)}
               >
                 <History className="size-4" />
-                <span className="truncate">历史记录 ({conversations.length})</span>
+                <span className="truncate">历史 ({conversations.length})</span>
               </Button>
               <Button
-                className="h-10 rounded-full shadow-sm"
+                className="h-10 rounded-full px-3 text-xs shadow-sm"
                 onClick={handleCreateDraft}
               >
                 <Plus className="size-4" />
                 新建
+              </Button>
+              <Button
+                variant="outline"
+                className={cn(
+                  "h-10 rounded-full border-[#f2c3a3] px-3 text-xs shadow-sm",
+                  isEcommerceMode
+                    ? "bg-[#fff0e4] text-[#d7651f] hover:bg-[#fff0e4] hover:text-[#d7651f]"
+                    : "bg-[#fff7f1] text-[#d7651f] hover:bg-[#fff0e4] hover:text-[#d7651f]",
+                )}
+                onClick={handleOpenEcommerce}
+              >
+                <ShoppingCart className="size-4" />
+                电商专区
               </Button>
               <Button
                 variant="outline"
@@ -3408,7 +3539,10 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
 
           <div
             ref={resultsViewportRef}
-            className="hide-scrollbar min-h-0 flex-1 overflow-y-auto px-1 pt-2 pb-[14rem] sm:px-4 sm:pt-4 sm:pb-[15rem]"
+            className={cn(
+              "hide-scrollbar min-h-0 flex-1 overflow-y-auto px-1 pt-2 pb-[14rem] sm:px-4 sm:pt-4 sm:pb-[15rem]",
+              isEcommerceMode && "px-0 pt-0 sm:px-0 sm:pt-0",
+            )}
             style={composerDockHeight > 0 ? { paddingBottom: composerDockHeight + 24 } : undefined}
           >
             {!isEcommerceMode ? (
@@ -3430,7 +3564,9 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                 visibilityMutatingImageKey={visibilityMutatingImageKey}
                 formatConversationTime={formatConversationTime}
               />
-            ) : null}
+            ) : (
+              <EcommerceHero />
+            )}
           </div>
 
           <div
@@ -3490,6 +3626,10 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                       productInfo={ecommerceProductInfo}
                       language={ecommerceLanguage}
                       count={ecommerceCount}
+                      sizePreset={ecommerceSizePreset}
+                      outputFormat={ecommerceOutputFormat}
+                      designSpecText={ecommerceDesignSpecText}
+                      promptPlans={ecommercePromptPlans}
                       imageCountLimit={imageSingleCountLimit}
                       isAnalyzing={isEcommerceAnalyzing}
                       analyzeError={ecommerceAnalyzeError}
@@ -3502,11 +3642,24 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                       onClearEffectReferenceImages={() => setEcommerceEffectReferenceImages([])}
                       onReanalyze={() => void analyzeEcommerceImages(ecommerceMaterialImages)}
                       onLanguageChange={setEcommerceLanguage}
-                      onCountChange={setEcommerceCount}
+                      onCountChange={handleEcommerceCountChange}
+                      onSizePresetChange={setEcommerceSizePreset}
+                      onOutputFormatChange={setEcommerceOutputFormat}
+                      onDesignSpecChange={handleEcommerceDesignSpecChange}
+                      onPromptPlanSave={handleEcommercePromptPlanSave}
+                      onPromptPlanDelete={handleEcommercePromptPlanDelete}
                     />
                   ) : undefined
                 }
-                promptPlaceholder={isEcommerceMode ? "上传底图后等待提示词生成即可创作，语言和数量在上方可选" : undefined}
+                promptPlaceholder={
+                  isEcommerceMode
+                    ? "建议输入:产品名称、卖点、目标人员、详情图风格等\n这款产品是智能颈椎按摩仪，主打缓解久坐、低头、办公疲劳带来的肩颈酸痛。产品采用仿真人手揉捏按摩技术，搭配恒温热敷、多个按摩档位和轻量化佩戴设计，使用舒适不压迫；内置长续航电池，适合办公室、居家、出差等多场景使用..."
+                    : undefined
+                }
+                secondaryActionLabel={isEcommerceMode ? "AI帮写" : undefined}
+                secondaryActionDisabled={isEcommerceMode ? ecommerceMaterialImages.length === 0 : undefined}
+                secondaryActionLoading={isEcommerceMode ? isEcommerceAnalyzing : undefined}
+                onSecondaryAction={isEcommerceMode ? () => void handleEcommerceAssistWrite() : undefined}
                 submitDisabled={
                   isEcommerceMode
                     ? isEcommerceAnalyzing ||
@@ -3580,6 +3733,56 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
         </Dialog>
       ) : null}
     </>
+  );
+}
+
+function EcommerceHero() {
+  return (
+    <div className="relative min-h-full overflow-hidden rounded-[28px] bg-[radial-gradient(circle_at_88%_18%,rgba(255,176,115,0.14),transparent_30%),linear-gradient(115deg,#fffaf5_0%,#fffefd_42%,#f5f7fb_100%)] px-5 pt-16 pb-80 sm:px-14 sm:pt-20 lg:px-20 lg:pt-24">
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-[64%] overflow-hidden">
+        <img
+          src="/ecommerce-hero-products.jpg"
+          alt=""
+          className="h-[62%] w-full object-cover object-center opacity-[0.82] mix-blend-multiply [mask-image:linear-gradient(to_left,black_62%,transparent_100%)]"
+        />
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,#fffaf5_0%,rgba(255,250,245,0.72)_21%,rgba(255,250,245,0)_52%),linear-gradient(180deg,rgba(255,255,255,0)_0%,#f5f7fb_78%)]" />
+      </div>
+      <div className="pointer-events-none absolute right-[-5%] top-[24%] h-40 w-[65%] rounded-[50%] bg-[#f5b77e]/18 blur-2xl" />
+      <div className="pointer-events-none absolute bottom-[28%] left-[-8%] h-24 w-[58%] rotate-[-3deg] rounded-[50%] bg-[#ffd8bd]/20 blur-3xl" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[52%] bg-[linear-gradient(180deg,rgba(245,247,251,0)_0%,rgba(245,247,251,0.82)_42%,#f5f7fb_100%)]" />
+
+      <div className="relative z-10 max-w-[660px]">
+        <h1 className="text-5xl font-black tracking-normal text-[#181e25] sm:text-6xl lg:text-[4.75rem]">
+          电商专区
+        </h1>
+        <p className="mt-6 text-lg font-medium leading-8 text-[#45515e] sm:text-2xl">
+          专业电商图片生成，助力产品卖点可视化
+        </p>
+
+        <div className="mt-14 grid max-w-[640px] gap-4 sm:grid-cols-3 sm:gap-0">
+          {ECOMMERCE_HERO_FEATURES.map((feature, index) => {
+            const Icon = feature.icon;
+            return (
+              <div
+                key={feature.title}
+                className={cn(
+                  "flex items-center gap-3 sm:px-6",
+                  index === 0 ? "sm:pl-0" : "sm:border-l sm:border-[#ead9ca]",
+                )}
+              >
+                <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-[18px] bg-[linear-gradient(135deg,#ffb17e,#ff6f2f)] text-white shadow-[0_18px_36px_-20px_rgba(238,103,35,0.75)]">
+                  <Icon className="size-5" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-base font-extrabold text-[#181e25]">{feature.title}</span>
+                  <span className="mt-1 block text-xs font-medium leading-5 text-[#6b7280]">{feature.description}</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 

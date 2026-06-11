@@ -1,6 +1,6 @@
 "use client";
 
-import { Home as HomeIcon, LoaderCircle, MessageSquarePlus, ShoppingCart, Trash2 } from "lucide-react";
+import { BadgePercent, Gift, Home as HomeIcon, LoaderCircle, MessageSquarePlus, ShoppingCart, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -36,37 +36,37 @@ export function ImageSidebar({
   hideActionButtons = false,
 }: ImageSidebarProps) {
   return (
-    <aside className="h-full min-h-0 overflow-hidden">
+    <aside className="relative h-full min-h-0 overflow-hidden">
       <div className="flex h-full min-h-0 flex-col gap-2 py-1 sm:gap-3 sm:py-2">
         {!hideActionButtons && (
-          <div className="flex flex-col gap-2">
+          <div className="relative z-10 flex flex-col gap-2">
             <Button
-              className="h-10 w-full justify-start rounded-full bg-[#181e25] text-white shadow-sm hover:bg-[#2a323d]"
+              className="h-10 w-full justify-center gap-2 rounded-full bg-[#181e25] text-white shadow-sm hover:bg-[#2a323d]"
               onClick={onOpenHome || onCreateDraft}
             >
               <HomeIcon className="size-4" />
               首页
             </Button>
             <Button
-              className="h-10 w-full justify-start rounded-full bg-[#181e25] text-white shadow-sm hover:bg-[#2a323d]"
+              className="h-10 w-full justify-center gap-2 rounded-full bg-[#181e25] text-white shadow-sm hover:bg-[#2a323d]"
               onClick={onCreateDraft}
             >
-                <MessageSquarePlus className="size-4" />
-                新建对话
+              <MessageSquarePlus className="size-4" />
+              新建对话
             </Button>
             {onOpenEcommerce ? (
               <Button
                 variant="outline"
                 className={cn(
-                  "h-10 w-full justify-start rounded-full",
+                  "h-10 w-full justify-center gap-2 rounded-full",
                   isEcommerceActive
                     ? "border-[#f2c3a3] bg-[#fff0e4] text-[#d7651f] hover:bg-[#fff0e4] hover:text-[#d7651f]"
                     : "border-[#f2c3a3] bg-[#fff7f1] text-[#d7651f] hover:bg-[#fff0e4] hover:text-[#d7651f]",
                 )}
                 onClick={onOpenEcommerce}
               >
-                  <ShoppingCart className="size-4" />
-                  电商专区
+                <ShoppingCart className="size-4" />
+                电商专区
               </Button>
             ) : null}
             <div className="flex justify-end">
@@ -84,9 +84,22 @@ export function ImageSidebar({
           </div>
         )}
 
+        {isEcommerceActive && !hideActionButtons ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-1 z-0 hidden h-[18rem] overflow-hidden sm:block">
+            <div className="absolute bottom-0 left-[-18%] h-16 w-[135%] rotate-[-4deg] rounded-[50%] bg-[#ffd8bf]/55 blur-2xl" />
+            <ShoppingCart className="absolute bottom-10 left-1/2 size-32 -translate-x-1/2 text-[#ffb98f]/50 drop-shadow-[0_28px_34px_rgba(247,137,82,0.24)]" strokeWidth={1.35} />
+            <span className="absolute bottom-[9.6rem] left-[42%] inline-flex size-10 rotate-[-10deg] items-center justify-center rounded-[14px] bg-[#ffd0ad]/65 text-[#ff8a45] shadow-[0_16px_40px_-28px_rgba(236,105,49,0.8)]">
+              <Gift className="size-5" />
+            </span>
+            <span className="absolute bottom-[7.2rem] right-[16%] inline-flex size-9 rotate-[18deg] items-center justify-center rounded-[14px] bg-[#ffe2cf]/70 text-[#ff9a58] shadow-[0_16px_40px_-28px_rgba(236,105,49,0.8)]">
+              <BadgePercent className="size-[18px]" />
+            </span>
+          </div>
+        ) : null}
+
         <div
           className={cn(
-            "min-h-0 flex-1 overflow-y-auto [scrollbar-color:rgba(142,142,147,.45)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#8e8e93]/45 [&::-webkit-scrollbar-track]:bg-transparent",
+            "relative z-10 min-h-0 flex-1 overflow-y-auto [scrollbar-color:rgba(142,142,147,.45)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#8e8e93]/45 [&::-webkit-scrollbar-track]:bg-transparent",
             hideActionButtons ? "flex flex-col gap-1 pr-0" : "flex flex-col gap-2 pr-1",
           )}
         >
