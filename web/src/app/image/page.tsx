@@ -180,6 +180,14 @@ const ECOMMERCE_HERO_FEATURES = [
     description: "快速生成，提升效率",
   },
 ];
+const ECOMMERCE_ANALYZING_MESSAGES = [
+  "正在解析详情页规划需求...",
+  "正在构建页面框架...",
+  "正在搭建内容板块结构...",
+  "正在策划核心信息排布...",
+  "正在完善规划方案细节...",
+  "方案正在深度生成中，耗时稍长，感谢耐心等待",
+] as const;
 
 type ComposerMode = "chat" | "image";
 
@@ -732,6 +740,13 @@ function parseCreationTaskErrorPayload(message: string) {
   };
 }
 
+function isEcommerceConversation(conversation: ImageConversation | null | undefined) {
+  if (!conversation) {
+    return false;
+  }
+  return conversation.turns.some((turn) => turn.hidePromptInResults);
+}
+
 function formatCreationTaskErrorMessage(message: string) {
   const trimmed = String(message || "").trim();
   if (!trimmed) {
@@ -1077,6 +1092,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
   const [ecommerceSizePreset, setEcommerceSizePreset] = useState<EcommerceSizePreset>(DEFAULT_ECOMMERCE_SIZE_PRESET);
   const [ecommerceOutputFormat, setEcommerceOutputFormat] = useState<ImageOutputFormat>(DEFAULT_IMAGE_OUTPUT_FORMAT);
   const [isEcommerceAnalyzing, setIsEcommerceAnalyzing] = useState(false);
+  const [ecommerceAnalyzingStep, setEcommerceAnalyzingStep] = useState(0);
   const [isEcommerceGenerating, setIsEcommerceGenerating] = useState(false);
   const [composerMode, setComposerMode] = useState<ComposerMode>(getStoredComposerMode);
   const [imageModel, setImageModel] = useState<ImageModel>(getStoredImageModel);
@@ -1211,6 +1227,10 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
   const selectedConversation = useMemo(
     () => conversations.find((item) => item.id === selectedConversationId) ?? null,
     [conversations, selectedConversationId],
+  );
+  const selectedConversationIsEcommerce = useMemo(
+    () => isEcommerceConversation(selectedConversation),
+    [selectedConversation],
   );
   const activeTaskCount = useMemo(
     () =>
@@ -1503,6 +1523,24 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     }
   }, [conversations, selectedConversationId]);
 
+  useEffect(() => {
+    if (!isEcommerceAnalyzing) {
+      setEcommerceAnalyzingStep(0);
+      return;
+    }
+
+    setEcommerceAnalyzingStep(0);
+    const timer = window.setInterval(() => {
+      setEcommerceAnalyzingStep((current) =>
+        current < ECOMMERCE_ANALYZING_MESSAGES.length - 1 ? current + 1 : current,
+      );
+    }, 1800);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [isEcommerceAnalyzing]);
+
   const persistConversation = async (conversation: ImageConversation) => {
     const nextConversations = sortImageConversations([
       conversation,
@@ -1613,6 +1651,16 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
 
   const handleOpenEcommerce = () => {
     setIsEcommerceMode(true);
+    setComposerMode("image");
+    setImageModel(DEFAULT_IMAGE_MODEL);
+    if (!isEcommerceConversation(selectedConversation)) {
+      setSelectedConversationId(null);
+    }
+    textareaRef.current?.focus();
+  };
+
+  const handleCreateEcommerceDraft = () => {
+    setIsEcommerceMode(true);
     setSelectedConversationId(null);
     resetComposer();
     clearEcommerceInputs();
@@ -1628,7 +1676,8 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
   }, []);
 
   const handleSelectConversation = (id: string) => {
-    setIsEcommerceMode(false);
+    const conversation = conversationsRef.current.find((item) => item.id === id) ?? null;
+    setIsEcommerceMode(isEcommerceConversation(conversation));
     setSelectedConversationId(id);
   };
 
@@ -3078,6 +3127,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
             selectedConversationId={selectedConversationId}
             onOpenHome={handleOpenHome}
             onCreateDraft={handleCreateDraft}
+            onCreateEcommerceDraft={handleCreateEcommerceDraft}
             onClearHistory={openClearHistoryConfirm}
             onOpenEcommerce={handleOpenEcommerce}
             isEcommerceActive={isEcommerceMode}
@@ -3546,7 +3596,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
             )}
             style={composerDockHeight > 0 ? { paddingBottom: composerDockHeight + 24 } : undefined}
           >
-            {!isEcommerceMode ? (
+            {!isEcommerceMode || selectedConversationIsEcommerce ? (
               <ImageResults
                 selectedConversation={selectedConversation}
                 progressByTurnKey={progressByTurnKey}
@@ -3659,13 +3709,16 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                 }
                 promptStatePanel={
                   isEcommerceMode && isEcommerceAnalyzing ? (
-                    <div className="flex w-full flex-col items-center justify-center gap-3 rounded-[20px] border border-[#eef2ff] bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] px-6 py-8 text-center">
-                      <span className="inline-flex size-16 items-center justify-center rounded-full bg-[linear-gradient(180deg,#f4f8ff_0%,#eef3ff_100%)] text-[#5b7cff] shadow-[0_16px_40px_-24px_rgba(91,124,255,0.45)]">
-                        <Sparkles className="size-7" />
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-[20px] border border-[#eef2ff] bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] px-6 py-8 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
+                      <span className="relative inline-flex size-16 items-center justify-center rounded-full bg-[linear-gradient(180deg,#f4f8ff_0%,#eef3ff_100%)] text-[#5b7cff] shadow-[0_16px_40px_-24px_rgba(91,124,255,0.45)]">
+                        <LoaderCircle className="absolute size-[3.7rem] animate-spin text-[#b9c9ff]" strokeWidth={1.4} />
+                        <Sparkles className="relative z-10 size-7" />
                       </span>
                       <div className="space-y-1">
                         <div className="text-[22px] font-semibold tracking-normal text-[#111827]">正在生成中...</div>
-                        <div className="text-sm text-[#7c8597]">AI正在为您精心构思内容</div>
+                        <div className="text-sm text-[#7c8597]">
+                          {ECOMMERCE_ANALYZING_MESSAGES[ecommerceAnalyzingStep]}
+                        </div>
                       </div>
                     </div>
                   ) : undefined

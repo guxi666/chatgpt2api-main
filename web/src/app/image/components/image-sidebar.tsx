@@ -12,6 +12,7 @@ type ImageSidebarProps = {
   selectedConversationId: string | null;
   onOpenHome?: () => void;
   onCreateDraft: () => void;
+  onCreateEcommerceDraft?: () => void;
   onClearHistory: () => void | Promise<void>;
   onSelectConversation: (id: string) => void;
   onOpenEcommerce?: () => void;
@@ -27,6 +28,7 @@ export function ImageSidebar({
   selectedConversationId,
   onOpenHome,
   onCreateDraft,
+  onCreateEcommerceDraft,
   onClearHistory,
   onSelectConversation,
   onOpenEcommerce,
@@ -67,6 +69,16 @@ export function ImageSidebar({
               >
                 <ShoppingCart className="size-4" />
                 电商专区
+              </Button>
+            ) : null}
+            {onCreateEcommerceDraft ? (
+              <Button
+                variant="outline"
+                className="h-10 w-full justify-center gap-2 rounded-full border-[#f2c3a3] bg-[#fff0e4] text-[#d7651f] hover:bg-[#fff0e4] hover:text-[#d7651f]"
+                onClick={onCreateEcommerceDraft}
+              >
+                <ShoppingCart className="size-4" />
+                新建电商窗口
               </Button>
             ) : null}
             <div className="flex justify-end">

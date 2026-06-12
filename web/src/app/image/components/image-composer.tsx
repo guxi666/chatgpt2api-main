@@ -690,7 +690,7 @@ export function ImageComposer({
             </div>
           ) : null}
           <div className="relative">
-            {uploadButtonPlacement === "prompt" ? (
+            {uploadButtonPlacement === "prompt" && !promptStatePanel ? (
               <div className="absolute left-4 top-4 z-10 sm:left-4 sm:top-3.5" onClick={(event) => event.stopPropagation()}>
                 {renderUploadControl("prompt")}
               </div>
@@ -698,8 +698,7 @@ export function ImageComposer({
             {promptStatePanel ? (
               <div
                 className={cn(
-                  "flex min-h-[96px] items-center justify-center px-6 pt-6 pb-3 sm:min-h-0 sm:px-5 sm:py-4",
-                  uploadButtonPlacement === "prompt" && "pl-16 sm:pl-16",
+                  "flex min-h-[96px] w-full items-stretch justify-stretch px-0 pt-0 pb-0 sm:min-h-0 sm:px-0 sm:py-0",
                 )}
                 style={{ height: promptAreaHeight }}
               >
