@@ -59,6 +59,7 @@ export type StoredImageSizeSelection = {
 export type ImageTurn = {
   id: string;
   prompt: string;
+  hidePromptInResults?: boolean;
   model: ImageModel;
   mode: ImageConversationMode;
   referenceImages: StoredReferenceImage[];
@@ -287,6 +288,7 @@ function normalizeTurn(turn: ImageTurn & Record<string, unknown>): ImageTurn {
   return {
     id: String(turn.id || `${Date.now()}`),
     prompt: String(turn.prompt || ""),
+    hidePromptInResults: Boolean(turn.hidePromptInResults),
     model,
     mode,
     referenceImages,

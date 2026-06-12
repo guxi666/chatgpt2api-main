@@ -482,6 +482,7 @@ export function ImageResults({
     <div className="mx-auto flex w-full max-w-[980px] flex-col gap-5 sm:gap-8">
       {selectedConversation.turns.map((turn, turnIndex) => {
         const progress = progressByTurnKey[turnProgressKey(selectedConversation.id, turn.id)];
+        const hidePromptCard = Boolean(turn.hidePromptInResults);
         const referenceLightboxImages = turn.referenceImages.map((image, index) => ({
           id: `${turn.id}-reference-${index}`,
           src: image.dataUrl,
@@ -584,84 +585,86 @@ export function ImageResults({
 
         return (
           <div key={turn.id} className="flex flex-col gap-3 sm:gap-4">
-            <div className="flex justify-end">
-              <article className="w-full max-w-[min(94%,760px)] rounded-[24px] border border-[#f2f3f5] bg-white px-4 py-3 text-left text-[14px] leading-6 text-[#222222] shadow-[0_4px_6px_rgba(0,0,0,0.08)] sm:px-5 sm:py-4 sm:text-[15px] sm:leading-7">
-                <div className="mb-3 flex items-start justify-between gap-3 border-b border-[#f2f3f5] pb-2">
-                  <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] leading-5 text-[#45515e]">
-                    <span className="rounded-full bg-[#f0f0f0] px-2.5 py-0.5 text-[#45515e]">第 {turnIndex + 1} 轮</span>
-                    <span className="rounded-full bg-[#f0f0f0] px-2.5 py-0.5 text-[#45515e]">{getTurnModeLabel(turn)}</span>
-                    <span className="rounded-full bg-[#f0f0f0] px-2.5 py-0.5 text-[#45515e]">{turn.model}</span>
-                    <span className="rounded-full bg-[#f0f0f0] px-2.5 py-0.5 text-[#45515e]">
-                      {getTurnStatusLabel(turn.status)}
-                    </span>
-                    <span className="px-1 text-[#8e8e93]">{formatConversationTime(turn.createdAt)}</span>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    {turnBusy ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="size-8 rounded-full border-amber-200 bg-amber-50 text-amber-700 shadow-none hover:bg-amber-100"
-                        onClick={() => void onCancelTurn(selectedConversation.id, turn.id)}
-                        aria-label="终止生成任务"
-                        title="终止"
-                      >
-                        <CircleStop className="size-4" />
-                      </Button>
-                    ) : (
-                      <>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="size-8 rounded-full border-[#e5e7eb] bg-white text-[#45515e] shadow-none hover:bg-black/[0.05]"
-                          onClick={() => onEditTurn(selectedConversation.id, turn.id)}
-                          aria-label="编辑生成设置"
-                          title="编辑"
-                        >
-                          <PencilLine className="size-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="size-8 rounded-full border-[#e5e7eb] bg-white text-[#45515e] shadow-none hover:bg-black/[0.05]"
-                          disabled={turnBusy || !turn.prompt.trim()}
-                          onClick={() => void onRegenerateTurn(selectedConversation.id, turn.id)}
-                          aria-label="重新生成"
-                          title="重新生成"
-                        >
-                          <RotateCcw className="size-4" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <div className="whitespace-pre-wrap break-words">{turn.prompt}</div>
-                  {turn.referenceImages.length > 0 ? (
-                    <div className="mt-3 flex flex-wrap justify-start gap-2">
-                      {turn.referenceImages.map((image, index) => (
-                        <button
-                          key={`${turn.id}-${image.name}-${index}`}
-                          type="button"
-                          onClick={() => onOpenLightbox(referenceLightboxImages, index)}
-                          className="group relative size-20 shrink-0 overflow-hidden rounded-2xl border border-stone-200/80 bg-stone-100/60 text-left transition hover:border-stone-300 sm:size-24"
-                          aria-label={`预览参考图 ${image.name || index + 1}`}
-                        >
-                          <img
-                            src={image.dataUrl}
-                            alt={image.name || `参考图 ${index + 1}`}
-                            className="absolute inset-0 h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]"
-                          />
-                        </button>
-                      ))}
+            {!hidePromptCard ? (
+              <div className="flex justify-end">
+                <article className="w-full max-w-[min(94%,760px)] rounded-[24px] border border-[#f2f3f5] bg-white px-4 py-3 text-left text-[14px] leading-6 text-[#222222] shadow-[0_4px_6px_rgba(0,0,0,0.08)] sm:px-5 sm:py-4 sm:text-[15px] sm:leading-7">
+                  <div className="mb-3 flex items-start justify-between gap-3 border-b border-[#f2f3f5] pb-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] leading-5 text-[#45515e]">
+                      <span className="rounded-full bg-[#f0f0f0] px-2.5 py-0.5 text-[#45515e]">第 {turnIndex + 1} 轮</span>
+                      <span className="rounded-full bg-[#f0f0f0] px-2.5 py-0.5 text-[#45515e]">{getTurnModeLabel(turn)}</span>
+                      <span className="rounded-full bg-[#f0f0f0] px-2.5 py-0.5 text-[#45515e]">{turn.model}</span>
+                      <span className="rounded-full bg-[#f0f0f0] px-2.5 py-0.5 text-[#45515e]">
+                        {getTurnStatusLabel(turn.status)}
+                      </span>
+                      <span className="px-1 text-[#8e8e93]">{formatConversationTime(turn.createdAt)}</span>
                     </div>
-                  ) : null}
-                </div>
-              </article>
-            </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {turnBusy ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="size-8 rounded-full border-amber-200 bg-amber-50 text-amber-700 shadow-none hover:bg-amber-100"
+                          onClick={() => void onCancelTurn(selectedConversation.id, turn.id)}
+                          aria-label="终止生成任务"
+                          title="终止"
+                        >
+                          <CircleStop className="size-4" />
+                        </Button>
+                      ) : (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="size-8 rounded-full border-[#e5e7eb] bg-white text-[#45515e] shadow-none hover:bg-black/[0.05]"
+                            onClick={() => onEditTurn(selectedConversation.id, turn.id)}
+                            aria-label="编辑生成设置"
+                            title="编辑"
+                          >
+                            <PencilLine className="size-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="size-8 rounded-full border-[#e5e7eb] bg-white text-[#45515e] shadow-none hover:bg-black/[0.05]"
+                            disabled={turnBusy || !turn.prompt.trim()}
+                            onClick={() => void onRegenerateTurn(selectedConversation.id, turn.id)}
+                            aria-label="重新生成"
+                            title="重新生成"
+                          >
+                            <RotateCcw className="size-4" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="whitespace-pre-wrap break-words">{turn.prompt}</div>
+                    {turn.referenceImages.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap justify-start gap-2">
+                        {turn.referenceImages.map((image, index) => (
+                          <button
+                            key={`${turn.id}-${image.name}-${index}`}
+                            type="button"
+                            onClick={() => onOpenLightbox(referenceLightboxImages, index)}
+                            className="group relative size-20 shrink-0 overflow-hidden rounded-2xl border border-stone-200/80 bg-stone-100/60 text-left transition hover:border-stone-300 sm:size-24"
+                            aria-label={`预览参考图 ${image.name || index + 1}`}
+                          >
+                            <img
+                              src={image.dataUrl}
+                              alt={image.name || `参考图 ${index + 1}`}
+                              className="absolute inset-0 h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]"
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
+              </div>
+            ) : null}
 
             <div className="flex justify-start">
               <section className="w-full px-1">

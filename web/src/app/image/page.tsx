@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { History, ImageIcon, ImagePlus, LoaderCircle, Plus, ShoppingCart, Tags, Trash2, X, Zap } from "lucide-react";
+import { History, ImageIcon, ImagePlus, LoaderCircle, Plus, ShoppingCart, Sparkles, Tags, Trash2, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import { ImageComposer } from "@/app/image/components/image-composer";
@@ -1823,7 +1823,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     setIsEcommerceAnalyzing(true);
     setEcommerceAnalyzeError("");
     setEcommerceProductInfo(ECOMMERCE_ANALYZING_PRODUCT_INFO);
-    setImagePrompt(buildEcommerceProductTemplate(ECOMMERCE_ANALYZING_PRODUCT_INFO));
+    setImagePrompt("");
     try {
       const info = await analyzeEcommerceProductImages(images, ECOMMERCE_CATEGORY_NAME);
       setEcommerceProductInfo(info);
@@ -2853,6 +2853,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
           prompt: composedPrompt,
           language: request.language as EcommerceLanguage,
         }),
+        hidePromptInResults: true,
         model: DEFAULT_IMAGE_MODEL,
         mode: "image",
         referenceImages: request.referenceImages,
@@ -3655,6 +3656,19 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                   isEcommerceMode
                     ? "建议输入:产品名称、卖点、目标人员、详情图风格等\n这款产品是智能颈椎按摩仪，主打缓解久坐、低头、办公疲劳带来的肩颈酸痛。产品采用仿真人手揉捏按摩技术，搭配恒温热敷、多个按摩档位和轻量化佩戴设计，使用舒适不压迫；内置长续航电池，适合办公室、居家、出差等多场景使用..."
                     : undefined
+                }
+                promptStatePanel={
+                  isEcommerceMode && isEcommerceAnalyzing ? (
+                    <div className="flex w-full flex-col items-center justify-center gap-3 rounded-[20px] border border-[#eef2ff] bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] px-6 py-8 text-center">
+                      <span className="inline-flex size-16 items-center justify-center rounded-full bg-[linear-gradient(180deg,#f4f8ff_0%,#eef3ff_100%)] text-[#5b7cff] shadow-[0_16px_40px_-24px_rgba(91,124,255,0.45)]">
+                        <Sparkles className="size-7" />
+                      </span>
+                      <div className="space-y-1">
+                        <div className="text-[22px] font-semibold tracking-normal text-[#111827]">正在生成中...</div>
+                        <div className="text-sm text-[#7c8597]">AI正在为您精心构思内容</div>
+                      </div>
+                    </div>
+                  ) : undefined
                 }
                 secondaryActionLabel={isEcommerceMode ? "AI帮写" : undefined}
                 secondaryActionDisabled={isEcommerceMode ? ecommerceMaterialImages.length === 0 : undefined}

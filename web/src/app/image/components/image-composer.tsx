@@ -66,6 +66,7 @@ type ImageComposerProps = {
   imageOutputHint: ReactNode;
   referenceImages: Array<{ name: string; dataUrl: string }>;
   extraPanel?: ReactNode;
+  promptStatePanel?: ReactNode;
   uploadOptions?: ReadonlyArray<{
     label: string;
     description: string;
@@ -173,6 +174,7 @@ export function ImageComposer({
   imageOutputHint,
   referenceImages,
   extraPanel,
+  promptStatePanel,
   uploadOptions,
   uploadButtonPlacement = "toolbar",
   hideToolbarControls = false,
@@ -693,31 +695,43 @@ export function ImageComposer({
                 {renderUploadControl("prompt")}
               </div>
             ) : null}
-            <Textarea
-              ref={textareaRef}
-              value={prompt}
-              onChange={(event) => onPromptChange(event.target.value)}
-              onPaste={handleTextareaPaste}
-              placeholder={
-                promptPlaceholder ||
-                (composerMode === "chat"
-                  ? "输入消息与AI聊天"
-                  : referenceImages.length > 0
-                  ? "描述你希望如何修改参考图"
-                  : "输入你想要生成的画面，也可直接粘贴图片")
-              }
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void onSubmit();
+            {promptStatePanel ? (
+              <div
+                className={cn(
+                  "flex min-h-[96px] items-center justify-center px-6 pt-6 pb-3 sm:min-h-0 sm:px-5 sm:py-4",
+                  uploadButtonPlacement === "prompt" && "pl-16 sm:pl-16",
+                )}
+                style={{ height: promptAreaHeight }}
+              >
+                {promptStatePanel}
+              </div>
+            ) : (
+              <Textarea
+                ref={textareaRef}
+                value={prompt}
+                onChange={(event) => onPromptChange(event.target.value)}
+                onPaste={handleTextareaPaste}
+                placeholder={
+                  promptPlaceholder ||
+                  (composerMode === "chat"
+                    ? "输入消息与AI聊天"
+                    : referenceImages.length > 0
+                    ? "描述你希望如何修改参考图"
+                    : "输入你想要生成的画面，也可直接粘贴图片")
                 }
-              }}
-              className={cn(
-                "min-h-[96px] resize-none rounded-none border-0 bg-transparent px-6 pt-6 pb-2 text-[17px] leading-7 text-[#222222] shadow-none placeholder:text-[#8e8e93] focus-visible:ring-0 dark:text-foreground dark:placeholder:text-muted-foreground sm:min-h-0 sm:px-5 sm:py-4 sm:text-[15px] sm:leading-6",
-                uploadButtonPlacement === "prompt" && "pl-16 sm:pl-16",
-              )}
-              style={{ height: promptAreaHeight }}
-            />
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void onSubmit();
+                  }
+                }}
+                className={cn(
+                  "min-h-[96px] resize-none rounded-none border-0 bg-transparent px-6 pt-6 pb-2 text-[17px] leading-7 text-[#222222] shadow-none placeholder:text-[#8e8e93] focus-visible:ring-0 dark:text-foreground dark:placeholder:text-muted-foreground sm:min-h-0 sm:px-5 sm:py-4 sm:text-[15px] sm:leading-6",
+                  uploadButtonPlacement === "prompt" && "pl-16 sm:pl-16",
+                )}
+                style={{ height: promptAreaHeight }}
+              />
+            )}
           </div>
 
           <div
