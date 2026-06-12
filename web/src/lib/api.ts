@@ -1116,6 +1116,18 @@ export async function fetchAuthProviders() {
   });
 }
 
+export async function requestEcommerceAssistCharge(mode: "check" | "consume") {
+  return httpRequest<{
+    ok: boolean;
+    amount_cents: number;
+    wallet?: Record<string, unknown>;
+    transaction?: Record<string, unknown>;
+  }>("/api/ecommerce/assist-charge", {
+    method: "POST",
+    body: { mode },
+  });
+}
+
 export async function fetchVisibleAnnouncements(target: AnnouncementTarget) {
   const params = new URLSearchParams({ target });
   return httpRequest<{ items: Announcement[] }>(
@@ -1894,8 +1906,14 @@ function managedUserPath(userId: string) {
   return `/api/admin/users/${encodeURIComponent(userId)}`;
 }
 
-export async function fetchManagedUsers() {
-  return httpRequest<{ items: ManagedUser[] }>("/api/admin/users");
+export async function fetchManagedUsers(options?: { billingOnly?: boolean }) {
+  const params = new URLSearchParams();
+  if (options?.billingOnly) {
+    params.set("billing_only", "1");
+  }
+  return httpRequest<{ items: ManagedUser[] }>(
+    `/api/admin/users${params.toString() ? `?${params.toString()}` : ""}`,
+  );
 }
 
 export async function fetchPermissionCatalog() {

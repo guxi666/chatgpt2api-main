@@ -9,7 +9,6 @@ import { AnnouncementsCard } from "./components/announcements-card";
 import { ConfigCard } from "./components/config-card";
 import { CPAPoolDialog } from "./components/cpa-pool-dialog";
 import { CPAPoolsCard } from "./components/cpa-pools-card";
-import { BillingAdminCard } from "./components/billing-admin-card";
 import { ImportBrowserDialog } from "./components/import-browser-dialog";
 import { LogGovernanceCard } from "./components/log-governance-card";
 import { LoginPageImageCard } from "./components/login-page-image-card";
@@ -81,9 +80,6 @@ function AdminSettingsPageContent() {
         </SettingsMasonryItem>
         <SettingsMasonryItem>
           <R2StorageCard />
-        </SettingsMasonryItem>
-        <SettingsMasonryItem>
-          <BillingAdminCard />
         </SettingsMasonryItem>
         <SettingsMasonryItem>
           <LogGovernanceCard />

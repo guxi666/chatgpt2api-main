@@ -204,6 +204,7 @@ function WalletPageContent() {
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
   const [imagePriceCents, setImagePriceCents] = useState(8);
   const [orders, setOrders] = useState<PayOrder[]>([]);
+  const [ordersTotal, setOrdersTotal] = useState(0);
   const [orderTypeFilter, setOrderTypeFilter] = useState<
     "all" | "recharge" | "consume"
   >("all");
@@ -219,45 +220,73 @@ function WalletPageContent() {
   const [redeemCode, setRedeemCode] = useState("");
   const [showInviteUsers, setShowInviteUsers] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isOrdersLoading, setIsOrdersLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedeeming, setIsRedeeming] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [pendingCount, setPendingCount] = useState(0);
+
+  const reloadWallet = useCallback(async () => {
+    const walletResult = await fetchWallet();
+    const walletData = walletResult;
+    setWallet(walletData.wallet);
+    setImagePriceCents(walletData.image_price);
+    const channels = Array.isArray(walletData.pay_channels)
+      ? walletData.pay_channels
+      : [];
+    setPayChannels(channels);
+    setPayType((current) =>
+      channels.length > 0 && !channels.includes(current)
+        ? defaultPayType(channels)
+        : current,
+    );
+  }, []);
+
+  const reloadOrders = useCallback(async () => {
+    setIsOrdersLoading(true);
+    try {
+      const [ordersData, pendingData] = await Promise.all([
+        fetchPayOrders({
+          type: orderTypeFilter,
+          status: orderStatusFilter,
+          page: page,
+          page_size: pageSize,
+        }),
+        fetchPayOrders({
+          status: "pending",
+          page: 1,
+          page_size: 1,
+        }),
+      ]);
+      setOrders(Array.isArray(ordersData.items) ? ordersData.items : []);
+      setOrdersTotal(Number(ordersData.total || 0));
+      setPendingCount(Number(pendingData.total || 0));
+    } catch (error) {
+      setOrders([]);
+      setOrdersTotal(0);
+      setPendingCount(0);
+      logBackgroundLoadError("加载充值订单失败", error);
+    } finally {
+      setIsOrdersLoading(false);
+    }
+  }, [orderStatusFilter, orderTypeFilter, page, pageSize]);
 
   const reload = useCallback(async () => {
-    const [walletResult, orderResult] = await Promise.allSettled([
-      fetchWallet(),
-      fetchPayOrders({ limit: 500 }),
+    const [walletResult] = await Promise.allSettled([
+      reloadWallet(),
+      reloadOrders(),
     ]);
-    if (walletResult.status === "fulfilled") {
-      const walletData = walletResult.value;
-      setWallet(walletData.wallet);
-      setImagePriceCents(walletData.image_price);
-      const channels = Array.isArray(walletData.pay_channels)
-        ? walletData.pay_channels
-        : [];
-      setPayChannels(channels);
-      setPayType((current) =>
-        channels.length > 0 && !channels.includes(current)
-          ? defaultPayType(channels)
-          : current,
-      );
-    } else {
+    if (walletResult.status !== "fulfilled") {
       logBackgroundLoadError("加载钱包失败", walletResult.reason);
     }
-    if (orderResult.status === "fulfilled") {
-      setOrders(Array.isArray(orderResult.value.items) ? orderResult.value.items : []);
-    } else {
-      setOrders([]);
-      logBackgroundLoadError("加载充值订单失败", orderResult.reason);
-    }
-  }, []);
+  }, [reloadOrders, reloadWallet]);
 
   useEffect(() => {
     let active = true;
     const load = async () => {
       setIsLoading(true);
       try {
-        await reload();
+        await reloadWallet();
       } catch (error) {
         if (active) {
           logBackgroundLoadError("加载钱包失败", error);
@@ -272,7 +301,11 @@ function WalletPageContent() {
     return () => {
       active = false;
     };
-  }, [reload]);
+  }, [reloadWallet]);
+
+  useEffect(() => {
+    void reloadOrders();
+  }, [reloadOrders]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -343,40 +376,11 @@ function WalletPageContent() {
     }
   };
 
-  const pendingCount = useMemo(
-    () =>
-      orders.filter(
-        (order) =>
-          order.status === "pending" && !isPendingOrderTimeout(order, nowMs),
-      ).length,
-    [nowMs, orders],
-  );
-  const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
-      const kind =
-        order.record_type === "transaction"
-          ? String(order.type || "").toLowerCase()
-          : "recharge";
-      if (orderTypeFilter !== "all") {
-        if (orderTypeFilter === "consume" && kind !== "consume") return false;
-        if (orderTypeFilter === "recharge" && kind === "consume") return false;
-      }
-      if (orderStatusFilter !== "all") {
-        const normalized = String(order.status || "").toLowerCase();
-        if (normalized !== orderStatusFilter) return false;
-      }
-      return true;
-    });
-  }, [orderStatusFilter, orderTypeFilter, orders]);
-  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(ordersTotal / pageSize));
   const currentPage = Math.min(page, totalPages);
   useEffect(() => {
     setPage((prev) => Math.max(1, Math.min(prev, totalPages)));
   }, [totalPages]);
-  const pagedOrders = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredOrders.slice(start, start + pageSize);
-  }, [currentPage, filteredOrders, pageSize]);
   const effectiveChannels = payChannels;
 
   return (
@@ -388,11 +392,14 @@ function WalletPageContent() {
           <Button
             variant="outline"
             className="h-10 rounded-lg"
-            onClick={() => void reload()}
-            disabled={isLoading || isSubmitting || isRedeeming}
+            onClick={() => {
+              void reloadWallet();
+              void reloadOrders();
+            }}
+            disabled={isLoading || isOrdersLoading || isSubmitting || isRedeeming}
           >
             <RefreshCw
-              className={`size-4 ${isLoading ? "animate-spin" : ""}`}
+              className={`size-4 ${isLoading || isOrdersLoading ? "animate-spin" : ""}`}
             />
             刷新
           </Button>
@@ -670,11 +677,11 @@ function WalletPageContent() {
               className="h-10 rounded-lg"
             />
           </div>
-          {isLoading ? (
+          {isOrdersLoading ? (
             <div className="flex min-h-[180px] items-center justify-center">
               <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
             </div>
-          ) : filteredOrders.length === 0 ? (
+          ) : orders.length === 0 ? (
             <div className="rounded-[14px] border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
               暂无充值订单
             </div>
@@ -692,7 +699,7 @@ function WalletPageContent() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {pagedOrders.map((order) => {
+                  {orders.map((order) => {
                     const status = orderStatusLabel(order, nowMs);
                     const source =
                       order.record_type === "transaction"
@@ -721,10 +728,10 @@ function WalletPageContent() {
               </Table>
             </div>
           )}
-          {!isLoading && filteredOrders.length > 0 ? (
+          {!isOrdersLoading && orders.length > 0 ? (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
               <span>
-                第 {currentPage} / {totalPages} 页，共 {filteredOrders.length}{" "}
+                第 {currentPage} / {totalPages} 页，共 {ordersTotal}{" "}
                 条
               </span>
               <div className="flex items-center gap-2">

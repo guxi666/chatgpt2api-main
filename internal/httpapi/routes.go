@@ -423,7 +423,17 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == base {
 		switch r.Method {
 		case http.MethodGet:
-			util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.managedUsers()})
+			items := a.managedUsers()
+			if util.ToBool(r.URL.Query().Get("billing_only")) {
+				filtered := make([]map[string]any, 0, len(items))
+				for _, item := range items {
+					if util.ToBool(item["billing_user"]) || util.Clean(item["provider"]) == service.AuthProviderLocal || util.Clean(item["provider"]) == service.AuthProviderEmail {
+						filtered = append(filtered, item)
+					}
+				}
+				items = filtered
+			}
+			util.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 		case http.MethodPost:
 			body, err := readJSONMap(r)
 			if err != nil {

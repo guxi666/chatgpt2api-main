@@ -187,7 +187,7 @@ function UsersContent() {
   const loadUsers = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await fetchManagedUsers();
+      const data = await fetchManagedUsers({ billingOnly: false });
       setItems(Array.isArray(data.items) ? data.items : []);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载用户失败");

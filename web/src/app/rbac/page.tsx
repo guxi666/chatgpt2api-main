@@ -20,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
+  adjustManagedUserSubscription,
   createManagedRole,
   deleteManagedRole,
   fetchManagedRoles,
@@ -120,6 +121,7 @@ function RBACContent() {
 
   const [searchText, setSearchText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isMembersLoading, setIsMembersLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -130,6 +132,11 @@ function RBACContent() {
   const [deletingRole, setDeletingRole] = useState<ManagedRole | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [updatingUserIDs, setUpdatingUserIDs] = useState<Set<string>>(() => new Set());
+  const [editingSubscriptionUserId, setEditingSubscriptionUserId] = useState("");
+  const [subscriptionAdjustMode, setSubscriptionAdjustMode] = useState<"set" | "extend" | "clear">("extend");
+  const [subscriptionAdjustTier, setSubscriptionAdjustTier] = useState<"monthly" | "quarterly" | "yearly">("monthly");
+  const [subscriptionAdjustExpireAt, setSubscriptionAdjustExpireAt] = useState("");
+  const [subscriptionExtendDays, setSubscriptionExtendDays] = useState("30");
 
   useEffect(() => {
     selectedRoleIdRef.current = selectedRoleId;
@@ -146,23 +153,20 @@ function RBACContent() {
   const loadRBAC = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [rolesData, catalogData, usersData] = await Promise.all([
+      const [rolesData, catalogData] = await Promise.all([
         fetchManagedRoles(),
         fetchPermissionCatalog(),
-        fetchManagedUsers(),
       ]);
       const nextRoles = normalizeManagedRoles(rolesData.items);
       const nextCatalog = {
         menus: Array.isArray(catalogData.menus) ? catalogData.menus : [],
         apis: Array.isArray(catalogData.apis) ? catalogData.apis : [],
       };
-      const nextUsers = Array.isArray(usersData.items) ? usersData.items : [];
       const currentID = selectedRoleIdRef.current;
       const nextSelected = nextRoles.find((item) => item.id === currentID) || nextRoles[0] || null;
 
       setRoles(nextRoles);
       setCatalog(nextCatalog);
-      setUsers(nextUsers);
       applySelectedRole(nextSelected);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载角色权限失败");
@@ -171,9 +175,22 @@ function RBACContent() {
     }
   }, [applySelectedRole]);
 
+  const loadRoleMembers = useCallback(async () => {
+    setIsMembersLoading(true);
+    try {
+      const usersData = await fetchManagedUsers();
+      setUsers(Array.isArray(usersData.items) ? usersData.items : []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载角色成员失败");
+    } finally {
+      setIsMembersLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadRBAC();
-  }, [loadRBAC]);
+    void loadRoleMembers();
+  }, [loadRBAC, loadRoleMembers]);
 
   const selectedRole = useMemo(() => roles.find((item) => item.id === selectedRoleId) || null, [roles, selectedRoleId]);
   const selectedRoleSubscriptionTier = useMemo(() => roleSubscriptionTier(selectedRole), [selectedRole]);
@@ -339,6 +356,40 @@ function RBACContent() {
     }
   };
 
+  const handleUserSubscriptionAdjust = async (user: ManagedUser) => {
+    const targetUserId = String(editingSubscriptionUserId || "").trim() || user.id;
+    setUserUpdating(user.id, true);
+    try {
+      const payload: {
+        mode: "set" | "extend" | "clear";
+        tier?: "monthly" | "quarterly" | "yearly";
+        expire_at?: string;
+        extend_days?: number;
+      } = { mode: subscriptionAdjustMode };
+      if (subscriptionAdjustMode !== "clear") {
+        payload.tier = subscriptionAdjustTier;
+      }
+      if (subscriptionAdjustMode === "set" && subscriptionAdjustExpireAt.trim()) {
+        payload.expire_at = subscriptionAdjustExpireAt.trim();
+      }
+      if (subscriptionAdjustMode === "extend") {
+        const extendDays = Number(subscriptionExtendDays.trim());
+        if (!Number.isFinite(extendDays) || extendDays <= 0) {
+          toast.error("续期天数必须大于 0");
+          return;
+        }
+        payload.extend_days = Math.round(extendDays);
+      }
+      const data = await adjustManagedUserSubscription(targetUserId, payload);
+      setUsers(Array.isArray(data.items) ? data.items : []);
+      toast.success("套餐有效期已更新");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "套餐更新失败");
+    } finally {
+      setUserUpdating(user.id, false);
+    }
+  };
+
   return (
     <section className="flex flex-col gap-5">
       <PageHeader
@@ -447,7 +498,11 @@ function RBACContent() {
                   <Badge variant="secondary" className="rounded-md">{isLoading ? "-" : roleMembers.length} 用户</Badge>
               </div>
               {selectedRole ? (
-                roleMembers.length > 0 ? (
+                isMembersLoading ? (
+                  <div className="flex min-h-[160px] items-center justify-center">
+                    <LoaderCircle className="size-5 animate-spin text-stone-400" />
+                  </div>
+                ) : roleMembers.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="min-w-[980px] w-full text-sm">
                       <thead>
@@ -500,6 +555,68 @@ function RBACContent() {
               ) : (
                 <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-6 text-sm text-muted-foreground">请先选择左侧角色。</div>
               )}
+            </div>
+
+            <div className="border-b border-border px-5 py-4">
+              <div className="mb-3 text-sm font-semibold text-foreground">管理员手动调整套餐有效期</div>
+              <div className="grid gap-3 xl:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
+                <Select value={editingSubscriptionUserId} onValueChange={setEditingSubscriptionUserId}>
+                  <SelectTrigger className="h-10 rounded-lg">
+                    <SelectValue placeholder="选择用户" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roleMembers.map((user) => (
+                      <SelectItem key={user.id} value={user.id}>
+                        {managedUserDisplayName(user, duplicatedUserNames)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={subscriptionAdjustMode} onValueChange={(value) => setSubscriptionAdjustMode(value as "set" | "extend" | "clear")}>
+                  <SelectTrigger className="h-10 rounded-lg">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="set">设置套餐与到期时间</SelectItem>
+                    <SelectItem value="extend">按天续期</SelectItem>
+                    <SelectItem value="clear">清空套餐</SelectItem>
+                  </SelectContent>
+                </Select>
+                {subscriptionAdjustMode !== "clear" ? (
+                  <Select value={subscriptionAdjustTier} onValueChange={(value) => setSubscriptionAdjustTier(value as "monthly" | "quarterly" | "yearly")}>
+                    <SelectTrigger className="h-10 rounded-lg">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="monthly">包月</SelectItem>
+                      <SelectItem value="quarterly">包季</SelectItem>
+                      <SelectItem value="yearly">包年</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="h-10 rounded-lg border border-border/80 bg-muted/20" />
+                )}
+                {subscriptionAdjustMode === "set" ? (
+                  <Input type="datetime-local" value={subscriptionAdjustExpireAt} onChange={(event) => setSubscriptionAdjustExpireAt(event.target.value)} className="h-10 rounded-lg" />
+                ) : subscriptionAdjustMode === "extend" ? (
+                  <Input value={subscriptionExtendDays} onChange={(event) => setSubscriptionExtendDays(event.target.value)} placeholder="续期天数" className="h-10 rounded-lg" />
+                ) : (
+                  <div className="h-10 rounded-lg border border-border/80 bg-muted/20" />
+                )}
+                <Button
+                  className="h-10 rounded-lg px-4"
+                  disabled={!editingSubscriptionUserId || isSaving || isMembersLoading}
+                  onClick={() => {
+                    const user = roleMembers.find((item) => item.id === editingSubscriptionUserId);
+                    if (user) {
+                      void handleUserSubscriptionAdjust(user);
+                    }
+                  }}
+                >
+                  {isSaving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
+                  保存
+                </Button>
+              </div>
             </div>
 
             <div className="p-5">

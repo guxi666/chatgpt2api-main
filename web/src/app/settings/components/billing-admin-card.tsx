@@ -61,6 +61,8 @@ const ORDER_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 
 export function BillingAdminCard() {
   const [isLoading, setIsLoading] = useState(true);
+  const [isCodesLoading, setIsCodesLoading] = useState(true);
+  const [isReportLoading, setIsReportLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [codes, setCodes] = useState<RedeemCode[]>([]);
@@ -92,26 +94,19 @@ export function BillingAdminCard() {
   const [reportStartAt, setReportStartAt] = useState("");
   const [reportEndAt, setReportEndAt] = useState("");
 
-  const billUsers = useMemo(
-    () => users.filter((item) => item.billing_user || item.provider === "local" || item.provider === "email"),
-    [users],
-  );
+  const billUsers = useMemo(() => users, [users]);
 
-  const load = async () => {
+  const loadPrimary = async () => {
     setIsLoading(true);
     try {
-      const [usersData, codeData, ordersData] = await Promise.all([
-        fetchManagedUsers(),
-        fetchRedeemCodes(200),
+      const [usersData, ordersData] = await Promise.all([
+        fetchManagedUsers({ billingOnly: true }),
         fetchAdminBillingOrders({ limit: 0, page: 1, page_size: 1 }),
       ]);
       const nextUsers = Array.isArray(usersData.items) ? usersData.items : [];
       setUsers(nextUsers);
-      setCodes(Array.isArray(codeData.items) ? codeData.items : []);
       setOrders(Array.isArray(ordersData.items) ? ordersData.items : []);
       setStats(ordersData.stats || null);
-      const report = await fetchAdminSubscriptionReport();
-      setSubscriptionReport(report);
       if (!selectedUserId && nextUsers.length > 0) {
         const first = nextUsers.find((item) => item.billing_user) || nextUsers[0];
         if (first) {
@@ -125,8 +120,34 @@ export function BillingAdminCard() {
     }
   };
 
+  const loadCodes = async () => {
+    setIsCodesLoading(true);
+    try {
+      const codeData = await fetchRedeemCodes(50);
+      setCodes(Array.isArray(codeData.items) ? codeData.items : []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载卡密失败");
+    } finally {
+      setIsCodesLoading(false);
+    }
+  };
+
+  const loadSubscriptionReport = async () => {
+    setIsReportLoading(true);
+    try {
+      const report = await fetchAdminSubscriptionReport();
+      setSubscriptionReport(report);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载订阅统计失败");
+    } finally {
+      setIsReportLoading(false);
+    }
+  };
+
   useEffect(() => {
-    void load();
+    void loadPrimary();
+    void loadCodes();
+    void loadSubscriptionReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -167,7 +188,7 @@ export function BillingAdminCard() {
         });
       }
       toast.success("余额调整成功");
-      await load();
+      await loadPrimary();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "余额调整失败");
     } finally {
@@ -204,7 +225,7 @@ export function BillingAdminCard() {
     try {
       await adjustManagedUserSubscription(selectedUserId, payload);
       toast.success("套餐有效期已更新");
-      await load();
+      await loadPrimary();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "套餐更新失败");
     } finally {
@@ -232,7 +253,7 @@ export function BillingAdminCard() {
         note: createNote.trim() || undefined,
       });
       toast.success("卡密已生成");
-      await load();
+      await loadCodes();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "生成卡密失败");
     } finally {
@@ -244,7 +265,7 @@ export function BillingAdminCard() {
     setIsSaving(true);
     try {
       await updateRedeemCode(code.code, { enabled: !code.enabled });
-      await load();
+      await loadCodes();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "更新卡密失败");
     } finally {
@@ -256,7 +277,7 @@ export function BillingAdminCard() {
     setIsSaving(true);
     try {
       await deleteRedeemCode(code.code);
-      await load();
+      await loadCodes();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "删除卡密失败");
     } finally {
@@ -278,6 +299,7 @@ export function BillingAdminCard() {
 
   const handleFilterSubscriptionReport = async () => {
     setIsSaving(true);
+    setIsReportLoading(true);
     try {
       const report = await fetchAdminSubscriptionReport({
         tier: reportTier,
@@ -289,6 +311,7 @@ export function BillingAdminCard() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "查询订阅统计失败");
     } finally {
+      setIsReportLoading(false);
       setIsSaving(false);
     }
   };
@@ -427,40 +450,46 @@ export function BillingAdminCard() {
 
           <section className="flex flex-col gap-3 rounded-[14px] border border-border/80 p-4">
             <h3 className="text-sm font-semibold">卡密列表</h3>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>卡密</TableHead>
-                    <TableHead>金额</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead>使用者</TableHead>
-                    <TableHead>过期</TableHead>
-                    <TableHead>操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {codes.map((code) => (
-                    <TableRow key={code.code}>
-                      <TableCell className="font-mono text-xs">{code.code}</TableCell>
-                      <TableCell>￥{code.amount_yuan}</TableCell>
-                      <TableCell>{code.enabled ? "启用" : "禁用"}</TableCell>
-                      <TableCell>{code.used_by || "-"}</TableCell>
-                      <TableCell>{formatDateTime(code.expires_at)}</TableCell>
-                      <TableCell className="flex gap-2">
-                        <Button variant="outline" className="h-8 rounded-[10px] px-3" disabled={isSaving} onClick={() => void handleToggleCode(code)}>
-                          {code.enabled ? "禁用" : "启用"}
-                        </Button>
-                        <Button variant="outline" className="h-8 rounded-[10px] border-rose-200 px-3 text-rose-600" disabled={isSaving} onClick={() => void handleDeleteCode(code)}>
-                          <Trash2 className="size-4" />
-                          删除
-                        </Button>
-                      </TableCell>
+            {isCodesLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>卡密</TableHead>
+                      <TableHead>金额</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>使用者</TableHead>
+                      <TableHead>过期</TableHead>
+                      <TableHead>操作</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {codes.map((code) => (
+                      <TableRow key={code.code}>
+                        <TableCell className="font-mono text-xs">{code.code}</TableCell>
+                        <TableCell>￥{code.amount_yuan}</TableCell>
+                        <TableCell>{code.enabled ? "启用" : "禁用"}</TableCell>
+                        <TableCell>{code.used_by || "-"}</TableCell>
+                        <TableCell>{formatDateTime(code.expires_at)}</TableCell>
+                        <TableCell className="flex gap-2">
+                          <Button variant="outline" className="h-8 rounded-[10px] px-3" disabled={isSaving} onClick={() => void handleToggleCode(code)}>
+                            {code.enabled ? "禁用" : "启用"}
+                          </Button>
+                          <Button variant="outline" className="h-8 rounded-[10px] border-rose-200 px-3 text-rose-600" disabled={isSaving} onClick={() => void handleDeleteCode(code)}>
+                            <Trash2 className="size-4" />
+                            删除
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </section>
 
           <section className="flex flex-col gap-3 rounded-[14px] border border-border/80 p-4">
@@ -526,56 +555,64 @@ export function BillingAdminCard() {
                 <Input id="report-end-at" type="date" value={reportEndAt} onChange={(event) => setReportEndAt(event.target.value)} className={settingsInputClassName} />
               </Field>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              <div className="rounded-[12px] border border-border/80 bg-muted/30 p-3">
-                <div className="text-xs text-muted-foreground">订阅订单</div>
-                <div className="mt-1 text-lg font-semibold">{subscriptionReport?.summary.orders || 0}</div>
+            {isReportLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
               </div>
-              <div className="rounded-[12px] border border-border/80 bg-muted/30 p-3">
-                <div className="text-xs text-muted-foreground">订阅收入</div>
-                <div className="mt-1 text-lg font-semibold">￥{subscriptionReport?.summary.revenue_yuan || "0.00"}</div>
-              </div>
-              <div className="rounded-[12px] border border-border/80 bg-muted/30 p-3">
-                <div className="text-xs text-muted-foreground">新订阅用户</div>
-                <div className="mt-1 text-lg font-semibold">{subscriptionReport?.summary.new_subscribers || 0}</div>
-              </div>
-              <div className="rounded-[12px] border border-border/80 bg-muted/30 p-3">
-                <div className="text-xs text-muted-foreground">续费订单</div>
-                <div className="mt-1 text-lg font-semibold">{subscriptionReport?.summary.renewal_orders || 0}</div>
-              </div>
-              <div className="rounded-[12px] border border-border/80 bg-muted/30 p-3">
-                <div className="text-xs text-muted-foreground">付费用户数</div>
-                <div className="mt-1 text-lg font-semibold">{subscriptionReport?.summary.paid_user_count || 0}</div>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>套餐档位</TableHead>
-                    <TableHead>订单数</TableHead>
-                    <TableHead>收入</TableHead>
-                    <TableHead>新订阅</TableHead>
-                    <TableHead>续费</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(["monthly", "quarterly", "yearly"] as const).map((tier) => {
-                    const row = subscriptionReport?.tiers?.[tier];
-                    const label = tier === "monthly" ? "包月" : tier === "quarterly" ? "包季" : "包年";
-                    return (
-                      <TableRow key={tier}>
-                        <TableCell>{label}</TableCell>
-                        <TableCell>{row?.orders || 0}</TableCell>
-                        <TableCell>￥{row?.revenue_yuan || "0.00"}</TableCell>
-                        <TableCell>{row?.new_subscribers || 0}</TableCell>
-                        <TableCell>{row?.renewals || 0}</TableCell>
+            ) : (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                  <div className="rounded-[12px] border border-border/80 bg-muted/30 p-3">
+                    <div className="text-xs text-muted-foreground">订阅订单</div>
+                    <div className="mt-1 text-lg font-semibold">{subscriptionReport?.summary.orders || 0}</div>
+                  </div>
+                  <div className="rounded-[12px] border border-border/80 bg-muted/30 p-3">
+                    <div className="text-xs text-muted-foreground">订阅收入</div>
+                    <div className="mt-1 text-lg font-semibold">￥{subscriptionReport?.summary.revenue_yuan || "0.00"}</div>
+                  </div>
+                  <div className="rounded-[12px] border border-border/80 bg-muted/30 p-3">
+                    <div className="text-xs text-muted-foreground">新订阅用户</div>
+                    <div className="mt-1 text-lg font-semibold">{subscriptionReport?.summary.new_subscribers || 0}</div>
+                  </div>
+                  <div className="rounded-[12px] border border-border/80 bg-muted/30 p-3">
+                    <div className="text-xs text-muted-foreground">续费订单</div>
+                    <div className="mt-1 text-lg font-semibold">{subscriptionReport?.summary.renewal_orders || 0}</div>
+                  </div>
+                  <div className="rounded-[12px] border border-border/80 bg-muted/30 p-3">
+                    <div className="text-xs text-muted-foreground">付费用户数</div>
+                    <div className="mt-1 text-lg font-semibold">{subscriptionReport?.summary.paid_user_count || 0}</div>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>套餐档位</TableHead>
+                        <TableHead>订单数</TableHead>
+                        <TableHead>收入</TableHead>
+                        <TableHead>新订阅</TableHead>
+                        <TableHead>续费</TableHead>
                       </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+                    </TableHeader>
+                    <TableBody>
+                      {(["monthly", "quarterly", "yearly"] as const).map((tier) => {
+                        const row = subscriptionReport?.tiers?.[tier];
+                        const label = tier === "monthly" ? "包月" : tier === "quarterly" ? "包季" : "包年";
+                        return (
+                          <TableRow key={tier}>
+                            <TableCell>{label}</TableCell>
+                            <TableCell>{row?.orders || 0}</TableCell>
+                            <TableCell>￥{row?.revenue_yuan || "0.00"}</TableCell>
+                            <TableCell>{row?.new_subscribers || 0}</TableCell>
+                            <TableCell>{row?.renewals || 0}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            )}
           </section>
 
 
