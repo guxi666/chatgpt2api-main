@@ -826,64 +826,70 @@ function AdminWalletPageContent() {
     "all" | "pending" | "approved" | "paid" | "rejected"
   >("all");
   const [isLoading, setIsLoading] = useState(false);
+  const [isOrdersLoading, setIsOrdersLoading] = useState(false);
+  const [isWithdrawalsLoading, setIsWithdrawalsLoading] = useState(false);
   const [processingWithdrawalID, setProcessingWithdrawalID] = useState("");
 
-  const load = useCallback(async (showLoading = false) => {
+  const loadOrders = useCallback(async (showLoading = false) => {
     if (showLoading) {
       setIsLoading(true);
     }
+    setIsOrdersLoading(true);
     try {
-      const [orderResult, withdrawalResult] = await Promise.allSettled([
-        fetchAdminBillingOrders({
-          limit: 0,
-          status: orderStatus,
-          order_kind: orderKind,
-          page: orderPage,
-          page_size: orderPageSize,
-        }),
-        fetchAgencyAdminWithdrawals(500),
-      ]);
-      if (orderResult.status === "fulfilled") {
-        const orderData = orderResult.value;
-        setOrders(Array.isArray(orderData.items) ? orderData.items : []);
-        setStats(orderData.stats || EMPTY_ADMIN_BILLING_STATS);
-        setOrderTotal(Number(orderData.total || 0));
-        setOrderTotalPages(Math.max(1, Number(orderData.total_page || 1)));
-      } else {
-        setOrders([]);
-        setStats(EMPTY_ADMIN_BILLING_STATS);
-        setOrderTotal(0);
-        setOrderTotalPages(1);
-        logBackgroundLoadError("加载充值和收益明细失败", orderResult.reason);
-      }
-
-      if (withdrawalResult.status === "fulfilled") {
-        const nextWithdrawals = Array.isArray(withdrawalResult.value.items)
-          ? withdrawalResult.value.items
-          : [];
-        setWithdrawals(nextWithdrawals);
-        setWithdrawalNotes((current) => {
-          const next = { ...current };
-          for (const item of nextWithdrawals) {
-            if (next[item.id] === undefined)
-              next[item.id] = item.admin_note || "";
-          }
-          return next;
-        });
-      } else {
-        setWithdrawals([]);
-        logBackgroundLoadError("加载提现申请失败", withdrawalResult.reason);
-      }
+      const orderData = await fetchAdminBillingOrders({
+        limit: 0,
+        status: orderStatus,
+        order_kind: orderKind,
+        page: orderPage,
+        page_size: orderPageSize,
+      });
+      setOrders(Array.isArray(orderData.items) ? orderData.items : []);
+      setStats(orderData.stats || EMPTY_ADMIN_BILLING_STATS);
+      setOrderTotal(Number(orderData.total || 0));
+      setOrderTotalPages(Math.max(1, Number(orderData.total_page || 1)));
     } catch (error) {
-      logBackgroundLoadError("加载提现和收益明细失败", error);
+      setOrders([]);
+      setStats(EMPTY_ADMIN_BILLING_STATS);
+      setOrderTotal(0);
+      setOrderTotalPages(1);
+      logBackgroundLoadError("加载充值和收益明细失败", error);
     } finally {
+      setIsOrdersLoading(false);
       setIsLoading(false);
     }
   }, [orderKind, orderPage, orderPageSize, orderStatus]);
 
+  const loadWithdrawals = useCallback(async () => {
+    setIsWithdrawalsLoading(true);
+    try {
+      const withdrawalData = await fetchAgencyAdminWithdrawals(100);
+      const nextWithdrawals = Array.isArray(withdrawalData.items)
+        ? withdrawalData.items
+        : [];
+      setWithdrawals(nextWithdrawals);
+      setWithdrawalNotes((current) => {
+        const next = { ...current };
+        for (const item of nextWithdrawals) {
+          if (next[item.id] === undefined)
+            next[item.id] = item.admin_note || "";
+        }
+        return next;
+      });
+    } catch (error) {
+      setWithdrawals([]);
+      logBackgroundLoadError("加载提现申请失败", error);
+    } finally {
+      setIsWithdrawalsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadOrders();
+  }, [loadOrders]);
+
+  useEffect(() => {
+    void loadWithdrawals();
+  }, [loadWithdrawals]);
 
   useEffect(() => {
     setOrderPage((prev) => Math.max(1, Math.min(prev, orderTotalPages)));
@@ -932,11 +938,14 @@ function AdminWalletPageContent() {
           <Button
             variant="outline"
             className="h-10 rounded-lg"
-            onClick={() => void load(true)}
-            disabled={isLoading}
+            onClick={() => {
+              void loadOrders(true);
+              void loadWithdrawals();
+            }}
+            disabled={isLoading || isOrdersLoading || isWithdrawalsLoading}
           >
             <RefreshCw
-              className={`size-4 ${isLoading ? "animate-spin" : ""}`}
+              className={`size-4 ${isLoading || isOrdersLoading || isWithdrawalsLoading ? "animate-spin" : ""}`}
             />
             刷新
           </Button>
@@ -992,7 +1001,7 @@ function AdminWalletPageContent() {
               isLoading={isLoading}
               className="text-2xl font-semibold"
             >
-              {withdrawals.length}
+              {isWithdrawalsLoading ? "-" : withdrawals.length}
             </MetricValue>
           </CardContent>
         </Card>
@@ -1040,7 +1049,7 @@ function AdminWalletPageContent() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {isLoading ? (
+                {isWithdrawalsLoading ? (
                   <TableRow>
                     <TableCell
                       colSpan={8}
@@ -1263,10 +1272,10 @@ function AdminWalletPageContent() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {isLoading ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={8}
+                  {isOrdersLoading ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={8}
                       className="py-8 text-center text-muted-foreground"
                     >
                       <LoaderCircle className="mr-2 inline size-4 animate-spin" />

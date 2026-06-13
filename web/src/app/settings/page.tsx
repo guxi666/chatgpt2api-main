@@ -37,7 +37,7 @@ function SettingsDataController() {
 }
 
 function SettingsMasonryItem({ children }: { children: ReactNode }) {
-  return <div className="mb-5 break-inside-avoid">{children}</div>;
+  return <div>{children}</div>;
 }
 
 function DeferredSettingsSection({
@@ -93,10 +93,10 @@ function AdminSettingsPageContent() {
   }, [loadPools, pools]);
 
   return (
-    <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 pb-8">
+    <div className="mx-auto flex w-full max-w-[1680px] flex-col gap-5 pb-8">
       <SettingsDataController />
       <SettingsHeader />
-      <section className="columns-1 gap-5 md:columns-2 xl:columns-3">
+      <section className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
         <SettingsMasonryItem>
           <ConfigCard />
         </SettingsMasonryItem>
@@ -108,9 +108,6 @@ function AdminSettingsPageContent() {
         </SettingsMasonryItem>
         <SettingsMasonryItem>
           <PaymentSettingsCard />
-        </SettingsMasonryItem>
-        <SettingsMasonryItem>
-          <BillingAdminCard />
         </SettingsMasonryItem>
         <SettingsMasonryItem>
           <R2StorageCard />
@@ -130,6 +127,9 @@ function AdminSettingsPageContent() {
         <DeferredSettingsSection title="Sub2API 连接管理">
           <Sub2APIConnections />
         </DeferredSettingsSection>
+      </section>
+      <section>
+        <BillingAdminCard />
       </section>
       <CPAPoolDialog />
       <ImportBrowserDialog />
