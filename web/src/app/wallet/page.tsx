@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -800,6 +800,18 @@ function payoutText(item: AgencyWithdrawalRequest) {
 }
 
 function AdminWalletPageContent() {
+  const ordersCacheRef = useRef(
+    new Map<
+      string,
+      {
+        items: PayOrder[];
+        stats: AdminBillingStats;
+        total: number;
+        totalPages: number;
+      }
+    >(),
+  );
+  const withdrawalsCacheRef = useRef<AgencyWithdrawalRequest[] | null>(null);
   const [orders, setOrders] = useState<PayOrder[]>([]);
   const [stats, setStats] = useState<AdminBillingStats | null>(null);
   const [withdrawals, setWithdrawals] = useState<AgencyWithdrawalRequest[]>([]);
@@ -831,6 +843,20 @@ function AdminWalletPageContent() {
   const [processingWithdrawalID, setProcessingWithdrawalID] = useState("");
 
   const loadOrders = useCallback(async (showLoading = false) => {
+    const cacheKey = JSON.stringify({
+      orderKind,
+      orderStatus,
+      orderPage,
+      orderPageSize,
+    });
+    const cached = ordersCacheRef.current.get(cacheKey);
+    if (cached && !showLoading) {
+      setOrders(cached.items);
+      setStats(cached.stats);
+      setOrderTotal(cached.total);
+      setOrderTotalPages(cached.totalPages);
+      return;
+    }
     if (showLoading) {
       setIsLoading(true);
     }
@@ -847,6 +873,12 @@ function AdminWalletPageContent() {
       setStats(orderData.stats || EMPTY_ADMIN_BILLING_STATS);
       setOrderTotal(Number(orderData.total || 0));
       setOrderTotalPages(Math.max(1, Number(orderData.total_page || 1)));
+      ordersCacheRef.current.set(cacheKey, {
+        items: Array.isArray(orderData.items) ? orderData.items : [],
+        stats: orderData.stats || EMPTY_ADMIN_BILLING_STATS,
+        total: Number(orderData.total || 0),
+        totalPages: Math.max(1, Number(orderData.total_page || 1)),
+      });
     } catch (error) {
       setOrders([]);
       setStats(EMPTY_ADMIN_BILLING_STATS);
@@ -860,12 +892,17 @@ function AdminWalletPageContent() {
   }, [orderKind, orderPage, orderPageSize, orderStatus]);
 
   const loadWithdrawals = useCallback(async () => {
+    if (withdrawalsCacheRef.current) {
+      setWithdrawals(withdrawalsCacheRef.current);
+      return;
+    }
     setIsWithdrawalsLoading(true);
     try {
       const withdrawalData = await fetchAgencyAdminWithdrawals(100);
       const nextWithdrawals = Array.isArray(withdrawalData.items)
         ? withdrawalData.items
         : [];
+      withdrawalsCacheRef.current = nextWithdrawals;
       setWithdrawals(nextWithdrawals);
       setWithdrawalNotes((current) => {
         const next = { ...current };
