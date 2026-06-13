@@ -37,7 +37,7 @@ function SettingsDataController() {
 }
 
 function SettingsMasonryItem({ children }: { children: ReactNode }) {
-  return <div>{children}</div>;
+  return <div className="mb-5 break-inside-avoid">{children}</div>;
 }
 
 function DeferredSettingsSection({
@@ -96,7 +96,7 @@ function AdminSettingsPageContent() {
     <div className="mx-auto flex w-full max-w-[1680px] flex-col gap-5 pb-8">
       <SettingsDataController />
       <SettingsHeader />
-      <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+      <section className="columns-1 gap-5 xl:columns-2">
         <SettingsMasonryItem>
           <ConfigCard />
         </SettingsMasonryItem>
@@ -119,7 +119,7 @@ function AdminSettingsPageContent() {
           <AnnouncementsCard />
         </SettingsMasonryItem>
       </section>
-      <section className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+      <section className="columns-1 gap-5 md:columns-2 xl:columns-3">
         <DeferredSettingsSection title="日志数据治理" onOpen={() => void loadLogGovernance()}>
           <LogGovernanceCard />
         </DeferredSettingsSection>
