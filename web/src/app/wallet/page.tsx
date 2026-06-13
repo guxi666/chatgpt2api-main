@@ -834,6 +834,7 @@ function AdminWalletPageContent() {
   const [orderPage, setOrderPage] = useState(1);
   const [orderTotal, setOrderTotal] = useState(0);
   const [orderTotalPages, setOrderTotalPages] = useState(1);
+  const [orderUserKeyword, setOrderUserKeyword] = useState("");
   const [withdrawStatus, setWithdrawStatus] = useState<
     "all" | "pending" | "approved" | "paid" | "rejected"
   >("all");
@@ -846,6 +847,7 @@ function AdminWalletPageContent() {
     const cacheKey = JSON.stringify({
       orderKind,
       orderStatus,
+      orderUserKeyword,
       orderPage,
       orderPageSize,
     });
@@ -866,6 +868,7 @@ function AdminWalletPageContent() {
         limit: 0,
         status: orderStatus,
         order_kind: orderKind,
+        user_keyword: orderUserKeyword,
         page: orderPage,
         page_size: orderPageSize,
       });
@@ -889,7 +892,7 @@ function AdminWalletPageContent() {
       setIsOrdersLoading(false);
       setIsLoading(false);
     }
-  }, [orderKind, orderPage, orderPageSize, orderStatus]);
+  }, [orderKind, orderPage, orderPageSize, orderStatus, orderUserKeyword]);
 
   const loadWithdrawals = useCallback(async () => {
     if (withdrawalsCacheRef.current) {
@@ -1224,7 +1227,16 @@ function AdminWalletPageContent() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-[160px_160px_140px_160px]">
+          <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-[minmax(220px,1.2fr)_160px_160px_140px_160px]">
+            <Input
+              value={orderUserKeyword}
+              onChange={(event) => {
+                setOrderUserKeyword(event.target.value);
+                setOrderPage(1);
+              }}
+              placeholder="查询用户邮箱 / 用户ID / 订单号"
+              className="h-10 rounded-lg"
+            />
             <Select
               value={orderStatus}
               onValueChange={(value) => {

@@ -1066,6 +1066,7 @@ func (a *App) handleAdminBilling(w http.ResponseWriter, r *http.Request) {
 		a.decorateAdminBillingOrderUsers(items)
 		statusFilter := strings.ToLower(strings.TrimSpace(query.Get("status")))
 		kindFilter := strings.ToLower(strings.TrimSpace(query.Get("order_kind")))
+		userKeyword := strings.ToLower(strings.TrimSpace(query.Get("user_keyword")))
 		filtered := make([]map[string]any, 0, len(items))
 		for _, item := range items {
 			if statusFilter != "" && statusFilter != "all" && strings.ToLower(strings.TrimSpace(util.Clean(item["status"]))) != statusFilter {
@@ -1073,6 +1074,18 @@ func (a *App) handleAdminBilling(w http.ResponseWriter, r *http.Request) {
 			}
 			if kindFilter != "" && kindFilter != "all" && strings.ToLower(strings.TrimSpace(util.Clean(item["order_kind"]))) != kindFilter {
 				continue
+			}
+			if userKeyword != "" {
+				candidate := strings.ToLower(strings.TrimSpace(
+					firstNonEmpty(
+						util.Clean(item["user_email"]),
+						util.Clean(item["user_id"]),
+						util.Clean(item["out_trade_no"]),
+					),
+				))
+				if !strings.Contains(candidate, userKeyword) {
+					continue
+				}
 			}
 			filtered = append(filtered, item)
 		}

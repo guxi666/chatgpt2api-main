@@ -328,6 +328,16 @@ export function ImageResults({
       });
   };
 
+  const setBulkImageSelection = (keys: string[], selected: boolean) => {
+    setSelectedImageIds((current) => {
+      const next = { ...current };
+      keys.forEach((key) => {
+        next[key] = selected;
+      });
+      return next;
+    });
+  };
+
   const downloadItems = async (key: string, items: DownloadableImage[]) => {
     if (items.length === 0 || downloadingKey) {
       return;
@@ -481,6 +491,25 @@ export function ImageResults({
   const ecommerceGridMode =
     selectedConversation.turns.length > 1 &&
     selectedConversation.turns.every((turn) => Boolean(turn.hidePromptInResults));
+  const conversationDownloadableImages = selectedConversation.turns.flatMap((turn) =>
+    turn.images.flatMap((image, index) => {
+      const src = image.status === "success" ? getStoredImageSrc(image) : "";
+      return src
+        ? [
+            {
+              id: image.id,
+              selectionKey: imageSelectionKey(selectedConversation.id, turn.id, image.id),
+              src,
+              fileName: buildDownloadName(turn.createdAt, turn.id, index, image.outputFormat || turn.outputFormat),
+              imageIndex: index,
+            },
+          ]
+        : [];
+    }),
+  );
+  const selectedConversationDownloadableImages = conversationDownloadableImages.filter(
+    (image) => selectedImageIds[image.selectionKey],
+  );
 
   return (
     <div
@@ -489,6 +518,62 @@ export function ImageResults({
         ecommerceGridMode ? "grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" : "flex flex-col gap-5 sm:gap-8",
       )}
     >
+      {ecommerceGridMode && conversationDownloadableImages.length > 0 ? (
+        <div className="col-span-full flex flex-wrap items-center justify-between gap-3 rounded-[20px] border border-[#e5e7eb] bg-white px-4 py-3 shadow-[0_4px_10px_rgba(24,30,37,0.05)]">
+          <div className="text-sm font-medium text-[#222222]">
+            当前对话共 {conversationDownloadableImages.length} 张图，已选 {selectedConversationDownloadableImages.length} 张
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 rounded-full px-3"
+              onClick={() =>
+                setBulkImageSelection(
+                  conversationDownloadableImages.map((item) => item.selectionKey),
+                  true,
+                )
+              }
+            >
+              全选当前对话
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 rounded-full px-3"
+              onClick={() =>
+                setBulkImageSelection(
+                  conversationDownloadableImages.map((item) => item.selectionKey),
+                  false,
+                )
+              }
+            >
+              取消全选
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-9 rounded-full bg-[#1456f0] px-3 text-white hover:bg-[#2563eb]"
+              disabled={selectedConversationDownloadableImages.length === 0 || downloadingKey !== null}
+              onClick={() =>
+                void downloadItems(
+                  `conversation-selected:${selectedConversation.id}`,
+                  selectedConversationDownloadableImages,
+                )
+              }
+            >
+              {downloadingKey === `conversation-selected:${selectedConversation.id}` ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <Download className="size-4" />
+              )}
+              下载已选
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {selectedConversation.turns.map((turn, turnIndex) => {
         const progress = progressByTurnKey[turnProgressKey(selectedConversation.id, turn.id)];
         const hidePromptCard = Boolean(turn.hidePromptInResults);

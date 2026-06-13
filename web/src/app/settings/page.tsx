@@ -96,7 +96,7 @@ function AdminSettingsPageContent() {
     <div className="mx-auto flex w-full max-w-[1680px] flex-col gap-5 pb-8">
       <SettingsDataController />
       <SettingsHeader />
-      <section className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+      <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <SettingsMasonryItem>
           <ConfigCard />
         </SettingsMasonryItem>
@@ -118,6 +118,8 @@ function AdminSettingsPageContent() {
         <SettingsMasonryItem>
           <AnnouncementsCard />
         </SettingsMasonryItem>
+      </section>
+      <section className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         <DeferredSettingsSection title="日志数据治理" onOpen={() => void loadLogGovernance()}>
           <LogGovernanceCard />
         </DeferredSettingsSection>

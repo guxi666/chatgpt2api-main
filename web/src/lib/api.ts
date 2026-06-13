@@ -2083,6 +2083,7 @@ export async function fetchAdminBillingOrders(
           | "subscription_quarterly"
           | "subscription_yearly"
           | "all";
+        user_keyword?: string;
         page?: number;
         page_size?: number;
       }
@@ -2097,6 +2098,8 @@ export async function fetchAdminBillingOrders(
       params.set("status", filters.status);
     if (filters.order_kind && filters.order_kind !== "all")
       params.set("order_kind", filters.order_kind);
+    if (filters.user_keyword && filters.user_keyword.trim())
+      params.set("user_keyword", filters.user_keyword.trim());
     if (filters.page && filters.page > 0)
       params.set("page", String(filters.page));
     if (filters.page_size && filters.page_size > 0)
