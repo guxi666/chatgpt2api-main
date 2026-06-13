@@ -178,7 +178,7 @@ function RBACContent() {
   const loadRoleMembers = useCallback(async () => {
     setIsMembersLoading(true);
     try {
-      const usersData = await fetchManagedUsers();
+      const usersData = await fetchManagedUsers({ compact: true });
       setUsers(Array.isArray(usersData.items) ? usersData.items : []);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载角色成员失败");

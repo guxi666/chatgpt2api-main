@@ -478,8 +478,17 @@ export function ImageResults({
     );
   }
 
+  const ecommerceGridMode =
+    selectedConversation.turns.length > 1 &&
+    selectedConversation.turns.every((turn) => Boolean(turn.hidePromptInResults));
+
   return (
-    <div className="mx-auto flex w-full max-w-[980px] flex-col gap-5 sm:gap-8">
+    <div
+      className={cn(
+        "mx-auto w-full max-w-[980px]",
+        ecommerceGridMode ? "grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" : "flex flex-col gap-5 sm:gap-8",
+      )}
+    >
       {selectedConversation.turns.map((turn, turnIndex) => {
         const progress = progressByTurnKey[turnProgressKey(selectedConversation.id, turn.id)];
         const hidePromptCard = Boolean(turn.hidePromptInResults);
@@ -584,7 +593,7 @@ export function ImageResults({
           ) : null;
 
         return (
-          <div key={turn.id} className="flex flex-col gap-3 sm:gap-4">
+          <div key={turn.id} className={cn("flex flex-col gap-3 sm:gap-4", ecommerceGridMode && "min-w-0")}>
             {!hidePromptCard ? (
               <div className="flex justify-end">
                 <article className="w-full max-w-[min(94%,760px)] rounded-[24px] border border-[#f2f3f5] bg-white px-4 py-3 text-left text-[14px] leading-6 text-[#222222] shadow-[0_4px_6px_rgba(0,0,0,0.08)] sm:px-5 sm:py-4 sm:text-[15px] sm:leading-7">
@@ -667,7 +676,7 @@ export function ImageResults({
             ) : null}
 
             <div className="flex justify-start">
-              <section className="w-full px-1">
+              <section className={cn("w-full px-1", ecommerceGridMode && "px-0")}>
                 {showResultSummary ? (
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2 sm:mb-4">
                     <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[#45515e] sm:gap-2 sm:text-xs">
@@ -733,7 +742,12 @@ export function ImageResults({
                 ) : null}
 
                 {visualImages.length > 0 ? (
-                  <div className="columns-1 gap-3 sm:columns-2 sm:gap-4 xl:columns-3">
+                  <div
+                    className={cn(
+                      "columns-1 gap-3 sm:columns-2 sm:gap-4 xl:columns-3",
+                      ecommerceGridMode && "grid grid-cols-1 gap-0 sm:grid-cols-1 xl:grid-cols-1",
+                    )}
+                  >
                     {visualImages.map(({ image, index }) => {
                     const imageSrc = image.status === "success" ? getStoredImageSrc(image) : "";
                     if (image.status === "success" && imageSrc) {
@@ -755,6 +769,7 @@ export function ImageResults({
                           key={image.id}
                           className={cn(
                             "group relative mb-3 inline-block w-full break-inside-avoid overflow-hidden rounded-[22px] bg-[#f0f0f0] shadow-[0_0_15px_rgba(44,30,116,0.16)] sm:mb-4",
+                            ecommerceGridMode && "mb-0",
                             selected && "ring-2 ring-[#1456f0]/90 ring-offset-2",
                           )}
                           onMouseLeave={(event) => blurFocusedElementInContainer(event.currentTarget)}

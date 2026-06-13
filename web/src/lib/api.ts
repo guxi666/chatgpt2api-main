@@ -1906,10 +1906,13 @@ function managedUserPath(userId: string) {
   return `/api/admin/users/${encodeURIComponent(userId)}`;
 }
 
-export async function fetchManagedUsers(options?: { billingOnly?: boolean }) {
+export async function fetchManagedUsers(options?: { billingOnly?: boolean; compact?: boolean }) {
   const params = new URLSearchParams();
   if (options?.billingOnly) {
     params.set("billing_only", "1");
+  }
+  if (options?.compact) {
+    params.set("compact", "1");
   }
   return httpRequest<{ items: ManagedUser[] }>(
     `/api/admin/users${params.toString() ? `?${params.toString()}` : ""}`,

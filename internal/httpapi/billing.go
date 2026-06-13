@@ -13,6 +13,8 @@ import (
 	"chatgpt2api/internal/version"
 )
 
+const ecommerceAssistPriceCents = 5
+
 func (a *App) handleEmailRegister(w http.ResponseWriter, r *http.Request) {
 	body, err := readJSONMap(r)
 	if err != nil {
@@ -120,6 +122,48 @@ func (a *App) handleWallet(w http.ResponseWriter, r *http.Request) {
 		"image_price":  a.config.ImagePriceCents(),
 		"image_prices": a.imagePricesConfig(),
 		"pay_channels": a.availablePayChannels(),
+	})
+}
+
+func (a *App) handleEcommerceAssistCharge(w http.ResponseWriter, r *http.Request) {
+	identity, ok := a.requireIdentity(w, r, "")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	body, err := readJSONMap(r)
+	if err != nil {
+		util.WriteError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	mode := strings.ToLower(strings.TrimSpace(util.Clean(body["mode"])))
+	if mode == "" {
+		mode = "consume"
+	}
+	if mode == "check" {
+		if err := a.billing.EnsureCanConsumeBalance(identity, ecommerceAssistPriceCents); err != nil {
+			util.WriteError(w, http.StatusPaymentRequired, err.Error())
+			return
+		}
+		util.WriteJSON(w, http.StatusOK, map[string]any{
+			"ok":           true,
+			"amount_cents": ecommerceAssistPriceCents,
+		})
+		return
+	}
+	tx, chargeErr := a.billing.ConsumeBalanceUsage(identity, ecommerceAssistPriceCents, "ecommerce ai assist")
+	if chargeErr != nil {
+		util.WriteError(w, http.StatusPaymentRequired, chargeErr.Error())
+		return
+	}
+	util.WriteJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"amount_cents": ecommerceAssistPriceCents,
+		"wallet":       a.billing.GetWalletByIdentity(identity),
+		"transaction":  tx,
 	})
 }
 

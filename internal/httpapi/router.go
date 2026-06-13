@@ -70,6 +70,7 @@ func (a *App) routes() []appRoute {
 		subtree("/api/register", a.handleRegister),
 		exact(http.MethodGet, "/api/wallet", a.handleWallet),
 		exact(http.MethodPost, "/api/wallet/redeem", a.handleWalletRedeem),
+		exact(http.MethodPost, "/api/ecommerce/assist-charge", a.handleEcommerceAssistCharge),
 		exact("", "/api/pay/orders", a.handlePayOrders),
 		exact("", "/api/subscriptions/plans", a.handleSubscriptions),
 		exact("", "/api/subscriptions/orders", a.handleSubscriptions),

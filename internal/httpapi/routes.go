@@ -423,7 +423,7 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == base {
 		switch r.Method {
 		case http.MethodGet:
-			items := a.managedUsers()
+			items := a.managedUsers(util.ToBool(r.URL.Query().Get("compact")))
 			if util.ToBool(r.URL.Query().Get("billing_only")) {
 				filtered := make([]map[string]any, 0, len(items))
 				for _, item := range items {
@@ -464,7 +464,7 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 					service.AuthProviderLocal,
 				)
 			}
-			items := a.managedUsers()
+			items := a.managedUsers(false)
 			if current := findManagedUser(items, util.Clean(item["id"])); current != nil {
 				item = current
 			}
@@ -527,7 +527,7 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 			util.WriteError(w, http.StatusNotFound, "user not found")
 			return
 		}
-		items := a.managedUsers()
+		items := a.managedUsers(false)
 		if current := findManagedUser(items, userID); current != nil {
 			item = current
 		}
@@ -552,7 +552,7 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 			util.WriteError(w, status, err.Error())
 			return
 		}
-		util.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": a.managedUsers()})
+		util.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": a.managedUsers(false)})
 		return
 	}
 	if len(parts) != 4 {
@@ -588,7 +588,7 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		if _, hasRoleID := updates["role_id"]; hasRoleID {
 			a.syncAgencyByRoleID(userID, util.Clean(item["role_id"]))
 		}
-		items := a.managedUsers()
+		items := a.managedUsers(false)
 		if current := findManagedUser(items, userID); current != nil {
 			item = current
 		}
@@ -598,13 +598,13 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 			util.WriteError(w, http.StatusNotFound, "user not found")
 			return
 		}
-		util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.managedUsers()})
+		util.WriteJSON(w, http.StatusOK, map[string]any{"items": a.managedUsers(false)})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
-func (a *App) managedUsers() []map[string]any {
+func (a *App) managedUsers(compact bool) []map[string]any {
 	items := a.auth.ListUsers()
 	billingUsers := map[string]map[string]any{}
 	for _, item := range a.billing.ListUsersForAdmin() {
@@ -613,7 +613,10 @@ func (a *App) managedUsers() []map[string]any {
 			billingUsers[id] = item
 		}
 	}
-	stats := a.logs.UserUsageStats(14)
+	stats := map[string]map[string]any{}
+	if !compact {
+		stats = a.logs.UserUsageStats(14)
+	}
 	for _, item := range items {
 		userID := util.Clean(item["id"])
 		item["has_password"] = a.auth.HasPasswordAccountByUserID(userID)
@@ -634,12 +637,14 @@ func (a *App) managedUsers() []map[string]any {
 				billingUsers[userID] = wallet
 			}
 		}
-		usage := stats[userID]
-		if usage == nil {
-			usage = service.ZeroUserUsageStats(14)
-		}
-		for key, value := range usage {
-			item[key] = value
+		if !compact {
+			usage := stats[userID]
+			if usage == nil {
+				usage = service.ZeroUserUsageStats(14)
+			}
+			for key, value := range usage {
+				item[key] = value
+			}
 		}
 		if billing, exists := billingUsers[userID]; exists {
 			email := managedUserEmailCandidate(
@@ -759,7 +764,7 @@ func (a *App) decorateAdminBillingOrderUsers(items []map[string]any) {
 		}
 	}
 	usersByID := map[string]map[string]any{}
-	for _, user := range a.managedUsers() {
+	for _, user := range a.managedUsers(false) {
 		if id := strings.TrimSpace(util.Clean(user["id"])); id != "" {
 			usersByID[id] = user
 		}
@@ -876,7 +881,7 @@ func (a *App) handleAdminBilling(w http.ResponseWriter, r *http.Request) {
 			}
 			util.WriteJSON(w, http.StatusOK, map[string]any{
 				"wallet": wallet,
-				"items":  a.managedUsers(),
+				"items":  a.managedUsers(false),
 			})
 			return
 		}
@@ -912,7 +917,7 @@ func (a *App) handleAdminBilling(w http.ResponseWriter, r *http.Request) {
 			}
 			util.WriteJSON(w, http.StatusOK, map[string]any{
 				"status": status,
-				"items":  a.managedUsers(),
+				"items":  a.managedUsers(false),
 			})
 			return
 		}

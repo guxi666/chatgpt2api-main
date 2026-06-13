@@ -45,6 +45,7 @@ import {
   reservePaymentWindow,
 } from "@/lib/payment-window";
 import { useAuthGuard } from "@/lib/use-auth-guard";
+import { SubscriptionSettingsCard } from "@/app/settings/components/subscription-settings-card";
 
 const fallbackPlans: SubscriptionPlan[] = [
   {
@@ -154,7 +155,7 @@ function tierLabel(tier?: string) {
   }
 }
 
-function SubscriptionPageContent() {
+function SubscriptionPageContent({ canEditConfig }: { canEditConfig: boolean }) {
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [enabled, setEnabled] = useState(true);
   const [status, setStatus] = useState<SubscriptionStatus>({ active: false });
@@ -511,6 +512,8 @@ function SubscriptionPageContent() {
         </CardContent>
       </Card>
 
+      {canEditConfig ? <SubscriptionSettingsCard /> : null}
+
       <div className="flex items-center justify-center gap-5 rounded-[14px] border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
         <span className="inline-flex items-center gap-1">
           <ShieldCheck className="size-4 text-indigo-600" />
@@ -539,5 +542,5 @@ export default function SubscriptionPage() {
       </div>
     );
   }
-  return <SubscriptionPageContent />;
+  return <SubscriptionPageContent canEditConfig={session.role === "admin"} />;
 }

@@ -214,10 +214,11 @@ export function EcommerceComposerPanel({
               <PopoverContent
                 align="end"
                 side="top"
-                className="w-[min(calc(100vw-2rem),38rem)] rounded-[20px] border-[#e5e7eb] bg-white p-3 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)]"
+                className="max-h-[min(72vh,32rem)] w-[min(calc(100vw-2rem),38rem)] overflow-hidden rounded-[20px] border-[#e5e7eb] bg-white p-0 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)]"
                 onOpenAutoFocus={(event) => event.preventDefault()}
               >
-                <div className="grid grid-cols-5 gap-2">
+                <div className="sticky top-0 z-20 border-b border-[#eef2f7] bg-white px-3 pt-3 pb-2">
+                  <div className="grid grid-cols-5 gap-2">
                   {availableQuantities.map((item) => {
                     const active = item === count;
                     return (
@@ -243,9 +244,10 @@ export function EcommerceComposerPanel({
                       </button>
                     );
                   })}
+                  </div>
                 </div>
 
-                <div ref={planScrollRef} className="mt-4 max-h-[min(68vh,34rem)] space-y-3 overflow-y-auto pr-1">
+                <div ref={planScrollRef} className="space-y-3 overflow-y-auto px-3 pt-3 pb-3">
                   <div className="overflow-hidden rounded-[18px] border border-[#e8ebf0] bg-[#f8fafe]">
                     <button
                       type="button"

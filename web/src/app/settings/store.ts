@@ -599,11 +599,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   isStartingImport: false,
 
   initialize: async () => {
-    await Promise.allSettled([
-      get().loadConfig(),
-      get().loadPools(),
-      get().loadLogGovernance(),
-    ]);
+    await Promise.allSettled([get().loadConfig()]);
   },
 
   loadConfig: async () => {

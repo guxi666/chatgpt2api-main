@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
-import { LoaderCircle } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ChevronDown, LoaderCircle } from "lucide-react";
 
 import { useAuthGuard } from "@/lib/use-auth-guard";
 
 import { AnnouncementsCard } from "./components/announcements-card";
+import { BillingAdminCard } from "./components/billing-admin-card";
 import { ConfigCard } from "./components/config-card";
 import { CPAPoolDialog } from "./components/cpa-pool-dialog";
 import { CPAPoolsCard } from "./components/cpa-pools-card";
@@ -17,15 +18,12 @@ import { ProxySettingsCard } from "./components/proxy-settings-card";
 import { R2StorageCard } from "./components/r2-storage-card";
 import { SiteBrandCard } from "./components/site-brand-card";
 import { SettingsHeader } from "./components/settings-header";
-import { SubscriptionSettingsCard } from "./components/subscription-settings-card";
 import { Sub2APIConnections } from "./components/sub2api-connections";
 import { useSettingsStore } from "./store";
 
 function SettingsDataController() {
   const didLoadRef = useRef(false);
   const initialize = useSettingsStore((state) => state.initialize);
-  const loadPools = useSettingsStore((state) => state.loadPools);
-  const pools = useSettingsStore((state) => state.pools);
 
   useEffect(() => {
     if (didLoadRef.current) {
@@ -34,6 +32,50 @@ function SettingsDataController() {
     didLoadRef.current = true;
     void initialize();
   }, [initialize]);
+
+  return null;
+}
+
+function SettingsMasonryItem({ children }: { children: ReactNode }) {
+  return <div className="mb-5 break-inside-avoid">{children}</div>;
+}
+
+function DeferredSettingsSection({
+  title,
+  onOpen,
+  children,
+}: {
+  title: string;
+  onOpen?: () => void;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="mb-5 break-inside-avoid overflow-hidden rounded-[20px] border border-border/80 bg-white">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between px-5 py-4 text-left"
+        onClick={() => {
+          const next = !open;
+          setOpen(next);
+          if (next) {
+            onOpen?.();
+          }
+        }}
+      >
+        <span className="text-base font-semibold text-foreground">{title}</span>
+        <ChevronDown className={open ? "size-4 rotate-180 text-muted-foreground transition" : "size-4 text-muted-foreground transition"} />
+      </button>
+      {open ? <div className="border-t border-border/70">{children}</div> : null}
+    </div>
+  );
+}
+
+function AdminSettingsPageContent() {
+  const loadPools = useSettingsStore((state) => state.loadPools);
+  const pools = useSettingsStore((state) => state.pools);
+  const loadLogGovernance = useSettingsStore((state) => state.loadLogGovernance);
 
   useEffect(() => {
     const hasRunningJobs = pools.some((pool) => {
@@ -50,19 +92,11 @@ function SettingsDataController() {
     return () => window.clearInterval(timer);
   }, [loadPools, pools]);
 
-  return null;
-}
-
-function SettingsMasonryItem({ children }: { children: ReactNode }) {
-  return <div className="mb-5 break-inside-avoid">{children}</div>;
-}
-
-function AdminSettingsPageContent() {
   return (
-    <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-5 pb-8">
+    <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 pb-8">
       <SettingsDataController />
       <SettingsHeader />
-      <section className="columns-1 gap-5 md:columns-2">
+      <section className="columns-1 gap-5 md:columns-2 xl:columns-3">
         <SettingsMasonryItem>
           <ConfigCard />
         </SettingsMasonryItem>
@@ -76,13 +110,10 @@ function AdminSettingsPageContent() {
           <PaymentSettingsCard />
         </SettingsMasonryItem>
         <SettingsMasonryItem>
-          <SubscriptionSettingsCard />
+          <BillingAdminCard />
         </SettingsMasonryItem>
         <SettingsMasonryItem>
           <R2StorageCard />
-        </SettingsMasonryItem>
-        <SettingsMasonryItem>
-          <LogGovernanceCard />
         </SettingsMasonryItem>
         <SettingsMasonryItem>
           <LoginPageImageCard />
@@ -90,12 +121,15 @@ function AdminSettingsPageContent() {
         <SettingsMasonryItem>
           <AnnouncementsCard />
         </SettingsMasonryItem>
-        <SettingsMasonryItem>
+        <DeferredSettingsSection title="日志数据治理" onOpen={() => void loadLogGovernance()}>
+          <LogGovernanceCard />
+        </DeferredSettingsSection>
+        <DeferredSettingsSection title="CPA 连接管理" onOpen={() => void loadPools()}>
           <CPAPoolsCard />
-        </SettingsMasonryItem>
-        <SettingsMasonryItem>
+        </DeferredSettingsSection>
+        <DeferredSettingsSection title="Sub2API 连接管理">
           <Sub2APIConnections />
-        </SettingsMasonryItem>
+        </DeferredSettingsSection>
       </section>
       <CPAPoolDialog />
       <ImportBrowserDialog />

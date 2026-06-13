@@ -1770,6 +1770,25 @@ func (s *EmailBillingService) EnsureCanConsume(identity Identity, amountCents in
 	return nil
 }
 
+func (s *EmailBillingService) EnsureCanConsumeBalance(identity Identity, amountCents int) error {
+	if amountCents < 1 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.ensureUserByIdentityLocked(identity)
+	if user == nil {
+		return nil
+	}
+	if !user.Enabled {
+		return fmt.Errorf("account is disabled")
+	}
+	if user.BalanceCents < amountCents {
+		return fmt.Errorf("insufficient balance, please recharge first")
+	}
+	return nil
+}
+
 func (s *EmailBillingService) ConsumeImageUsage(identity Identity, amountCents int, note string) (map[string]any, error) {
 	if amountCents < 1 {
 		return nil, nil
@@ -1781,6 +1800,48 @@ func (s *EmailBillingService) ConsumeImageUsage(identity Identity, amountCents i
 		return nil, nil
 	}
 	if hasActiveSubscriptionLocked(user) {
+		return nil, nil
+	}
+	if !user.Enabled {
+		return nil, fmt.Errorf("account is disabled")
+	}
+	if user.BalanceCents < amountCents {
+		return nil, fmt.Errorf("insufficient balance, please recharge first")
+	}
+	user.BalanceCents -= amountCents
+	user.TotalConsumeCents += amountCents
+	user.UpdatedAt = util.NowISO()
+	tx := map[string]any{
+		"id":                  "tx_" + util.NewHex(18),
+		"user_id":             user.ID,
+		"email":               user.Email,
+		"type":                BillingTxTypeConsume,
+		"amount_cents":        -amountCents,
+		"balance_after_cents": user.BalanceCents,
+		"note":                strings.TrimSpace(note),
+		"created_at":          util.NowISO(),
+	}
+	s.transactions = append(s.transactions, tx)
+	if err := s.saveLocked(); err != nil {
+		user.BalanceCents += amountCents
+		user.TotalConsumeCents -= amountCents
+		user.UpdatedAt = util.NowISO()
+		if len(s.transactions) > 0 {
+			s.transactions = s.transactions[:len(s.transactions)-1]
+		}
+		return nil, err
+	}
+	return tx, nil
+}
+
+func (s *EmailBillingService) ConsumeBalanceUsage(identity Identity, amountCents int, note string) (map[string]any, error) {
+	if amountCents < 1 {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.ensureUserByIdentityLocked(identity)
+	if user == nil {
 		return nil, nil
 	}
 	if !user.Enabled {

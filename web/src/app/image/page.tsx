@@ -92,6 +92,7 @@ import {
   IMAGE_CREATION_MODEL_OPTIONS,
   IMAGE_OUTPUT_FORMAT_OPTIONS,
   isChatModel,
+  requestEcommerceAssistCharge,
   isImageCreationModel,
   isImageModel,
   isImageOutputFormat,
@@ -158,7 +159,7 @@ const QUOTA_REFRESH_EVENT = "chatgpt2api:quota-refresh";
 const DEFAULT_IMAGE_QUALITY: ImageQuality = "high";
 const DEFAULT_IMAGE_OUTPUT_FORMAT: ImageOutputFormat = "png";
 const DEFAULT_ECOMMERCE_SIZE_PRESET: EcommerceSizePreset = "auto";
-const activeConversationQueueIds = new Set<string>();
+const activeTurnQueueKeys = new Set<string>();
 const EMPTY_IMAGE_ASPECT_RATIO_SELECT_VALUE = "__empty_aspect_ratio__";
 const MISSING_RECOVERABLE_TASK_ID_ERROR = "页面刷新或任务中断，未找到可恢复的任务 ID";
 const ECOMMERCE_ANALYZING_PRODUCT_INFO = buildEmptyEcommerceProductInfo("识别中");
@@ -1867,7 +1868,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     if (images.length === 0) {
       setEcommerceProductInfo(null);
       setEcommerceAnalyzeError("");
-      return;
+      return false;
     }
     setIsEcommerceAnalyzing(true);
     setEcommerceAnalyzeError("");
@@ -1880,6 +1881,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
       setEcommercePromptPlans(buildEcommercePromptPlans(info, ecommerceCount));
       setImagePrompt(buildEcommerceProductTemplate(info));
       toast.success("产品信息已识别");
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "产品识别失败";
       setEcommerceProductInfo(ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO);
@@ -1887,6 +1889,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
       setEcommerceDesignSpecText(buildEcommerceDesignSpecText(ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO));
       setEcommercePromptPlans(buildEcommercePromptPlans(ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO, ecommerceCount));
       setImagePrompt(buildEcommerceProductTemplate(ECOMMERCE_UNRECOGNIZED_PRODUCT_INFO));
+      return false;
     } finally {
       setIsEcommerceAnalyzing(false);
     }
@@ -1973,7 +1976,21 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
       toast.error("请先上传素材图片");
       return;
     }
-    await analyzeEcommerceImages(ecommerceMaterialImages);
+    try {
+      await requestEcommerceAssistCharge("check");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "余额不足，请先充值");
+      return;
+    }
+    const ok = await analyzeEcommerceImages(ecommerceMaterialImages);
+    if (!ok) {
+      return;
+    }
+    try {
+      await requestEcommerceAssistCharge("consume");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "AI帮写扣费失败");
+    }
     textareaRef.current?.focus();
   }, [analyzeEcommerceImages, ecommerceMaterialImages]);
 
@@ -2209,15 +2226,17 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
     );
   }, []);
 
-  const runConversationQueue = useCallback(
-    async (conversationId: string) => {
-      if (activeConversationQueueIds.has(conversationId)) {
+  const processConversationTurn = useCallback(
+    async (conversationId: string, turnId: string) => {
+      const activeTurnKey = imageTurnProgressKey(conversationId, turnId);
+      if (activeTurnQueueKeys.has(activeTurnKey)) {
         return;
       }
 
       const snapshot = conversationsRef.current.find((conversation) => conversation.id === conversationId);
       const activeTurn = snapshot?.turns.find(
         (turn) =>
+          turn.id === turnId &&
           (turn.status === "queued" || turn.status === "generating") &&
           turn.images.some((image) => image.status === "loading"),
       );
@@ -2225,8 +2244,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
         return;
       }
 
-      activeConversationQueueIds.add(conversationId);
-      const activeTurnKey = imageTurnProgressKey(conversationId, activeTurn.id);
+      activeTurnQueueKeys.add(activeTurnKey);
       updateTurnProgress(conversationId, activeTurn.id, {
         message: activeTurn.mode === "chat" ? "正在准备对话请求" : "正在准备生成任务",
         detail:
@@ -2234,6 +2252,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
             ? "正在整理上下文"
             : `准备处理 ${activeTurn.images.filter((image) => image.status === "loading").length || activeTurn.count} 张图片`,
       });
+
       const applyTasks = async (tasks: CreationTask[]) => {
         const taskMap = new Map(tasks.map((task) => [task.id, task]));
         await updateConversation(conversationId, (current) => {
@@ -2465,35 +2484,51 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
       } finally {
         clearTurnProgress(conversationId, activeTurn.id);
         cancelledTurnIdsRef.current.delete(activeTurnKey);
-        activeConversationQueueIds.delete(conversationId);
-        for (const conversation of conversationsRef.current) {
-          if (
-            !activeConversationQueueIds.has(conversation.id) &&
-            conversation.turns.some(
+        activeTurnQueueKeys.delete(activeTurnKey);
+        window.setTimeout(() => {
+          for (const conversation of conversationsRef.current) {
+            const pendingTurns = conversation.turns.filter(
               (turn) =>
                 (turn.status === "queued" || turn.status === "generating") &&
                 turn.images.some((image) => image.status === "loading"),
-            )
-          ) {
-            void runConversationQueue(conversation.id);
+            );
+            for (const turn of pendingTurns) {
+              const nextKey = imageTurnProgressKey(conversation.id, turn.id);
+              if (!activeTurnQueueKeys.has(nextKey)) {
+                void processConversationTurn(conversation.id, turn.id);
+              }
+            }
           }
-        }
+        }, 0);
       }
     },
     [clearTurnProgress, updateConversation, updateTurnProgress],
   );
+
+  const runConversationQueue = useCallback(
+    async (conversationId: string) => {
+      const snapshot = conversationsRef.current.find((conversation) => conversation.id === conversationId);
+      if (!snapshot) {
+        return;
+      }
+      const pendingTurns = snapshot.turns.filter(
+        (turn) =>
+          (turn.status === "queued" || turn.status === "generating") &&
+          turn.images.some((image) => image.status === "loading"),
+      );
+      for (const turn of pendingTurns) {
+        const key = imageTurnProgressKey(conversationId, turn.id);
+        if (!activeTurnQueueKeys.has(key)) {
+          void processConversationTurn(conversationId, turn.id);
+        }
+      }
+    },
+    [processConversationTurn],
+  );
+
   useEffect(() => {
     for (const conversation of conversations) {
-      if (
-        !activeConversationQueueIds.has(conversation.id) &&
-        conversation.turns.some(
-          (turn) =>
-            (turn.status === "queued" || turn.status === "generating") &&
-            turn.images.some((image) => image.status === "loading"),
-        )
-      ) {
-        void runConversationQueue(conversation.id);
-      }
+      void runConversationQueue(conversation.id);
     }
   }, [conversations, runConversationQueue]);
 
@@ -3709,13 +3744,13 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                 }
                 promptStatePanel={
                   isEcommerceMode && isEcommerceAnalyzing ? (
-                    <div className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-[20px] border border-[#eef2ff] bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] px-6 py-8 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
-                      <span className="relative inline-flex size-16 items-center justify-center rounded-full bg-[linear-gradient(180deg,#f4f8ff_0%,#eef3ff_100%)] text-[#5b7cff] shadow-[0_16px_40px_-24px_rgba(91,124,255,0.45)]">
-                        <LoaderCircle className="absolute size-[3.7rem] animate-spin text-[#b9c9ff]" strokeWidth={1.4} />
-                        <Sparkles className="relative z-10 size-7" />
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-2.5 rounded-[20px] border border-[#eef2ff] bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] px-6 py-6 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
+                      <span className="relative inline-flex size-12 items-center justify-center rounded-full bg-[linear-gradient(180deg,#f4f8ff_0%,#eef3ff_100%)] text-[#5b7cff] shadow-[0_12px_28px_-22px_rgba(91,124,255,0.45)]">
+                        <LoaderCircle className="absolute size-[2.8rem] animate-spin text-[#b9c9ff]" strokeWidth={1.4} />
+                        <Sparkles className="relative z-10 size-5" />
                       </span>
                       <div className="space-y-1">
-                        <div className="text-[22px] font-semibold tracking-normal text-[#111827]">正在生成中...</div>
+                        <div className="text-[18px] font-semibold tracking-normal text-[#111827]">正在生成中...</div>
                         <div className="text-sm text-[#7c8597]">
                           {ECOMMERCE_ANALYZING_MESSAGES[ecommerceAnalyzingStep]}
                         </div>
