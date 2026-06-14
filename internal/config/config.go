@@ -1,6 +1,8 @@
 package config
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -1113,24 +1115,234 @@ func (s *Store) Update(data map[string]any) (map[string]any, error) {
 }
 
 func (s *Store) CleanupOldImages() int {
-	cutoff := time.Now().Add(-time.Duration(s.ImageRetentionDays()) * 24 * time.Hour)
+	targetDay := s.imageCleanupTargetDay(time.Now())
+	if targetDay == "" {
+		return 0
+	}
+
 	removed := 0
-	for _, dir := range []string{s.ImagesDir(), s.ImageThumbnailsDir(), s.ImageMetadataDir()} {
-		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
-			}
-			info, statErr := d.Info()
-			if statErr == nil && info.ModTime().Before(cutoff) {
-				if os.Remove(path) == nil {
-					removed++
-				}
-			}
+	imageRoot := s.ImagesDir()
+	thumbnailRoot := s.ImageThumbnailsDir()
+	metadataRoot := s.ImageMetadataDir()
+	var docStore storage.JSONDocumentBackend
+	if backend, err := s.StorageBackend(); err == nil {
+		docStore, _ = backend.(storage.JSONDocumentBackend)
+	}
+	targetRelDir := strings.ReplaceAll(targetDay, "-", string(filepath.Separator))
+	targetImageDir := filepath.Join(imageRoot, targetRelDir)
+	removedPaths := make([]string, 0)
+
+	_ = filepath.WalkDir(targetImageDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d == nil || d.IsDir() {
 			return nil
-		})
-		removeEmptyDirs(dir)
+		}
+		rel, relErr := filepath.Rel(imageRoot, path)
+		if relErr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if os.Remove(path) == nil {
+			removed++
+			removedPaths = append(removedPaths, rel)
+		}
+		thumbnailPath := filepath.Join(thumbnailRoot, filepath.FromSlash(rel)+".jpg")
+		if removeErr := os.Remove(thumbnailPath); removeErr == nil {
+			removed++
+		}
+		if removeErr := os.Remove(thumbnailPath + ".json"); removeErr == nil {
+			removed++
+		}
+		if docStore != nil {
+			if removeErr := docStore.DeleteJSONDocument(cleanupThumbnailMetadataDocumentName(rel)); removeErr == nil {
+				removed++
+			}
+		}
+		metaPath := filepath.Join(metadataRoot, filepath.FromSlash(rel)+".json")
+		if removeErr := os.Remove(metaPath); removeErr == nil {
+			removed++
+		}
+		if docStore != nil {
+			if removeErr := docStore.DeleteJSONDocument(cleanupImageMetadataDocumentName(rel)); removeErr == nil {
+				removed++
+			}
+		}
+		return nil
+	})
+	removeEmptyDirs(targetImageDir)
+	removeEmptyDirs(imageRoot)
+	removeEmptyDirs(thumbnailRoot)
+	removeEmptyDirs(metadataRoot)
+
+	removed += s.cleanupRemoteImagesForDay(targetDay, removedPaths)
+	return removed
+}
+
+func (s *Store) imageCleanupTargetDay(now time.Time) string {
+	retention := s.ImageRetentionDays()
+	if retention < 1 {
+		return ""
+	}
+	return now.AddDate(0, 0, -retention-1).Format("2006-01-02")
+}
+
+const cleanupRemoteImageIndexDocumentName = "image_remote_index.json"
+
+func (s *Store) cleanupRemoteImagesForDay(targetDay string, removedPaths []string) int {
+	records, save, ok := s.loadCleanupRemoteImageRecords()
+	if !ok {
+		return 0
+	}
+	removedSet := make(map[string]struct{}, len(removedPaths))
+	for _, rel := range removedPaths {
+		if rel = filepath.ToSlash(strings.TrimSpace(rel)); rel != "" {
+			removedSet[rel] = struct{}{}
+		}
+	}
+	primary := s.ImageObjectStorage()
+	secondary := s.ImageSecondaryObjectStorage()
+	kept := make([]map[string]any, 0, len(records))
+	removed := 0
+	for _, record := range records {
+		pathValue := filepath.ToSlash(util.Clean(record["path"]))
+		dateValue := util.Clean(record["date"])
+		urlValue := util.Clean(record["url"])
+		objectKey := util.Clean(record["object_key"])
+		storageName := util.Clean(record["storage"])
+		if pathValue == "" || urlValue == "" {
+			continue
+		}
+		if dateValue != targetDay {
+			kept = append(kept, record)
+			continue
+		}
+		deletedRemote := false
+		switch storageName {
+		case "r2_primary":
+			deletedRemote = s.deleteRemoteR2Object(primary, objectKey, pathValue)
+		case "r2_secondary":
+			deletedRemote = s.deleteRemoteR2Object(secondary, objectKey, pathValue)
+		case "imgbed":
+			deletedRemote = false
+		default:
+			deletedRemote = s.deleteRemoteR2Object(primary, objectKey, pathValue) ||
+				s.deleteRemoteR2Object(secondary, objectKey, pathValue)
+		}
+		if deletedRemote || storageName == "" {
+			removed++
+			continue
+		}
+		if _, localRemoved := removedSet[pathValue]; localRemoved {
+			kept = append(kept, record)
+			continue
+		}
+		kept = append(kept, record)
+	}
+	if err := save(kept); err != nil {
+		return removed
 	}
 	return removed
+}
+
+func (s *Store) deleteRemoteR2Object(cfg objectstore.Config, objectKey, rel string) bool {
+	cfg = cfg.Normalize()
+	if !cfg.Ready() {
+		return false
+	}
+	key := strings.TrimSpace(objectKey)
+	if key == "" {
+		key = cfg.ObjectKey(rel)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return objectstore.Delete(ctx, cfg, key) == nil
+}
+
+func (s *Store) loadCleanupRemoteImageRecords() ([]map[string]any, func([]map[string]any) error, bool) {
+	if backend, err := s.StorageBackend(); err == nil {
+		if docs, ok := backend.(storage.JSONDocumentBackend); ok {
+			raw, loadErr := docs.LoadJSONDocument(cleanupRemoteImageIndexDocumentName)
+			if loadErr != nil {
+				raw = nil
+			}
+			return normalizeCleanupRemoteImageRecords(raw), func(next []map[string]any) error {
+				return docs.SaveJSONDocument(cleanupRemoteImageIndexDocumentName, next)
+			}, true
+		}
+	}
+
+	indexPath := filepath.Join(s.DataDir, cleanupRemoteImageIndexDocumentName)
+	raw, err := os.ReadFile(indexPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, func(next []map[string]any) error {
+				data, marshalErr := json.Marshal(next)
+				if marshalErr != nil {
+					return marshalErr
+				}
+				return os.WriteFile(indexPath, data, 0o644)
+			}, true
+		}
+		return nil, nil, false
+	}
+	var payload any
+	if unmarshalErr := json.Unmarshal(raw, &payload); unmarshalErr != nil {
+		return nil, nil, false
+	}
+	return normalizeCleanupRemoteImageRecords(payload), func(next []map[string]any) error {
+		data, marshalErr := json.Marshal(next)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		return os.WriteFile(indexPath, data, 0o644)
+	}, true
+}
+
+func normalizeCleanupRemoteImageRecords(raw any) []map[string]any {
+	items := cleanupRemoteImageRecordsToMapsSlice(raw)
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		pathValue := filepath.ToSlash(util.Clean(item["path"]))
+		urlValue := util.Clean(item["url"])
+		if pathValue == "" || urlValue == "" {
+			continue
+		}
+		copyItem := make(map[string]any, len(item))
+		for key, value := range item {
+			copyItem[key] = value
+		}
+		copyItem["path"] = pathValue
+		copyItem["url"] = urlValue
+		out = append(out, copyItem)
+	}
+	return out
+}
+
+func cleanupRemoteImageRecordsToMapsSlice(raw any) []map[string]any {
+	switch list := raw.(type) {
+	case []map[string]any:
+		return list
+	case []any:
+		out := make([]map[string]any, 0, len(list))
+		for _, item := range list {
+			if mapped, ok := item.(map[string]any); ok {
+				out = append(out, mapped)
+			}
+		}
+		return out
+	case map[string]any:
+		if items, ok := list["items"]; ok {
+			return cleanupRemoteImageRecordsToMapsSlice(items)
+		}
+	}
+	return nil
+}
+
+func cleanupImageMetadataDocumentName(rel string) string {
+	return "image_metadata/" + filepath.ToSlash(rel) + ".json"
+}
+
+func cleanupThumbnailMetadataDocumentName(rel string) string {
+	return "image_thumbnails/" + filepath.ToSlash(rel) + ".jpg.json"
 }
 
 func (s *Store) StorageBackend() (storage.Backend, error) {

@@ -301,15 +301,22 @@ func (s *AccountService) GetAvailableAccessToken(ctx context.Context) (string, e
 
 func (s *AccountService) GetAvailableAccessTokenFor(ctx context.Context, allow func(map[string]any) bool) (string, error) {
 	attempted := map[string]struct{}{}
+	var lastRefreshErr error
 	for {
 		reservation, err := s.reserveNextCandidateToken(attempted, allow)
 		if err != nil {
+			if lastRefreshErr != nil {
+				return "", lastRefreshErr
+			}
 			return "", err
 		}
 		attempted[reservation.token] = struct{}{}
-		account := s.RefreshAccountState(ctx, reservation.token)
+		account, refreshErr := s.RefreshAccountStateWithError(ctx, reservation.token)
 		if account != nil && (allow == nil || allow(account)) && s.reservedImageSlotAvailable(reservation) {
 			return reservation.token, nil
+		}
+		if refreshErr != nil {
+			lastRefreshErr = refreshErr
 		}
 		s.releaseImageReservation(reservation.token)
 	}
@@ -327,14 +334,19 @@ func (s *AccountService) HasAvailableAccount() bool {
 }
 
 func (s *AccountService) RefreshAccountState(ctx context.Context, accessToken string) map[string]any {
+	account, _ := s.RefreshAccountStateWithError(ctx, accessToken)
+	return account
+}
+
+func (s *AccountService) RefreshAccountStateWithError(ctx context.Context, accessToken string) (map[string]any, error) {
 	remote, err := s.FetchRemoteInfo(ctx, accessToken)
 	if err != nil {
 		if _, handled := s.ApplyAccountError(accessToken, "refresh_account_state", err); handled {
-			return s.GetAccount(accessToken)
+			return s.GetAccount(accessToken), nil
 		}
-		return nil
+		return nil, err
 	}
-	return s.UpdateAccount(accessToken, remote)
+	return s.UpdateAccount(accessToken, remote), nil
 }
 
 func (s *AccountService) RefreshAccounts(ctx context.Context, accessTokens []string) map[string]any {

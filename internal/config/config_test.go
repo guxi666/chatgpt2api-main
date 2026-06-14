@@ -1,10 +1,14 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"chatgpt2api/internal/storage"
 )
 
 func TestStoreUpdatePersistsRuntimeSettings(t *testing.T) {
@@ -140,6 +144,112 @@ func TestStoreNormalizesImageTaskTimeoutSeconds(t *testing.T) {
 	assertConfigValue(t, got, "image_task_timeout_seconds", 3600)
 	if store.ImageTaskTimeoutSeconds() != 3600 {
 		t.Fatalf("ImageTaskTimeoutSeconds() = %d, want 3600", store.ImageTaskTimeoutSeconds())
+	}
+}
+
+func TestCleanupOldImagesRemovesOnlyTargetDay(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CHATGPT2API_ROOT", root)
+	t.Setenv("STORAGE_BACKEND", "json")
+	unsetEnv(t, "CHATGPT2API_IMAGE_RETENTION_DAYS")
+	unsetLinuxDoEnv(t)
+
+	store, err := NewStore()
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	if _, err := store.Update(map[string]any{"image_retention_days": 1}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	targetDay := time.Now().AddDate(0, 0, -2).Format("2006-01-02")
+	olderDay := time.Now().AddDate(0, 0, -3).Format("2006-01-02")
+	newerDay := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+
+	targetRel := createCleanupTestImage(t, store, targetDay, "target.png")
+	olderRel := createCleanupTestImage(t, store, olderDay, "older.png")
+	newerRel := createCleanupTestImage(t, store, newerDay, "newer.png")
+
+	records := []map[string]any{
+		{"path": targetRel, "date": targetDay, "url": "https://cdn.example/target.png"},
+		{"path": olderRel, "date": olderDay, "url": "https://cdn.example/older.png"},
+		{"path": newerRel, "date": newerDay, "url": "https://cdn.example/newer.png"},
+	}
+	backend, err := store.StorageBackend()
+	if err != nil {
+		t.Fatalf("StorageBackend() error = %v", err)
+	}
+	docStore, ok := backend.(storage.JSONDocumentBackend)
+	if !ok {
+		t.Fatal("storage backend does not implement JSONDocumentBackend")
+	}
+	if err := docStore.SaveJSONDocument(cleanupRemoteImageIndexDocumentName, records); err != nil {
+		t.Fatalf("SaveJSONDocument(image_remote_index.json) error = %v", err)
+	}
+
+	store.CleanupOldImages()
+
+	assertPathMissing(t, filepath.Join(store.ImagesDir(), filepath.FromSlash(targetRel)))
+	assertPathMissing(t, filepath.Join(store.ImageThumbnailsDir(), filepath.FromSlash(targetRel)+".jpg"))
+	assertPathMissing(t, filepath.Join(store.ImageMetadataDir(), filepath.FromSlash(targetRel)+".json"))
+
+	assertPathExists(t, filepath.Join(store.ImagesDir(), filepath.FromSlash(olderRel)))
+	assertPathExists(t, filepath.Join(store.ImagesDir(), filepath.FromSlash(newerRel)))
+
+	indexRaw, err := docStore.LoadJSONDocument(cleanupRemoteImageIndexDocumentName)
+	if err != nil {
+		t.Fatalf("LoadJSONDocument(image_remote_index.json) error = %v", err)
+	}
+	var remaining []map[string]any
+	indexData, err := json.Marshal(indexRaw)
+	if err != nil {
+		t.Fatalf("json.Marshal(indexRaw) error = %v", err)
+	}
+	if err := json.Unmarshal(indexData, &remaining); err != nil {
+		t.Fatalf("json.Unmarshal(remaining) error = %v", err)
+	}
+	if len(remaining) != 2 {
+		t.Fatalf("remaining records = %#v, want 2", remaining)
+	}
+	for _, item := range remaining {
+		if strings.TrimSpace(item["path"].(string)) == targetRel {
+			t.Fatalf("target record still exists in remote index: %#v", remaining)
+		}
+	}
+}
+
+func createCleanupTestImage(t *testing.T, store *Store, day, name string) string {
+	t.Helper()
+	parts := strings.Split(day, "-")
+	if len(parts) != 3 {
+		t.Fatalf("invalid day %q", day)
+	}
+	rel := filepath.ToSlash(filepath.Join(parts[0], parts[1], parts[2], name))
+	imagePath := filepath.Join(store.ImagesDir(), filepath.FromSlash(rel))
+	thumbPath := filepath.Join(store.ImageThumbnailsDir(), filepath.FromSlash(rel)+".jpg")
+	metaPath := filepath.Join(store.ImageMetadataDir(), filepath.FromSlash(rel)+".json")
+	for _, item := range []string{imagePath, thumbPath, metaPath} {
+		if err := os.MkdirAll(filepath.Dir(item), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q) error = %v", item, err)
+		}
+		if err := os.WriteFile(item, []byte("x"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", item, err)
+		}
+	}
+	return rel
+}
+
+func assertPathMissing(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected path missing: %s", path)
+	}
+}
+
+func assertPathExists(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected path exists: %s err=%v", path, err)
 	}
 }
 

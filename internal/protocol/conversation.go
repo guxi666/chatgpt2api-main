@@ -329,6 +329,9 @@ func (e *Engine) CollectTextWithPool(ctx context.Context, request ConversationRe
 		if _, handled := e.Accounts.ApplyAccountError(token, "text_chat", err); handled {
 			continue
 		}
+		if util.IsRetryableUpstreamError(err.Error()) {
+			continue
+		}
 		return "", err
 	}
 	if lastErr != nil {
@@ -531,6 +534,9 @@ func (e *Engine) StreamImageOutputsWithPool(ctx context.Context, request Convers
 					if service.IsAccountRateLimitedErrorMessage(err.Error()) || !emittedForToken {
 						continue
 					}
+				}
+				if !emittedForToken && util.IsRetryableUpstreamError(lastError) {
+					continue
 				}
 				if !emittedForToken && IsTokenInvalidError(lastError) {
 					continue

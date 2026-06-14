@@ -402,6 +402,38 @@ func TestApplyAccountErrorMessageIgnoresBootstrapFailures(t *testing.T) {
 	}
 }
 
+func TestGetAvailableAccessTokenForReturnsRefreshErrorInsteadOfQuotaWhenAllRefreshesFail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			http.Error(w, "temporary upstream outage", http.StatusBadGateway)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	accounts := newTestAccountService(t)
+	accounts.remoteBaseURL = server.URL
+	accounts.browserHTTPClient = func(string, time.Duration) *http.Client {
+		return server.Client()
+	}
+	accounts.AddAccounts([]string{"token-1", "token-2"})
+	accounts.UpdateAccount("token-1", map[string]any{"status": "正常", "quota": 5})
+	accounts.UpdateAccount("token-2", map[string]any{"status": "正常", "quota": 6})
+
+	token, err := accounts.GetAvailableAccessTokenFor(context.Background(), nil)
+	if err == nil {
+		t.Fatalf("GetAvailableAccessTokenFor() token = %q err = nil, want refresh error", token)
+	}
+	if token != "" {
+		t.Fatalf("GetAvailableAccessTokenFor() token = %q, want empty", token)
+	}
+	if !strings.Contains(err.Error(), "HTTP 502") {
+		t.Fatalf("GetAvailableAccessTokenFor() err = %q, want HTTP 502 refresh error", err.Error())
+	}
+}
+
 func newTestAccountService(t *testing.T) *AccountService {
 	t.Helper()
 	dir := t.TempDir()

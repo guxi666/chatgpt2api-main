@@ -845,8 +845,7 @@ function usesReferenceImages(mode: ImageConversationMode) {
 }
 
 function usesResponseImageTaskModel(model: ImageModel) {
-  void model;
-  return false;
+  return isResponseImageToolModel(model);
 }
 
 function isMissingBatchImageDataError(error?: string) {

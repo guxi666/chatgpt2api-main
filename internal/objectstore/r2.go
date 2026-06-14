@@ -99,6 +99,36 @@ func Upload(ctx context.Context, cfg Config, key string, data []byte, contentTyp
 	return cfg.PublicURL(key), nil
 }
 
+func Delete(ctx context.Context, cfg Config, key string) error {
+	cfg = cfg.Normalize()
+	if !cfg.Ready() {
+		return errors.New("R2 storage is not configured")
+	}
+	if strings.TrimSpace(key) == "" {
+		return errors.New("object key is required")
+	}
+	objectURL := cfg.Endpoint + "/" + escapePath(cfg.Bucket) + "/" + escapePath(key)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, objectURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set("X-Amz-Content-Sha256", payloadHash(nil))
+	signV4(req, cfg, nil)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("R2 delete failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
 func ContentTypeForPath(filePath string) string {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
