@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   CircleHelp,
+  Globe2,
   Image as ImageIcon,
   ImagePlus,
   MessageCircle,
@@ -76,6 +77,10 @@ type ImageComposerProps = {
   uploadButtonPlacement?: "toolbar" | "prompt";
   hideToolbarControls?: boolean;
   promptPlaceholder?: string;
+  languageValue?: string;
+  languageOptions?: readonly string[];
+  onLanguageChange?: (value: string) => void;
+  showLanguageSelector?: boolean;
   submitDisabled?: boolean;
   submitLabelOverride?: string;
   secondaryActionLabel?: string;
@@ -179,6 +184,10 @@ export function ImageComposer({
   uploadButtonPlacement = "toolbar",
   hideToolbarControls = false,
   promptPlaceholder,
+  languageValue,
+  languageOptions,
+  onLanguageChange,
+  showLanguageSelector = false,
   submitDisabled,
   submitLabelOverride,
   secondaryActionLabel,
@@ -822,6 +831,23 @@ export function ImageComposer({
                     </div>
                   ) : null}
                 </div>
+                {showLanguageSelector && composerMode === "image" && languageOptions?.length && languageValue && onLanguageChange ? (
+                  <label className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[#e5e7eb] bg-white px-2.5 text-xs font-medium text-[#45515e] sm:h-8 sm:px-3 dark:border-border dark:bg-background/70 dark:text-muted-foreground">
+                    <Globe2 className="size-4 shrink-0 sm:size-3.5" />
+                    <select
+                      value={languageValue}
+                      onChange={(event) => onLanguageChange(event.target.value)}
+                      className="min-w-0 bg-transparent pr-5 text-xs font-medium text-[#18181b] outline-none dark:text-foreground"
+                      aria-label="选择生成语言"
+                    >
+                      {languageOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 {showPromptMarket ? (
                   <button
                     type="button"

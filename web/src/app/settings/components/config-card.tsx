@@ -141,6 +141,12 @@ export function ConfigCard() {
   const setRegistrationBonusImageTimes = useSettingsStore(
     (state) => state.setRegistrationBonusImageTimes,
   );
+  const setShowEcommerceEntry = useSettingsStore(
+    (state) => state.setShowEcommerceEntry,
+  );
+  const setShowNewEcommerceWindowEntry = useSettingsStore(
+    (state) => state.setShowNewEcommerceWindowEntry,
+  );
   const setCFTurnstileEnabled = useSettingsStore(
     (state) => state.setCFTurnstileEnabled,
   );
@@ -431,6 +437,16 @@ export function ConfigCard() {
               checked={Boolean(config?.registration_enabled)}
               onCheckedChange={setRegistrationEnabled}
               label="开放账号注册"
+            />
+            <ConfigOption
+              checked={config?.show_ecommerce_entry !== false}
+              onCheckedChange={setShowEcommerceEntry}
+              label="显示电商专区入口"
+            />
+            <ConfigOption
+              checked={config?.show_new_ecommerce_window_entry !== false}
+              onCheckedChange={setShowNewEcommerceWindowEntry}
+              label="显示新建电商窗口"
             />
           </div>
         </section>

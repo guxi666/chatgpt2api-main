@@ -112,6 +112,9 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     registration_bonus_image_times: Number.isFinite(registrationBonusImageTimes)
       ? registrationBonusImageTimes
       : 20,
+    show_ecommerce_entry: config.show_ecommerce_entry !== false,
+    show_new_ecommerce_window_entry:
+      config.show_new_ecommerce_window_entry !== false,
     cf_turnstile_enabled: Boolean(config.cf_turnstile_enabled),
     cf_turnstile_site_key:
       typeof config.cf_turnstile_site_key === "string"
@@ -464,6 +467,8 @@ type SettingsStore = {
   setRegistrationEnabled: (value: boolean) => void;
   setRegistrationAllowedEmailDomains: (value: string) => void;
   setRegistrationBonusImageTimes: (value: string) => void;
+  setShowEcommerceEntry: (value: boolean) => void;
+  setShowNewEcommerceWindowEntry: (value: boolean) => void;
   setCFTurnstileEnabled: (value: boolean) => void;
   setCFTurnstileSiteKey: (value: string) => void;
   setCFTurnstileSecretKey: (value: string) => void;
@@ -704,6 +709,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           0,
           Number(config.registration_bonus_image_times) || 0,
         ),
+        show_ecommerce_entry: Boolean(config.show_ecommerce_entry),
+        show_new_ecommerce_window_entry: Boolean(
+          config.show_new_ecommerce_window_entry,
+        ),
         cf_turnstile_enabled: Boolean(config.cf_turnstile_enabled),
         cf_turnstile_site_key: String(
           config.cf_turnstile_site_key || "",
@@ -916,6 +925,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         site_logo_url: String(
           nextConfig.brand_site_logo_url || "/logo-mark.svg",
         ),
+        show_ecommerce_entry: Boolean(nextConfig.show_ecommerce_entry),
+        show_new_ecommerce_window_entry: Boolean(
+          nextConfig.show_new_ecommerce_window_entry,
+        ),
       });
       toast.success("配置已保存");
     } catch (error) {
@@ -1111,6 +1124,27 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     set((state) =>
       state.config
         ? { config: { ...state.config, registration_bonus_image_times: value } }
+        : {},
+    );
+  },
+
+  setShowEcommerceEntry: (value) => {
+    set((state) =>
+      state.config
+        ? { config: { ...state.config, show_ecommerce_entry: value } }
+        : {},
+    );
+  },
+
+  setShowNewEcommerceWindowEntry: (value) => {
+    set((state) =>
+      state.config
+        ? {
+            config: {
+              ...state.config,
+              show_new_ecommerce_window_entry: value,
+            },
+          }
         : {},
     );
   },

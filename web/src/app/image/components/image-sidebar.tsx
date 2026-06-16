@@ -20,6 +20,8 @@ type ImageSidebarProps = {
   onDeleteConversation: (id: string) => void | Promise<void>;
   formatConversationTime: (value: string) => string;
   hideActionButtons?: boolean;
+  showEcommerceEntry?: boolean;
+  showNewEcommerceWindowEntry?: boolean;
 };
 
 export function ImageSidebar({
@@ -36,6 +38,8 @@ export function ImageSidebar({
   onDeleteConversation,
   formatConversationTime,
   hideActionButtons = false,
+  showEcommerceEntry = true,
+  showNewEcommerceWindowEntry = true,
 }: ImageSidebarProps) {
   return (
     <aside className="relative h-full min-h-0 overflow-hidden">
@@ -56,7 +60,7 @@ export function ImageSidebar({
               <MessageSquarePlus className="size-4" />
               新建对话
             </Button>
-            {onOpenEcommerce ? (
+            {onOpenEcommerce && showEcommerceEntry ? (
               <Button
                 variant="outline"
                 className={cn(
@@ -71,7 +75,7 @@ export function ImageSidebar({
                 电商专区
               </Button>
             ) : null}
-            {onCreateEcommerceDraft ? (
+            {onCreateEcommerceDraft && showNewEcommerceWindowEntry ? (
               <Button
                 variant="outline"
                 className="h-10 w-full justify-center gap-2 rounded-full border-[#f2c3a3] bg-[#fff0e4] text-[#d7651f] hover:bg-[#fff0e4] hover:text-[#d7651f]"

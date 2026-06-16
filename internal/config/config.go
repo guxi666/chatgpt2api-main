@@ -48,6 +48,8 @@ var settingEnvKeys = map[string]string{
 	"registration_enabled":                 "CHATGPT2API_REGISTRATION_ENABLED",
 	"registration_allowed_email_domains":   "CHATGPT2API_REGISTRATION_ALLOWED_EMAIL_DOMAINS",
 	"registration_bonus_image_times":       "CHATGPT2API_REGISTRATION_BONUS_IMAGE_TIMES",
+	"show_ecommerce_entry":                 "CHATGPT2API_SHOW_ECOMMERCE_ENTRY",
+	"show_new_ecommerce_window_entry":      "CHATGPT2API_SHOW_NEW_ECOMMERCE_WINDOW_ENTRY",
 	"cf_turnstile_enabled":                 "CHATGPT2API_CF_TURNSTILE_ENABLED",
 	"cf_turnstile_site_key":                "CHATGPT2API_CF_TURNSTILE_SITE_KEY",
 	"cf_turnstile_secret_key":              "CHATGPT2API_CF_TURNSTILE_SECRET_KEY",
@@ -352,6 +354,14 @@ func (s *Store) RegistrationBonusImageTimes() int {
 		return 100000
 	}
 	return value
+}
+
+func (s *Store) ShowEcommerceEntry() bool {
+	return util.ToBool(s.settingValue("show_ecommerce_entry", true))
+}
+
+func (s *Store) ShowNewEcommerceWindowEntry() bool {
+	return util.ToBool(s.settingValue("show_new_ecommerce_window_entry", true))
 }
 
 func (s *Store) EmailAllowedDomains() []string {
@@ -929,6 +939,8 @@ func (s *Store) Get() map[string]any {
 	data["registration_enabled"] = s.RegistrationEnabled()
 	data["registration_allowed_email_domains"] = strings.Join(s.RegistrationAllowedEmailDomains(), ",")
 	data["registration_bonus_image_times"] = s.RegistrationBonusImageTimes()
+	data["show_ecommerce_entry"] = s.ShowEcommerceEntry()
+	data["show_new_ecommerce_window_entry"] = s.ShowNewEcommerceWindowEntry()
 	data["cf_turnstile_enabled"] = s.CFTurnstileEnabled()
 	data["cf_turnstile_site_key"] = s.CFTurnstileSiteKey()
 	data["cf_turnstile_secret_key_configured"] = s.CFTurnstileSecretKey() != ""

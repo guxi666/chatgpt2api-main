@@ -18,6 +18,7 @@ import {
   buildEcommercePromptPlans,
   buildEcommerceProductTemplate,
   buildEcommerceReferenceImages,
+  ecommerceLanguageOptions,
   ecommerceUploadKindLimit,
   getEcommerceImageFiles,
   isValidEcommerceUploadImage,
@@ -748,6 +749,14 @@ function isEcommerceConversation(conversation: ImageConversation | null | undefi
   return conversation.turns.some((turn) => turn.hidePromptInResults);
 }
 
+function applyVisibleTextLanguage(prompt: string, language: EcommerceLanguage) {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return `${trimmed}\n\n如果画面中包含任何可见文字、标题、标签或说明，请统一使用${language}呈现。`;
+}
+
 function formatCreationTaskErrorMessage(message: string) {
   const trimmed = String(message || "").trim();
   if (!trimmed) {
@@ -1079,6 +1088,8 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
   const promptApplyRequestIdRef = useRef(0);
 
   const [imagePrompt, setImagePrompt] = useState("");
+  const [imageLanguage, setImageLanguage] =
+    useState<EcommerceLanguage>("简体中文");
   const [isEcommerceMode, setIsEcommerceMode] = useState(false);
   const [ecommerceUploadKind, setEcommerceUploadKind] = useState<EcommerceUploadKind>("material");
   const [ecommerceMaterialImages, setEcommerceMaterialImages] = useState<StoredReferenceImage[]>([]);
@@ -1126,6 +1137,9 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
   const [visibilityMutatingImageKey, setVisibilityMutatingImageKey] = useState("");
   const [promptPresets, setPromptPresets] = useState<ImagePromptPreset[]>(() => [...IMAGE_PROMPT_PRESETS]);
   const appMeta = useAppMeta();
+  const showEcommerceEntry = appMeta.show_ecommerce_entry !== false;
+  const showNewEcommerceWindowEntry =
+    appMeta.show_new_ecommerce_window_entry !== false;
   const imageSingleCountLimit = useMemo(
     () => Math.max(1, Math.min(10, Number(appMeta.image_single_count_limit) || 10)),
     [appMeta.image_single_count_limit],
@@ -3042,6 +3056,10 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
 
     try {
       const effectiveImageMode = getComposerConversationMode(composerMode, referenceImages);
+      const promptWithLanguage =
+        composerMode === "chat"
+          ? prompt
+          : applyVisibleTextLanguage(prompt, imageLanguage);
       const effectiveModel =
         effectiveImageMode === "chat"
           ? isChatModel(imageModel)
@@ -3069,7 +3087,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
       const turnId = createId();
       const draftTurn: ImageTurn = {
         id: turnId,
-        prompt,
+        prompt: promptWithLanguage,
         model: effectiveModel,
         mode: effectiveImageMode,
         referenceImages: usesReferenceImages(effectiveImageMode) ? referenceImages : [],
@@ -3168,6 +3186,8 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
             onSelectConversation={handleSelectConversation}
             onDeleteConversation={openDeleteConversationConfirm}
             formatConversationTime={formatConversationTime}
+            showEcommerceEntry={showEcommerceEntry}
+            showNewEcommerceWindowEntry={showNewEcommerceWindowEntry}
           />
         </div>
 
@@ -3196,6 +3216,8 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                 onDeleteConversation={openDeleteConversationConfirm}
                 formatConversationTime={formatConversationTime}
                 hideActionButtons
+                showEcommerceEntry={showEcommerceEntry}
+                showNewEcommerceWindowEntry={showNewEcommerceWindowEntry}
               />
             </div>
           </DialogContent>
@@ -3598,19 +3620,21 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                 <Plus className="size-4" />
                 新建
               </Button>
-              <Button
-                variant="outline"
-                className={cn(
-                  "h-10 rounded-full border-[#f2c3a3] px-3 text-xs shadow-sm",
-                  isEcommerceMode
-                    ? "bg-[#fff0e4] text-[#d7651f] hover:bg-[#fff0e4] hover:text-[#d7651f]"
-                    : "bg-[#fff7f1] text-[#d7651f] hover:bg-[#fff0e4] hover:text-[#d7651f]",
-                )}
-                onClick={handleOpenEcommerce}
-              >
-                <ShoppingCart className="size-4" />
-                电商专区
-              </Button>
+              {showEcommerceEntry ? (
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "h-10 rounded-full border-[#f2c3a3] px-3 text-xs shadow-sm",
+                    isEcommerceMode
+                      ? "bg-[#fff0e4] text-[#d7651f] hover:bg-[#fff0e4] hover:text-[#d7651f]"
+                      : "bg-[#fff7f1] text-[#d7651f] hover:bg-[#fff0e4] hover:text-[#d7651f]",
+                  )}
+                  onClick={handleOpenEcommerce}
+                >
+                  <ShoppingCart className="size-4" />
+                  电商专区
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
                 className="h-10 rounded-full border-[#e5e7eb] bg-white px-3 text-[#45515e] shadow-sm"
@@ -3741,6 +3765,14 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
                     ? "建议输入:产品名称、卖点、目标人员、详情图风格等\n这款产品是智能颈椎按摩仪，主打缓解久坐、低头、办公疲劳带来的肩颈酸痛。产品采用仿真人手揉捏按摩技术，搭配恒温热敷、多个按摩档位和轻量化佩戴设计，使用舒适不压迫；内置长续航电池，适合办公室、居家、出差等多场景使用..."
                     : undefined
                 }
+                languageValue={isEcommerceMode ? ecommerceLanguage : imageLanguage}
+                languageOptions={ecommerceLanguageOptions}
+                onLanguageChange={(value) =>
+                  isEcommerceMode
+                    ? setEcommerceLanguage(value as EcommerceLanguage)
+                    : setImageLanguage(value as EcommerceLanguage)
+                }
+                showLanguageSelector={!isEcommerceMode}
                 promptStatePanel={
                   isEcommerceMode && isEcommerceAnalyzing ? (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-2.5 rounded-[20px] border border-[#eef2ff] bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] px-6 py-6 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">

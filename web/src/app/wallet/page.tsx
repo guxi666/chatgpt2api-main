@@ -686,8 +686,8 @@ function WalletPageContent() {
               暂无充值订单
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
+            <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
+              <Table className="min-w-[760px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>记录号</TableHead>
@@ -1074,8 +1074,8 @@ function AdminWalletPageContent() {
               </SelectContent>
             </Select>
           </div>
-          <div className="overflow-hidden rounded-[14px] border border-border">
-            <Table>
+          <div className="overflow-x-auto rounded-[14px] border border-border [-webkit-overflow-scrolling:touch]">
+            <Table className="min-w-[980px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>申请编号</TableHead>
