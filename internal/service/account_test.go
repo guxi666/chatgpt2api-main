@@ -364,6 +364,30 @@ func TestReserveNextCandidateTokenCanFilterPaidAccounts(t *testing.T) {
 	}
 }
 
+func TestReserveNextCandidateTokenPrefersKnownQuotaOverUnknownQuota(t *testing.T) {
+	accounts := newTestAccountService(t)
+	accounts.AddAccounts([]string{"unknown-token", "known-token"})
+	accounts.UpdateAccount("unknown-token", map[string]any{
+		"status":              "姝ｅ父",
+		"quota":               0,
+		"image_quota_unknown": true,
+		"type":                "Plus",
+	})
+	accounts.UpdateAccount("known-token", map[string]any{
+		"status": "姝ｅ父",
+		"quota":  3,
+		"type":   "Plus",
+	})
+
+	reservation, err := accounts.reserveNextCandidateToken(map[string]struct{}{}, nil)
+	if err != nil {
+		t.Fatalf("reserveNextCandidateToken() error = %v", err)
+	}
+	if reservation.token != "known-token" {
+		t.Fatalf("reserved token = %q, want known-token", reservation.token)
+	}
+}
+
 func TestApplyAccountErrorMessageDetectsImageStreamFailures(t *testing.T) {
 	accounts := newTestAccountService(t)
 	accounts.AddAccounts([]string{"token-invalid", "token-limited"})

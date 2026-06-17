@@ -1215,6 +1215,10 @@ export async function refreshAccounts(accountIds: string[]) {
   return httpRequest<AccountRefreshResponse>("/api/accounts/refresh", {
     method: "POST",
     body: { account_ids: accountIds },
+    timeoutMs: Math.min(
+      180000,
+      Math.max(30000, accountIds.length * 1500),
+    ),
   });
 }
 

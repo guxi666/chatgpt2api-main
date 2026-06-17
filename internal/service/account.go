@@ -360,8 +360,8 @@ func (s *AccountService) RefreshAccounts(ctx context.Context, accessTokens []str
 		err   error
 	}
 	workers := len(tokens)
-	if workers > 10 {
-		workers = 10
+	if workers > 20 {
+		workers = 20
 	}
 	jobs := make(chan string)
 	results := make(chan result, len(tokens))
@@ -625,7 +625,8 @@ type imageTokenReservation struct {
 func (s *AccountService) reserveNextCandidateToken(excluded map[string]struct{}, allow func(map[string]any) bool) (imageTokenReservation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var tokens []string
+	var knownTokens []string
+	var fallbackTokens []string
 	for _, item := range s.items {
 		token := util.Clean(item["access_token"])
 		if token == "" {
@@ -638,8 +639,16 @@ func (s *AccountService) reserveNextCandidateToken(excluded map[string]struct{},
 			continue
 		}
 		if s.availableImageSlotsLocked(item) > 0 {
-			tokens = append(tokens, token)
+			if util.ToBool(item["image_quota_unknown"]) {
+				fallbackTokens = append(fallbackTokens, token)
+			} else if util.ToInt(item["quota"], 0) > 0 {
+				knownTokens = append(knownTokens, token)
+			}
 		}
+	}
+	tokens := knownTokens
+	if len(tokens) == 0 {
+		tokens = fallbackTokens
 	}
 	if len(tokens) == 0 {
 		return imageTokenReservation{}, fmt.Errorf("no available image quota")
