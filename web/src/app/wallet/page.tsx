@@ -1306,8 +1306,8 @@ function AdminWalletPageContent() {
               className="h-10 rounded-lg"
             />
           </div>
-          <div className="overflow-hidden rounded-[14px] border border-border">
-            <Table>
+          <div className="overflow-x-auto rounded-[14px] border border-border [-webkit-overflow-scrolling:touch]">
+            <Table className="min-w-[980px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>订单号</TableHead>

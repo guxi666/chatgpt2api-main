@@ -797,6 +797,9 @@ function formatCreationTaskErrorMessage(message: string) {
   if (normalized.includes("timed out waiting for async image generation")) {
     return "图片生成等待超时，建议稍后重试，或降低分辨率、质量后再试。";
   }
+  if (normalized.includes("task returned no output data")) {
+    return "图片生成失败：上游没有返回图片结果。通常是代理线路不稳定、风控拦截或上游中断，请稍后重试或更换代理。";
+  }
   if (normalized.includes("no available image quota")) {
     return "当前没有可用的图片额度，请检查账号额度或稍后重试。";
   }
