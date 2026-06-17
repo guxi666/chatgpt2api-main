@@ -24,6 +24,8 @@ export type AppMeta = {
   site_logo_url: string;
   image_single_count_limit: number;
   image_prompt_presets_json: string;
+  agency_enabled: boolean;
+  subscription_enabled: boolean;
   show_ecommerce_entry: boolean;
   show_new_ecommerce_window_entry: boolean;
   login_page_image_url: string;
@@ -40,6 +42,8 @@ export const defaultAppMeta: AppMeta = {
   site_logo_url: "/logo-mark.svg",
   image_single_count_limit: 10,
   image_prompt_presets_json: "",
+  agency_enabled: true,
+  subscription_enabled: true,
   show_ecommerce_entry: true,
   show_new_ecommerce_window_entry: true,
   login_page_image_url: "",
@@ -79,6 +83,14 @@ export function normalizeAppMeta(data: Partial<AppMeta> = {}): AppMeta {
     image_single_count_limit: Math.max(1, Math.min(10, Number(data.image_single_count_limit) || 10)),
     image_prompt_presets_json:
       typeof data.image_prompt_presets_json === "string" ? data.image_prompt_presets_json : defaultAppMeta.image_prompt_presets_json,
+    agency_enabled:
+      typeof data.agency_enabled === "boolean"
+        ? data.agency_enabled
+        : defaultAppMeta.agency_enabled,
+    subscription_enabled:
+      typeof data.subscription_enabled === "boolean"
+        ? data.subscription_enabled
+        : defaultAppMeta.subscription_enabled,
     show_ecommerce_entry:
       typeof data.show_ecommerce_entry === "boolean" ? data.show_ecommerce_entry : defaultAppMeta.show_ecommerce_entry,
     show_new_ecommerce_window_entry:

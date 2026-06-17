@@ -730,6 +730,8 @@ func (a *App) handleAppMeta(w http.ResponseWriter, r *http.Request) {
 		"site_logo_url":                   a.config.BrandSiteLogoURL(),
 		"image_single_count_limit":        a.config.ImageSingleCountLimit(),
 		"image_prompt_presets_json":       presetsJSON,
+		"agency_enabled":                  a.config.AgencyEnabled(),
+		"subscription_enabled":            a.config.SubscriptionEnabled(),
 		"show_ecommerce_entry":            a.config.ShowEcommerceEntry(),
 		"show_new_ecommerce_window_entry": a.config.ShowNewEcommerceWindowEntry(),
 		"login_page_image_url":            a.config.LoginPageImageURL(),

@@ -397,9 +397,18 @@ export function TopNav() {
     return null;
   }
 
-  const visibleNavItems = navItems.filter((item) =>
-    canAccessPath(session, item.href),
-  );
+  const visibleNavItems = navItems.filter((item) => {
+    if (!canAccessPath(session, item.href)) {
+      return false;
+    }
+    if (item.href === "/subscription" && appMeta.subscription_enabled === false) {
+      return false;
+    }
+    if (item.href === "/agency" && appMeta.agency_enabled === false) {
+      return false;
+    }
+    return true;
+  });
   const roleLabel =
     session.role === "admin"
       ? "管理员"
