@@ -46,6 +46,7 @@ func (a *App) handleAgency(w http.ResponseWriter, r *http.Request) {
 		a.ensureAgencyTierRoles()
 		body, _ := readJSONMap(r)
 		updates := map[string]any{
+			"agency_enabled":                    util.ToBool(util.ValueOr(body["agency_enabled"], true)),
 			"agency_tier_basic_cents":           maxZeroInt(body["agency_tier_basic_cents"]),
 			"agency_tier_pro_cents":             maxZeroInt(body["agency_tier_pro_cents"]),
 			"agency_tier_premium_cents":         maxZeroInt(body["agency_tier_premium_cents"]),
@@ -460,6 +461,7 @@ func agencyPayload(a *App, editable bool) map[string]any {
 	}
 	return map[string]any{
 		"editable":    editable,
+		"enabled":     a.config.AgencyEnabled(),
 		"tiers":       items,
 		"materials":   agencyMaterials(a),
 		"material_qr": agencyMaterialQRConfig(a),

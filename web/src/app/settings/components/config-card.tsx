@@ -183,6 +183,7 @@ export function ConfigCard() {
   const setImagePrice1K = useSettingsStore((state) => state.setImagePrice1K);
   const setImagePrice2K = useSettingsStore((state) => state.setImagePrice2K);
   const setImagePrice4K = useSettingsStore((state) => state.setImagePrice4K);
+  const setConfigField = useSettingsStore((state) => state.setConfigField);
   const saveConfig = useSettingsStore((state) => state.saveConfig);
 
   const handleTestProxy = async () => {
@@ -447,6 +448,20 @@ export function ConfigCard() {
               checked={config?.show_new_ecommerce_window_entry !== false}
               onCheckedChange={setShowNewEcommerceWindowEntry}
               label="显示新建电商窗口"
+            />
+            <ConfigOption
+              checked={config?.agency_enabled !== false}
+              onCheckedChange={(value) =>
+                setConfigField("agency_enabled", Boolean(value))
+              }
+              label="启用代理加盟"
+            />
+            <ConfigOption
+              checked={config?.subscription_enabled !== false}
+              onCheckedChange={(value) =>
+                setConfigField("subscription_enabled", Boolean(value))
+              }
+              label="启用套餐订阅"
             />
           </div>
         </section>

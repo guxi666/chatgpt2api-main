@@ -749,14 +749,6 @@ function isEcommerceConversation(conversation: ImageConversation | null | undefi
   return conversation.turns.some((turn) => turn.hidePromptInResults);
 }
 
-function applyVisibleTextLanguage(prompt: string, language: EcommerceLanguage) {
-  const trimmed = prompt.trim();
-  if (!trimmed) {
-    return "";
-  }
-  return `${trimmed}\n\n如果画面中包含任何可见文字、标题、标签或说明，请统一使用${language}呈现。`;
-}
-
 function formatCreationTaskErrorMessage(message: string) {
   const trimmed = String(message || "").trim();
   if (!trimmed) {
@@ -3059,10 +3051,6 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
 
     try {
       const effectiveImageMode = getComposerConversationMode(composerMode, referenceImages);
-      const promptWithLanguage =
-        composerMode === "chat"
-          ? prompt
-          : applyVisibleTextLanguage(prompt, imageLanguage);
       const effectiveModel =
         effectiveImageMode === "chat"
           ? isChatModel(imageModel)
@@ -3090,7 +3078,7 @@ function ImagePageContent({ canEditPromptTemplates }: { canEditPromptTemplates: 
       const turnId = createId();
       const draftTurn: ImageTurn = {
         id: turnId,
-        prompt: promptWithLanguage,
+        prompt,
         model: effectiveModel,
         mode: effectiveImageMode,
         referenceImages: usesReferenceImages(effectiveImageMode) ? referenceImages : [],

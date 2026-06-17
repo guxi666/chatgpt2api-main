@@ -112,6 +112,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     registration_bonus_image_times: Number.isFinite(registrationBonusImageTimes)
       ? registrationBonusImageTimes
       : 20,
+    agency_enabled: config.agency_enabled !== false,
     show_ecommerce_entry: config.show_ecommerce_entry !== false,
     show_new_ecommerce_window_entry:
       config.show_new_ecommerce_window_entry !== false,
@@ -709,6 +710,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           0,
           Number(config.registration_bonus_image_times) || 0,
         ),
+        agency_enabled: Boolean(config.agency_enabled),
         show_ecommerce_entry: Boolean(config.show_ecommerce_entry),
         show_new_ecommerce_window_entry: Boolean(
           config.show_new_ecommerce_window_entry,

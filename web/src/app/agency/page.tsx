@@ -249,11 +249,13 @@ function AgencyPackageShowcase({
   currentTier,
   joiningTier,
   onJoin,
+  enabled,
 }: {
   tiers: AgencyTier[];
   currentTier: string;
   joiningTier: string;
   onJoin: (tier: TierKey) => Promise<void>;
+  enabled: boolean;
 }) {
   const currentRank = tierRank(currentTier);
   const sorted = [...tiers].sort((a, b) => tierRank(a.key) - tierRank(b.key));
@@ -276,12 +278,17 @@ function AgencyPackageShowcase({
         </div>
 
         <div className="grid gap-4 lg:grid-cols-3">
+          {!enabled ? (
+            <div className="lg:col-span-3 rounded-[18px] border border-amber-200 bg-amber-50 px-5 py-4 text-center text-sm text-amber-800">
+              代理加盟暂未开放，当前已开通代理权限的用户不受影响。
+            </div>
+          ) : null}
           {sorted.map((tier) => {
             const meta = TIER_META[tier.key as TierKey] || TIER_META.basic;
             const Icon = meta.icon;
             const targetRank = tierRank(tier.key);
             const isCurrentTier = currentRank > 0 && targetRank === currentRank;
-            const disabled = joiningTier === tier.key || isCurrentTier;
+            const disabled = !enabled || joiningTier === tier.key || isCurrentTier;
             const isMiddle = tier.key === "pro";
             const isPremium = tier.key === "premium";
             const features = tier.key === "basic"
@@ -1257,6 +1264,10 @@ export default function AgencyPage() {
       toast.info("管理员账号无需购买代理套餐");
       return;
     }
+    if (config?.enabled === false) {
+      toast.error("代理加盟暂未开放");
+      return;
+    }
     const currentRank = tierRank(currentTier);
     const targetRank = tierRank(tier);
     if (currentRank > 0 && targetRank <= currentRank) return;
@@ -1409,6 +1420,7 @@ export default function AgencyPage() {
     const demoLink = `${siteOrigin.replace(/\/$/, "")}/login?invite_code=demo`;
     return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&margin=8&data=${encodeURIComponent(demoLink)}`;
   }, [config]);
+  const agencyConfigEnabled = config?.enabled !== false;
   const showAgencyPackage = isAdmin || !agencyEnabled;
   const currentTierName = tierLabel(currentTier, tiers);
   const brandTitle = (appMeta.app_title || "GPT生图站").trim() || "GPT生图站";
@@ -1425,7 +1437,7 @@ export default function AgencyPage() {
   return (
     <div className="mx-auto w-full max-w-[1280px] space-y-5">
       {showAgencyPackage ? (
-        <AgencyPackageShowcase tiers={tiers} currentTier={currentTier} joiningTier={joiningTier} onJoin={handleJoin} />
+        <AgencyPackageShowcase tiers={tiers} currentTier={currentTier} joiningTier={joiningTier} onJoin={handleJoin} enabled={agencyConfigEnabled} />
       ) : (
         <AgencyCommissionCenter
           dashboard={dashboard}

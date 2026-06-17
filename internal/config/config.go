@@ -74,6 +74,7 @@ var settingEnvKeys = map[string]string{
 	"agency_tier_basic_discount_bp":        "CHATGPT2API_AGENCY_TIER_BASIC_DISCOUNT_BP",
 	"agency_tier_pro_discount_bp":          "CHATGPT2API_AGENCY_TIER_PRO_DISCOUNT_BP",
 	"agency_tier_premium_discount_bp":      "CHATGPT2API_AGENCY_TIER_PREMIUM_DISCOUNT_BP",
+	"agency_enabled":                       "CHATGPT2API_AGENCY_ENABLED",
 	"subscription_enabled":                 "CHATGPT2API_SUBSCRIPTION_ENABLED",
 	"subscription_heading":                 "CHATGPT2API_SUBSCRIPTION_HEADING",
 	"subscription_subheading":              "CHATGPT2API_SUBSCRIPTION_SUBHEADING",
@@ -444,6 +445,10 @@ func (s *Store) AgencyTierProDiscountBP() int {
 
 func (s *Store) AgencyTierPremiumDiscountBP() int {
 	return clampAgencyBasisPoint(intSetting(s.settingValue("agency_tier_premium_discount_bp", 1500), 1500))
+}
+
+func (s *Store) AgencyEnabled() bool {
+	return util.ToBool(s.settingValue("agency_enabled", true))
 }
 
 func (s *Store) SubscriptionEnabled() bool {
@@ -966,6 +971,7 @@ func (s *Store) Get() map[string]any {
 	data["agency_tier_basic_discount_bp"] = s.AgencyTierBasicDiscountBP()
 	data["agency_tier_pro_discount_bp"] = s.AgencyTierProDiscountBP()
 	data["agency_tier_premium_discount_bp"] = s.AgencyTierPremiumDiscountBP()
+	data["agency_enabled"] = s.AgencyEnabled()
 	data["subscription_enabled"] = s.SubscriptionEnabled()
 	data["subscription_heading"] = s.SubscriptionHeading()
 	data["subscription_subheading"] = s.SubscriptionSubheading()

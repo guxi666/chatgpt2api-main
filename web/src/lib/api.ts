@@ -191,6 +191,7 @@ export type SettingsConfig = {
   registration_enabled?: boolean;
   registration_allowed_email_domains?: string;
   registration_bonus_image_times?: number | string;
+  agency_enabled?: boolean;
   show_ecommerce_entry?: boolean;
   show_new_ecommerce_window_entry?: boolean;
   cf_turnstile_enabled?: boolean;
@@ -338,6 +339,7 @@ export type AgencyMaterialQRConfig = {
 
 export type AgencyConfig = {
   editable: boolean;
+  enabled?: boolean;
   tiers: AgencyTier[];
   materials?: AgencyMaterial[];
   material_qr?: AgencyMaterialQRConfig;
@@ -1472,6 +1474,7 @@ export async function fetchAgencyConfig() {
 }
 
 export async function updateAgencyConfig(payload: {
+  agency_enabled?: boolean;
   agency_tier_basic_cents: number;
   agency_tier_pro_cents: number;
   agency_tier_premium_cents: number;
