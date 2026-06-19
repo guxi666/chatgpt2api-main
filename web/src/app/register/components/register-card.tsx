@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { AlertTriangle, LoaderCircle, Plus, Play, RotateCcw, Save, Square, Trash2, UserPlus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -8,10 +9,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { testProxy, type ProxyTestResult } from "@/lib/api";
 
 import { useSettingsStore } from "../../settings/store";
 
 export function RegisterCard() {
+  const [isTestingProxy, setIsTestingProxy] = useState(false);
+  const [proxyTestResult, setProxyTestResult] =
+    useState<ProxyTestResult | null>(null);
   const config = useSettingsStore((state) => state.registerConfig);
   const isLoading = useSettingsStore((state) => state.isLoadingRegister);
   const isSaving = useSettingsStore((state) => state.isSavingRegister);
@@ -22,6 +27,9 @@ export function RegisterCard() {
   const setTargetQuota = useSettingsStore((state) => state.setRegisterTargetQuota);
   const setTargetAvailable = useSettingsStore((state) => state.setRegisterTargetAvailable);
   const setCheckInterval = useSettingsStore((state) => state.setRegisterCheckInterval);
+  const setAccountCheckInterval = useSettingsStore(
+    (state) => state.setRegisterAccountCheckInterval,
+  );
   const setMailField = useSettingsStore((state) => state.setRegisterMailField);
   const addProvider = useSettingsStore((state) => state.addRegisterProvider);
   const updateProvider = useSettingsStore((state) => state.updateRegisterProvider);
@@ -55,6 +63,21 @@ export function RegisterCard() {
     });
   };
 
+  const handleTestProxy = async () => {
+    const candidate = String(config.proxy || "").trim();
+    if (!candidate) {
+      return;
+    }
+    setIsTestingProxy(true);
+    setProxyTestResult(null);
+    try {
+      const data = await testProxy(candidate);
+      setProxyTestResult(data.result);
+    } finally {
+      setIsTestingProxy(false);
+    }
+  };
+
   return (
     <div className="grid h-[calc(100vh-132px)] min-h-[640px] items-stretch gap-0 overflow-hidden rounded-[24px] border border-[#f2f3f5] bg-card shadow-[0_0_15px_rgba(44,30,116,0.16)] xl:grid-cols-2">
       <section className="space-y-4 overflow-y-auto border-b border-border p-4 xl:border-r xl:border-b-0">
@@ -74,7 +97,7 @@ export function RegisterCard() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
-            <div className="space-y-2">
+            <div className="space-y-2 md:col-span-2">
               <label className="text-sm text-stone-700">注册模式</label>
               <Select value={config.mode || "total"} onValueChange={(value) => setMode(value as "total" | "quota" | "available")} disabled={config.enabled}>
                 <SelectTrigger className="h-10 rounded-xl border-stone-200 bg-white">
@@ -97,7 +120,19 @@ export function RegisterCard() {
             </div>
             <div className="space-y-2">
               <label className="text-sm text-stone-700">注册代理</label>
-              <Input value={config.proxy} onChange={(event) => setProxy(event.target.value)} placeholder="http://127.0.0.1:7890" className="h-10 rounded-xl border-stone-200 bg-white" disabled={config.enabled} />
+              <div className="flex gap-2">
+                <Input value={config.proxy} onChange={(event) => { setProxy(event.target.value); setProxyTestResult(null); }} placeholder="http://127.0.0.1:7890" className="h-10 rounded-xl border-stone-200 bg-white" disabled={config.enabled} />
+                <Button type="button" variant="outline" className="h-10 shrink-0 rounded-xl border-stone-200 bg-white px-3 text-stone-700" onClick={() => void handleTestProxy()} disabled={config.enabled || isTestingProxy || !String(config.proxy || "").trim()}>
+                  {isTestingProxy ? <LoaderCircle className="size-4 animate-spin" /> : "测试代理"}
+                </Button>
+              </div>
+              {proxyTestResult ? (
+                <div className={`${proxyTestResult.ok ? "border border-emerald-200 bg-emerald-50 text-emerald-700" : "border border-rose-200 bg-rose-50 text-rose-700"} rounded-md px-3 py-2 text-xs`}>
+                  {proxyTestResult.ok
+                    ? `代理可用：HTTP ${proxyTestResult.status}，用时 ${proxyTestResult.latency_ms} ms`
+                    : `代理不可用：${proxyTestResult.error ?? "未知错误"}（用时 ${proxyTestResult.latency_ms} ms）`}
+                </div>
+              ) : null}
             </div>
             <div className="space-y-2">
               <label className="text-sm text-stone-700">目标剩余额度</label>
@@ -110,6 +145,10 @@ export function RegisterCard() {
             <div className="space-y-2">
               <label className="text-sm text-stone-700">检查间隔（秒）</label>
               <Input value={String(config.check_interval || "")} onChange={(event) => setCheckInterval(event.target.value)} className="h-10 rounded-xl border-stone-200 bg-white" disabled={config.enabled || config.mode === "total"} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-stone-700">账号测活间隔（秒）</label>
+              <Input value={String(config.account_check_interval || "")} onChange={(event) => setAccountCheckInterval(event.target.value)} className="h-10 rounded-xl border-stone-200 bg-white" disabled={config.enabled} />
             </div>
           </div>
 

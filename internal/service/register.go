@@ -204,8 +204,14 @@ func (s *RegisterService) run() {
 	threads := maxInt(1, util.ToInt(cfg["threads"], 1))
 	submitted, running, done, success, fail := 0, 0, 0, 0, 0
 	results := make(chan registerWorkerResult, threads)
+	nextAccountRefreshAt := time.Now()
 	for {
 		current := s.Get()
+		accountCheckInterval := time.Duration(maxInt(30, util.ToInt(current["account_check_interval"], 300))) * time.Second
+		if util.ToBool(current["enabled"]) && time.Now().After(nextAccountRefreshAt) {
+			s.refreshPoolAccounts()
+			nextAccountRefreshAt = time.Now().Add(accountCheckInterval)
+		}
 		for util.ToBool(current["enabled"]) && !s.targetReached(current, submitted) && running < threads {
 			submitted++
 			running++
@@ -242,6 +248,28 @@ func (s *RegisterService) run() {
 	s.notifyLocked()
 	s.appendLogLocked(fmt.Sprintf("注册任务结束，成功%d，失败%d", success, fail), "yellow")
 	s.mu.Unlock()
+}
+
+func (s *RegisterService) refreshPoolAccounts() {
+	if s.accounts == nil {
+		return
+	}
+	tokens := s.accounts.ListTokens()
+	if len(tokens) == 0 {
+		s.appendLog("号池测活：当前没有可检测的账号", "yellow")
+		return
+	}
+	result := s.accounts.RefreshAccounts(context.Background(), tokens)
+	refreshed := util.ToInt(result["refreshed"], 0)
+	errors := util.AsMapSlice(result["errors"])
+	if len(errors) > 0 {
+		firstError := util.Clean(errors[0]["error"])
+		if firstError != "" {
+			s.appendLog(fmt.Sprintf("号池测活：刷新成功 %d 个，失败 %d 个，首个错误：%s", refreshed, len(errors), firstError), "yellow")
+			return
+		}
+	}
+	s.appendLog(fmt.Sprintf("号池测活：刷新成功 %d 个，失败 %d 个", refreshed, len(errors)), "yellow")
 }
 
 func (s *RegisterService) runWorker(index int, config map[string]any) registerWorkerResult {
@@ -1061,15 +1089,16 @@ func registerDefaultConfig() map[string]any {
 			"wait_interval":   3,
 			"providers":       []map[string]any{},
 		},
-		"proxy":            "",
-		"total":            20000,
-		"threads":          64,
-		"mode":             registerModeTotal,
-		"target_quota":     100,
-		"target_available": 10,
-		"check_interval":   5,
-		"enabled":          false,
-		"stats":            stats,
+		"proxy":                  "",
+		"total":                  20000,
+		"threads":                64,
+		"mode":                   registerModeTotal,
+		"target_quota":           100,
+		"target_available":       10,
+		"check_interval":         5,
+		"account_check_interval": 300,
+		"enabled":                false,
+		"stats":                  stats,
 	}
 }
 
@@ -1108,6 +1137,7 @@ func normalizeRegisterConfig(raw map[string]any) map[string]any {
 	cfg["target_quota"] = maxInt(1, util.ToInt(cfg["target_quota"], 1))
 	cfg["target_available"] = maxInt(1, util.ToInt(cfg["target_available"], 1))
 	cfg["check_interval"] = maxInt(1, util.ToInt(cfg["check_interval"], 5))
+	cfg["account_check_interval"] = maxInt(30, util.ToInt(cfg["account_check_interval"], 300))
 	cfg["enabled"] = util.ToBool(cfg["enabled"])
 	cfg["mail"] = normalizeRegisterMailConfig(util.StringMap(cfg["mail"]))
 	stats := registerZeroStats(util.ToInt(cfg["threads"], 1), map[string]any{

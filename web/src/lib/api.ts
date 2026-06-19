@@ -896,6 +896,7 @@ export type RegisterConfig = {
   target_quota: number;
   target_available: number;
   check_interval: number;
+  account_check_interval: number;
   stats: {
     job_id?: string;
     success: number;

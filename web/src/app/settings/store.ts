@@ -534,6 +534,7 @@ type SettingsStore = {
   setRegisterTargetQuota: (value: string) => void;
   setRegisterTargetAvailable: (value: string) => void;
   setRegisterCheckInterval: (value: string) => void;
+  setRegisterAccountCheckInterval: (value: string) => void;
   setRegisterMailField: (
     key: "request_timeout" | "wait_timeout" | "wait_interval",
     value: string,
@@ -1695,6 +1696,19 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     );
   },
 
+  setRegisterAccountCheckInterval: (value) => {
+    set((state) =>
+      state.registerConfig
+        ? {
+            registerConfig: {
+              ...state.registerConfig,
+              account_check_interval: Number(value) || 0,
+            },
+          }
+        : {},
+    );
+  },
+
   setRegisterMailField: (key, value) => {
     set((state) =>
       state.registerConfig
@@ -1781,6 +1795,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           Number(registerConfig.target_available) || 1,
         ),
         check_interval: Math.max(1, Number(registerConfig.check_interval) || 5),
+        account_check_interval: Math.max(
+          30,
+          Number(registerConfig.account_check_interval) || 300,
+        ),
       });
       set({ registerConfig: data.register });
       toast.success("注册配置已保存");
@@ -1811,6 +1829,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           check_interval: Math.max(
             1,
             Number(registerConfig.check_interval) || 5,
+          ),
+          account_check_interval: Math.max(
+            30,
+            Number(registerConfig.account_check_interval) || 300,
           ),
         });
       }
