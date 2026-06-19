@@ -1796,8 +1796,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         ),
         check_interval: Math.max(1, Number(registerConfig.check_interval) || 5),
         account_check_interval: Math.max(
-          30,
-          Number(registerConfig.account_check_interval) || 300,
+          0,
+          Number(registerConfig.account_check_interval) || 0,
         ),
       });
       set({ registerConfig: data.register });
@@ -1831,8 +1831,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
             Number(registerConfig.check_interval) || 5,
           ),
           account_check_interval: Math.max(
-            30,
-            Number(registerConfig.account_check_interval) || 300,
+            0,
+            Number(registerConfig.account_check_interval) || 0,
           ),
         });
       }

@@ -207,8 +207,8 @@ func (s *RegisterService) run() {
 	nextAccountRefreshAt := time.Now()
 	for {
 		current := s.Get()
-		accountCheckInterval := time.Duration(maxInt(30, util.ToInt(current["account_check_interval"], 300))) * time.Second
-		if util.ToBool(current["enabled"]) && time.Now().After(nextAccountRefreshAt) {
+		accountCheckInterval := time.Duration(maxInt(0, util.ToInt(current["account_check_interval"], 0))) * time.Second
+		if util.ToBool(current["enabled"]) && accountCheckInterval > 0 && time.Now().After(nextAccountRefreshAt) {
 			s.refreshPoolAccounts()
 			nextAccountRefreshAt = time.Now().Add(accountCheckInterval)
 		}
@@ -1096,7 +1096,7 @@ func registerDefaultConfig() map[string]any {
 		"target_quota":           100,
 		"target_available":       10,
 		"check_interval":         5,
-		"account_check_interval": 300,
+		"account_check_interval": 0,
 		"enabled":                false,
 		"stats":                  stats,
 	}
@@ -1137,7 +1137,7 @@ func normalizeRegisterConfig(raw map[string]any) map[string]any {
 	cfg["target_quota"] = maxInt(1, util.ToInt(cfg["target_quota"], 1))
 	cfg["target_available"] = maxInt(1, util.ToInt(cfg["target_available"], 1))
 	cfg["check_interval"] = maxInt(1, util.ToInt(cfg["check_interval"], 5))
-	cfg["account_check_interval"] = maxInt(30, util.ToInt(cfg["account_check_interval"], 300))
+	cfg["account_check_interval"] = maxInt(0, util.ToInt(cfg["account_check_interval"], 0))
 	cfg["enabled"] = util.ToBool(cfg["enabled"])
 	cfg["mail"] = normalizeRegisterMailConfig(util.StringMap(cfg["mail"]))
 	stats := registerZeroStats(util.ToInt(cfg["threads"], 1), map[string]any{
