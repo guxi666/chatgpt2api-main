@@ -27,6 +27,9 @@ var settingEnvKeys = map[string]string{
 	"brand_top_left_logo_url":              "CHATGPT2API_BRAND_TOP_LEFT_LOGO_URL",
 	"brand_site_logo_url":                  "CHATGPT2API_BRAND_SITE_LOGO_URL",
 	"proxy":                                "CHATGPT2API_PROXY",
+	"proxy_pool_enabled":                   "CHATGPT2API_PROXY_POOL_ENABLED",
+	"proxy_pool_urls":                      "CHATGPT2API_PROXY_POOL_URLS",
+	"proxy_pool_cooldown_seconds":          "CHATGPT2API_PROXY_POOL_COOLDOWN_SECONDS",
 	"refresh_account_interval_minute":      "CHATGPT2API_REFRESH_ACCOUNT_INTERVAL_MINUTE",
 	"image_concurrent_limit":               "CHATGPT2API_IMAGE_CONCURRENT_LIMIT",
 	"image_single_count_limit":             "CHATGPT2API_IMAGE_SINGLE_COUNT_LIMIT",
@@ -713,6 +716,50 @@ func (s *Store) Proxy() string {
 	return strings.TrimSpace(fmt.Sprint(s.settingValue("proxy", "")))
 }
 
+func (s *Store) ProxyPoolEnabled() bool {
+	return util.ToBool(s.settingValue("proxy_pool_enabled", false))
+}
+
+func (s *Store) ProxyPoolURLs() []string {
+	raw := strings.TrimSpace(fmt.Sprint(s.settingValue("proxy_pool_urls", "")))
+	if raw == "" {
+		return nil
+	}
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == '\n' || r == '\r' || r == ','
+	})
+	out := make([]string, 0, len(fields))
+	seen := map[string]struct{}{}
+	for _, item := range fields {
+		value := strings.TrimSpace(item)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func (s *Store) ProxyPoolCooldownSeconds() int {
+	value := s.proxyPoolCooldownFromValue(s.settingValue("proxy_pool_cooldown_seconds", 600))
+	return value
+}
+
+func (s *Store) proxyPoolCooldownFromValue(value any) int {
+	valueInt := intSetting(value, 600)
+	if valueInt < 30 {
+		return 30
+	}
+	if valueInt > 86400 {
+		return 86400
+	}
+	return valueInt
+}
+
 func (s *Store) ImageObjectStorage() objectstore.Config {
 	accountEndpoint := strings.TrimSpace(fmt.Sprint(s.settingValue("image_r2_endpoint", "")))
 	return objectstore.Config{
@@ -936,6 +983,9 @@ func (s *Store) Get() map[string]any {
 	data["auto_remove_rate_limited_accounts"] = s.AutoRemoveRateLimitedAccounts()
 	data["log_levels"] = s.LogLevels()
 	data["proxy"] = s.Proxy()
+	data["proxy_pool_enabled"] = s.ProxyPoolEnabled()
+	data["proxy_pool_urls"] = strings.Join(s.ProxyPoolURLs(), "\n")
+	data["proxy_pool_cooldown_seconds"] = s.ProxyPoolCooldownSeconds()
 	data["base_url"] = s.BaseURL()
 	data["brand_top_left_name"] = s.BrandTopLeftName()
 	data["brand_site_name"] = s.BrandSiteName()
@@ -1117,6 +1167,9 @@ func (s *Store) Update(data map[string]any) (map[string]any, error) {
 	}
 	if value, ok := next["image_task_timeout_seconds"]; ok {
 		next["image_task_timeout_seconds"] = normalizeImageTaskTimeoutSeconds(value)
+	}
+	if value, ok := next["proxy_pool_cooldown_seconds"]; ok {
+		next["proxy_pool_cooldown_seconds"] = s.proxyPoolCooldownFromValue(value)
 	}
 	next["update_repo"] = normalizeUpdateRepo(util.ValueOr(next["update_repo"], "ZyphrZero/chatgpt2api"))
 	if err := s.validateSettingsUpdateLocked(next); err != nil {

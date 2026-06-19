@@ -2433,8 +2433,10 @@ export async function fetchSub2APIImportJob(serverId: string) {
 // ── Upstream proxy ────────────────────────────────────────────────
 
 export type ProxySettings = {
-  enabled: boolean;
   url: string;
+  pool_enabled?: boolean;
+  pool_urls?: string;
+  pool_cooldown_seconds?: number;
 };
 
 export type ProxyTestResult = {
@@ -2449,8 +2451,10 @@ export async function fetchProxy() {
 }
 
 export async function updateProxy(updates: {
-  enabled?: boolean;
   url?: string;
+  pool_enabled?: boolean;
+  pool_urls?: string;
+  pool_cooldown_seconds?: number;
 }) {
   return httpRequest<{ proxy: ProxySettings }>("/api/proxy", {
     method: "POST",

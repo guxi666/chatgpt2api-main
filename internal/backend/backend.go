@@ -54,6 +54,7 @@ type Client struct {
 
 	lookup       AccountLookup
 	proxy        *service.ProxyService
+	selectedProxy string
 	httpClient   *http.Client
 	fp           map[string]string
 	userAgent    string
@@ -80,6 +81,20 @@ type UploadedFile struct {
 	Height   int
 }
 
+func (c *Client) reportProxySuccess() {
+	if c.proxy == nil {
+		return
+	}
+	c.proxy.ReportSuccess(c.selectedProxy)
+}
+
+func (c *Client) reportProxyFailure(message string) {
+	if c.proxy == nil {
+		return
+	}
+	c.proxy.ReportFailure(c.selectedProxy, message)
+}
+
 func NewClient(accessToken string, lookup AccountLookup, proxy *service.ProxyService) *Client {
 	c := &Client{
 		BaseURL:           "https://chatgpt.com",
@@ -94,7 +109,11 @@ func NewClient(accessToken string, lookup AccountLookup, proxy *service.ProxySer
 	c.userAgent = c.fp["user-agent"]
 	c.deviceID = c.fp["oai-device-id"]
 	c.sessionID = c.fp["oai-session-id"]
-	c.httpClient = proxy.BrowserHTTPClientWithProfile(c.fp["impersonate"], 300*time.Second)
+	if proxy != nil {
+		c.httpClient, c.selectedProxy = proxy.BrowserHTTPClientWithProfileSource(c.fp["impersonate"], 300*time.Second)
+	} else {
+		c.httpClient = (&http.Client{Timeout: 300 * time.Second})
+	}
 	return c
 }
 
@@ -534,13 +553,16 @@ func (c *Client) bootstrap(ctx context.Context) error {
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		c.reportProxyFailure(err.Error())
 		return upstreamTransportError("bootstrap", err)
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.reportProxyFailure(fmt.Sprintf("bootstrap status=%d", resp.StatusCode))
 		return upstreamHTTPError("bootstrap", resp.StatusCode, data)
 	}
+	c.reportProxySuccess()
 	c.powSources, c.powDataBuild = parsePOWResources(string(data))
 	if len(c.powSources) == 0 {
 		c.powSources = []string{defaultPOWScript}
@@ -1027,7 +1049,13 @@ func (c *Client) postRaw(ctx context.Context, path string, data []byte, headers 
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		c.reportProxyFailure(err.Error())
 		return nil, upstreamTransportError(path, err)
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+		c.reportProxySuccess()
+	} else if resp.StatusCode == http.StatusForbidden || resp.StatusCode >= 500 {
+		c.reportProxyFailure(fmt.Sprintf("%s status=%d", path, resp.StatusCode))
 	}
 	return resp, nil
 }

@@ -1321,16 +1321,36 @@ func (a *App) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		util.WriteJSON(w, http.StatusOK, map[string]any{"proxy": map[string]any{"url": a.config.Proxy()}})
+		util.WriteJSON(w, http.StatusOK, map[string]any{"proxy": map[string]any{
+			"url":                   a.config.Proxy(),
+			"pool_enabled":          a.config.ProxyPoolEnabled(),
+			"pool_urls":             strings.Join(a.config.ProxyPoolURLs(), "\n"),
+			"pool_cooldown_seconds": a.config.ProxyPoolCooldownSeconds(),
+		}})
 	case http.MethodPost:
 		body, _ := readJSONMap(r)
 		url := util.Clean(body["url"])
-		updated, err := a.config.Update(map[string]any{"proxy": url})
+		updates := map[string]any{"proxy": url}
+		if _, ok := body["pool_enabled"]; ok {
+			updates["proxy_pool_enabled"] = util.ToBool(body["pool_enabled"])
+		}
+		if _, ok := body["pool_urls"]; ok {
+			updates["proxy_pool_urls"] = util.Clean(body["pool_urls"])
+		}
+		if _, ok := body["pool_cooldown_seconds"]; ok {
+			updates["proxy_pool_cooldown_seconds"] = util.ToInt(body["pool_cooldown_seconds"], 600)
+		}
+		updated, err := a.config.Update(updates)
 		if err != nil {
 			util.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		util.WriteJSON(w, http.StatusOK, map[string]any{"proxy": map[string]any{"url": updated["proxy"]}})
+		util.WriteJSON(w, http.StatusOK, map[string]any{"proxy": map[string]any{
+			"url":                   updated["proxy"],
+			"pool_enabled":          updated["proxy_pool_enabled"],
+			"pool_urls":             updated["proxy_pool_urls"],
+			"pool_cooldown_seconds": updated["proxy_pool_cooldown_seconds"],
+		}})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}

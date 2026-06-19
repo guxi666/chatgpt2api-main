@@ -9,8 +9,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"chatgpt2api/internal/util"
@@ -25,10 +27,20 @@ type ProxyConfig interface {
 
 type ProxyService struct {
 	config ProxyConfig
+	mu     sync.Mutex
+	index  int
+	state  map[string]*proxyState
+}
+
+type proxyState struct {
+	Failures      int
+	CooldownUntil time.Time
+	LastError     string
+	LastSuccessAt time.Time
 }
 
 func NewProxyService(config ProxyConfig) *ProxyService {
-	return &ProxyService{config: config}
+	return &ProxyService{config: config, state: map[string]*proxyState{}}
 }
 
 func HTTPClientForProxy(proxy string, timeout time.Duration) *http.Client {
@@ -36,15 +48,33 @@ func HTTPClientForProxy(proxy string, timeout time.Duration) *http.Client {
 }
 
 func (s *ProxyService) HTTPClient(timeout time.Duration) *http.Client {
-	return HTTPClientForProxy(s.config.Proxy(), timeout)
+	client, _ := s.HTTPClientWithSource(timeout)
+	return client
 }
 
 func (s *ProxyService) BrowserHTTPClient(timeout time.Duration) *http.Client {
-	return browserHTTPClient(s.config.Proxy(), timeout)
+	client, _ := s.BrowserHTTPClientWithSource(timeout)
+	return client
 }
 
 func (s *ProxyService) BrowserHTTPClientWithProfile(profile string, timeout time.Duration) *http.Client {
-	return browserHTTPClientForProfile(s.config.Proxy(), profile, timeout)
+	client, _ := s.BrowserHTTPClientWithProfileSource(profile, timeout)
+	return client
+}
+
+func (s *ProxyService) HTTPClientWithSource(timeout time.Duration) (*http.Client, string) {
+	proxy := s.pickProxy()
+	return HTTPClientForProxy(proxy, timeout), proxy
+}
+
+func (s *ProxyService) BrowserHTTPClientWithSource(timeout time.Duration) (*http.Client, string) {
+	proxy := s.pickProxy()
+	return browserHTTPClient(proxy, timeout), proxy
+}
+
+func (s *ProxyService) BrowserHTTPClientWithProfileSource(profile string, timeout time.Duration) (*http.Client, string) {
+	proxy := s.pickProxy()
+	return browserHTTPClientForProfile(proxy, profile, timeout), proxy
 }
 
 func (s *ProxyService) Test(candidate string, timeout time.Duration) map[string]any {
@@ -82,6 +112,112 @@ func (s *ProxyService) Test(candidate string, timeout time.Duration) map[string]
 		message = resp.Status
 	}
 	return map[string]any{"ok": ok, "status": resp.StatusCode, "latency_ms": latency, "error": message}
+}
+
+func (s *ProxyService) ReportSuccess(candidate string) {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.ensureStateLocked(candidate)
+	state.Failures = 0
+	state.CooldownUntil = time.Time{}
+	state.LastError = ""
+	state.LastSuccessAt = time.Now()
+}
+
+func (s *ProxyService) ReportFailure(candidate, message string) {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.ensureStateLocked(candidate)
+	state.Failures++
+	state.LastError = strings.TrimSpace(message)
+	if state.Failures >= 2 {
+		state.CooldownUntil = time.Now().Add(time.Duration(s.poolCooldownSeconds()) * time.Second)
+	}
+}
+
+func (s *ProxyService) poolEnabled() bool {
+	if provider, ok := s.config.(interface{ ProxyPoolEnabled() bool }); ok {
+		return provider.ProxyPoolEnabled()
+	}
+	return false
+}
+
+func (s *ProxyService) poolURLs() []string {
+	if provider, ok := s.config.(interface{ ProxyPoolURLs() []string }); ok {
+		return provider.ProxyPoolURLs()
+	}
+	return nil
+}
+
+func (s *ProxyService) poolCooldownSeconds() int {
+	if provider, ok := s.config.(interface{ ProxyPoolCooldownSeconds() int }); ok {
+		return provider.ProxyPoolCooldownSeconds()
+	}
+	return 600
+}
+
+func (s *ProxyService) candidates() []string {
+	if s.poolEnabled() {
+		if pool := s.poolURLs(); len(pool) > 0 {
+			return pool
+		}
+	}
+	if single := strings.TrimSpace(s.config.Proxy()); single != "" {
+		return []string{single}
+	}
+	return nil
+}
+
+func (s *ProxyService) ensureStateLocked(candidate string) *proxyState {
+	if s.state == nil {
+		s.state = map[string]*proxyState{}
+	}
+	item := s.state[candidate]
+	if item == nil {
+		item = &proxyState{}
+		s.state[candidate] = item
+	}
+	return item
+}
+
+func (s *ProxyService) pickProxy() string {
+	candidates := s.candidates()
+	if len(candidates) == 0 {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	available := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		state := s.ensureStateLocked(candidate)
+		if state.CooldownUntil.IsZero() || !state.CooldownUntil.After(now) {
+			available = append(available, candidate)
+		}
+	}
+	if len(available) == 0 {
+		available = append(available, candidates...)
+	}
+	sort.SliceStable(available, func(i, j int) bool {
+		left := s.ensureStateLocked(available[i])
+		right := s.ensureStateLocked(available[j])
+		if left.Failures != right.Failures {
+			return left.Failures < right.Failures
+		}
+		return left.LastSuccessAt.After(right.LastSuccessAt)
+	})
+	selected := available[s.index%len(available)]
+	s.index++
+	return selected
 }
 
 func browserHTTPClient(proxy string, timeout time.Duration) *http.Client {

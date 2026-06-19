@@ -1,17 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link2, LoaderCircle, PlugZap, Save } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { testProxy, updateProxy, type ProxyTestResult } from "@/lib/api";
+import { Textarea } from "@/components/ui/textarea";
+import { fetchProxy, testProxy, updateProxy, type ProxyTestResult } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-import { useSettingsStore } from "../store";
 import {
   SettingsCard,
   SettingsNotice,
@@ -31,20 +32,67 @@ function isSocksProxy(value: string) {
 }
 
 export function ProxySettingsCard() {
-  const [isTesting, setIsTesting] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<ProxyTestResult | null>(null);
-  const config = useSettingsStore((state) => state.config);
-  const isLoadingConfig = useSettingsStore((state) => state.isLoadingConfig);
-  const setProxy = useSettingsStore((state) => state.setProxy);
 
-  const proxy = String(config?.proxy ?? "");
+  const [proxy, setProxy] = useState("");
+  const [poolEnabled, setPoolEnabled] = useState(false);
+  const [poolUrls, setPoolUrls] = useState("");
+  const [poolCooldownSeconds, setPoolCooldownSeconds] = useState("600");
+
+  const [savedProxy, setSavedProxy] = useState("");
+  const [savedPoolEnabled, setSavedPoolEnabled] = useState(false);
+  const [savedPoolUrls, setSavedPoolUrls] = useState("");
+  const [savedPoolCooldownSeconds, setSavedPoolCooldownSeconds] = useState("600");
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      setIsLoading(true);
+      try {
+        const data = await fetchProxy();
+        if (!active) return;
+        const nextProxy = String(data.proxy.url || "");
+        const nextPoolEnabled = Boolean(data.proxy.pool_enabled);
+        const nextPoolUrls = String(data.proxy.pool_urls || "");
+        const nextCooldown = String(data.proxy.pool_cooldown_seconds || 600);
+        setProxy(nextProxy);
+        setPoolEnabled(nextPoolEnabled);
+        setPoolUrls(nextPoolUrls);
+        setPoolCooldownSeconds(nextCooldown);
+        setSavedProxy(nextProxy);
+        setSavedPoolEnabled(nextPoolEnabled);
+        setSavedPoolUrls(nextPoolUrls);
+        setSavedPoolCooldownSeconds(nextCooldown);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "加载代理配置失败");
+      } finally {
+        if (active) {
+          setIsLoading(false);
+        }
+      }
+    };
+    void load();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const trimmedProxy = proxy.trim();
+  const trimmedPoolUrls = poolUrls.trim();
   const proxyStatus = useMemo(() => {
     if (!trimmedProxy) return "未配置";
     if (isSocksProxy(trimmedProxy)) return "SOCKS5 已配置";
     return "HTTP 代理已配置";
   }, [trimmedProxy]);
+
+  const dirty =
+    trimmedProxy !== savedProxy ||
+    poolEnabled !== savedPoolEnabled ||
+    trimmedPoolUrls !== savedPoolUrls ||
+    String(poolCooldownSeconds || "").trim() !== savedPoolCooldownSeconds;
 
   const handleTest = async () => {
     if (!trimmedProxy) {
@@ -71,9 +119,25 @@ export function ProxySettingsCard() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const data = await updateProxy({ url: trimmedProxy });
-      setProxy(data.proxy.url || "");
-      toast.success(trimmedProxy ? "代理配置已保存" : "已清空代理配置");
+      const data = await updateProxy({
+        url: trimmedProxy,
+        pool_enabled: poolEnabled,
+        pool_urls: trimmedPoolUrls,
+        pool_cooldown_seconds: Math.max(30, Number(poolCooldownSeconds) || 600),
+      });
+      const nextProxy = String(data.proxy.url || "");
+      const nextPoolEnabled = Boolean(data.proxy.pool_enabled);
+      const nextPoolUrls = String(data.proxy.pool_urls || "");
+      const nextCooldown = String(data.proxy.pool_cooldown_seconds || 600);
+      setProxy(nextProxy);
+      setPoolEnabled(nextPoolEnabled);
+      setPoolUrls(nextPoolUrls);
+      setPoolCooldownSeconds(nextCooldown);
+      setSavedProxy(nextProxy);
+      setSavedPoolEnabled(nextPoolEnabled);
+      setSavedPoolUrls(nextPoolUrls);
+      setSavedPoolCooldownSeconds(nextCooldown);
+      toast.success("代理配置已保存");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "保存代理失败");
     } finally {
@@ -92,7 +156,7 @@ export function ProxySettingsCard() {
         </Badge>
       }
       action={
-        <Button size="lg" onClick={() => void handleSave()} disabled={isSaving || isLoadingConfig}>
+        <Button size="lg" onClick={() => void handleSave()} disabled={isSaving || isLoading || !dirty}>
           {isSaving ? (
             <LoaderCircle data-icon="inline-start" className="animate-spin" />
           ) : (
@@ -102,14 +166,14 @@ export function ProxySettingsCard() {
         </Button>
       }
     >
-      {isLoadingConfig ? (
+      {isLoading ? (
         <div className="flex items-center justify-center py-10">
           <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
         </div>
       ) : (
         <div className="flex flex-col gap-4">
           <Field className="gap-1.5">
-            <FieldLabel htmlFor="settings-socks5-proxy">代理地址</FieldLabel>
+            <FieldLabel htmlFor="settings-socks5-proxy">主代理地址</FieldLabel>
             <Input
               id="settings-socks5-proxy"
               value={proxy}
@@ -139,6 +203,35 @@ export function ProxySettingsCard() {
             ))}
           </div>
 
+          <label className="flex min-h-12 items-start gap-3 rounded-[13px] border border-border/80 bg-background px-3 py-3 text-sm">
+            <Checkbox
+              checked={poolEnabled}
+              onCheckedChange={(checked) => setPoolEnabled(Boolean(checked))}
+            />
+            <span className="leading-6 text-foreground">启用多代理池调度</span>
+          </label>
+
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="settings-proxy-pool-urls">多代理列表</FieldLabel>
+            <Textarea
+              id="settings-proxy-pool-urls"
+              value={poolUrls}
+              onChange={(event) => setPoolUrls(event.target.value)}
+              placeholder={"socks5h://user:pass@1.2.3.4:1080\nsocks5h://user:pass@5.6.7.8:1080"}
+              className="min-h-28 rounded-[13px] font-mono text-xs"
+            />
+          </Field>
+
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="settings-proxy-pool-cooldown">失败冷却（秒）</FieldLabel>
+            <Input
+              id="settings-proxy-pool-cooldown"
+              value={poolCooldownSeconds}
+              onChange={(event) => setPoolCooldownSeconds(event.target.value)}
+              className={settingsInputClassName}
+            />
+          </Field>
+
           <SettingsNotice>
             支持 <span className={settingsInlineCodeClassName}>socks5://</span>、
             <span className={settingsInlineCodeClassName}>socks5h://</span>、
@@ -167,14 +260,14 @@ export function ProxySettingsCard() {
               type="button"
               variant="outline"
               onClick={() => void handleTest()}
-              disabled={isTesting || isLoadingConfig || !trimmedProxy}
+              disabled={isTesting || isLoading || !trimmedProxy}
             >
               {isTesting ? (
                 <LoaderCircle data-icon="inline-start" className="animate-spin" />
               ) : (
                 <PlugZap data-icon="inline-start" />
               )}
-              测试代理
+              测试主代理
             </Button>
           </div>
         </div>
