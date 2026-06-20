@@ -890,6 +890,9 @@ export type RegisterConfig = {
     providers: Array<Record<string, unknown>>;
   };
   proxy: string;
+  proxy_pool_enabled?: boolean;
+  proxy_pool_urls?: string;
+  proxy_pool_cooldown_seconds?: number;
   total: number;
   threads: number;
   mode: "total" | "quota" | "available";

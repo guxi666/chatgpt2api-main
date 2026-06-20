@@ -535,6 +535,9 @@ type SettingsStore = {
   setRegisterTargetAvailable: (value: string) => void;
   setRegisterCheckInterval: (value: string) => void;
   setRegisterAccountCheckInterval: (value: string) => void;
+  setRegisterProxyPoolEnabled: (value: boolean) => void;
+  setRegisterProxyPoolURLs: (value: string) => void;
+  setRegisterProxyPoolCooldownSeconds: (value: string) => void;
   setRegisterMailField: (
     key: "request_timeout" | "wait_timeout" | "wait_interval",
     value: string,
@@ -1709,6 +1712,45 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     );
   },
 
+  setRegisterProxyPoolEnabled: (value) => {
+    set((state) =>
+      state.registerConfig
+        ? {
+            registerConfig: {
+              ...state.registerConfig,
+              proxy_pool_enabled: value,
+            },
+          }
+        : {},
+    );
+  },
+
+  setRegisterProxyPoolURLs: (value) => {
+    set((state) =>
+      state.registerConfig
+        ? {
+            registerConfig: {
+              ...state.registerConfig,
+              proxy_pool_urls: value,
+            },
+          }
+        : {},
+    );
+  },
+
+  setRegisterProxyPoolCooldownSeconds: (value) => {
+    set((state) =>
+      state.registerConfig
+        ? {
+            registerConfig: {
+              ...state.registerConfig,
+              proxy_pool_cooldown_seconds: Number(value) || 0,
+            },
+          }
+        : {},
+    );
+  },
+
   setRegisterMailField: (key, value) => {
     set((state) =>
       state.registerConfig
@@ -1786,6 +1828,12 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const data = await updateRegisterConfig({
         mail: registerConfig.mail,
         proxy: registerConfig.proxy.trim(),
+        proxy_pool_enabled: Boolean(registerConfig.proxy_pool_enabled),
+        proxy_pool_urls: String(registerConfig.proxy_pool_urls || "").trim(),
+        proxy_pool_cooldown_seconds: Math.max(
+          30,
+          Number(registerConfig.proxy_pool_cooldown_seconds) || 600,
+        ),
         total: Math.max(1, Number(registerConfig.total) || 1),
         threads: Math.max(1, Number(registerConfig.threads) || 1),
         mode: registerConfig.mode,
@@ -1818,6 +1866,12 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         await updateRegisterConfig({
           mail: registerConfig.mail,
           proxy: registerConfig.proxy.trim(),
+          proxy_pool_enabled: Boolean(registerConfig.proxy_pool_enabled),
+          proxy_pool_urls: String(registerConfig.proxy_pool_urls || "").trim(),
+          proxy_pool_cooldown_seconds: Math.max(
+            30,
+            Number(registerConfig.proxy_pool_cooldown_seconds) || 600,
+          ),
           total: Math.max(1, Number(registerConfig.total) || 1),
           threads: Math.max(1, Number(registerConfig.threads) || 1),
           mode: registerConfig.mode,

@@ -30,6 +30,15 @@ export function RegisterCard() {
   const setAccountCheckInterval = useSettingsStore(
     (state) => state.setRegisterAccountCheckInterval,
   );
+  const setProxyPoolEnabled = useSettingsStore(
+    (state) => state.setRegisterProxyPoolEnabled,
+  );
+  const setProxyPoolURLs = useSettingsStore(
+    (state) => state.setRegisterProxyPoolURLs,
+  );
+  const setProxyPoolCooldownSeconds = useSettingsStore(
+    (state) => state.setRegisterProxyPoolCooldownSeconds,
+  );
   const setMailField = useSettingsStore((state) => state.setRegisterMailField);
   const addProvider = useSettingsStore((state) => state.addRegisterProvider);
   const updateProvider = useSettingsStore((state) => state.updateRegisterProvider);
@@ -149,6 +158,17 @@ export function RegisterCard() {
             <div className="space-y-2">
               <label className="text-sm text-stone-700">账号测活间隔（秒）</label>
               <Input value={String(config.account_check_interval || "")} onChange={(event) => setAccountCheckInterval(event.target.value)} className="h-10 rounded-xl border-stone-200 bg-white" disabled={config.enabled} />
+            </div>
+            <div className="space-y-2 md:col-span-3">
+              <label className="flex items-center gap-3 text-sm text-stone-700">
+                <Checkbox checked={Boolean(config.proxy_pool_enabled)} onCheckedChange={(checked) => setProxyPoolEnabled(Boolean(checked))} disabled={config.enabled} />
+                启用注册代理池
+              </label>
+              <Textarea value={String(config.proxy_pool_urls || "")} onChange={(event) => setProxyPoolURLs(event.target.value)} placeholder={"socks5h://user:pass@1.2.3.4:1080\nsocks5h://user:pass@5.6.7.8:1080"} className="min-h-24 rounded-xl border-stone-200 bg-white font-mono text-xs" disabled={config.enabled} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-stone-700">注册代理冷却（秒）</label>
+              <Input value={String(config.proxy_pool_cooldown_seconds || "")} onChange={(event) => setProxyPoolCooldownSeconds(event.target.value)} className="h-10 rounded-xl border-stone-200 bg-white" disabled={config.enabled || !config.proxy_pool_enabled} />
             </div>
           </div>
 
