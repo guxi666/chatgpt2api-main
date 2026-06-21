@@ -8,7 +8,7 @@ import (
 func TestRewriteWebIndexBrand(t *testing.T) {
 	raw := `<!doctype html><html><head><link rel="icon" href="/favicon.ico" /><title>Old</title></head><body></body></html>`
 
-	got := rewriteWebIndexBrand(raw, `Site <A>`, `/brand.svg?x=1&y=2`)
+	got := rewriteWebIndexBrand(raw, `Site <A>`, `/brand.svg?x=1&y=2`, nil)
 
 	if want := `<title>Site &lt;A&gt;</title>`; !strings.Contains(got, want) {
 		t.Fatalf("rewritten title missing %q in %q", want, got)

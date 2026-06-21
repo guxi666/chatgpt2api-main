@@ -2290,7 +2290,12 @@ func (a *App) serveBrandedWebIndex(w http.ResponseWriter) bool {
 	if err != nil {
 		return false
 	}
-	body := rewriteWebIndexBrand(string(indexHTML), a.config.BrandSiteName(), a.config.BrandSiteLogoURL())
+	body := rewriteWebIndexBrand(string(indexHTML), a.config.BrandSiteName(), a.config.BrandSiteLogoURL(), map[string]any{
+		"agency_enabled":                  a.config.AgencyEnabled(),
+		"subscription_enabled":            a.config.SubscriptionEnabled(),
+		"show_ecommerce_entry":            a.config.ShowEcommerceEntry(),
+		"show_new_ecommerce_window_entry": a.config.ShowNewEcommerceWindowEntry(),
+	})
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write([]byte(body))
@@ -2306,30 +2311,34 @@ func isWebIndexRequest(rawPath string) bool {
 	return !strings.HasPrefix(clean, "assets/") && !strings.Contains(last, ".")
 }
 
-func rewriteWebIndexBrand(indexHTML, siteName, iconURL string) string {
+func rewriteWebIndexBrand(indexHTML, siteName, iconURL string, initialMeta map[string]any) string {
 	escapedSiteName := html.EscapeString(firstNonEmpty(strings.TrimSpace(siteName), "GPT生图站"))
 	escapedIconURL := html.EscapeString(firstNonEmpty(strings.TrimSpace(iconURL), "/logo-mark.svg"))
 	result := replaceHTMLTagContent(indexHTML, "<title>", "</title>", escapedSiteName)
 	replacement := `<link rel="icon" href="` + escapedIconURL + `" />`
 	result = strings.Replace(result, `<link rel="icon" href="/favicon.ico" />`, replacement, 1)
 	result = strings.Replace(result, `<link rel="icon" href="/logo-mark.svg" type="image/svg+xml" />`, replacement, 1)
-	if script := initialAppMetaScript(siteName, iconURL); script != "" {
+	if script := initialAppMetaScript(siteName, iconURL, initialMeta); script != "" {
 		result = strings.Replace(result, "</head>", script+"</head>", 1)
 	}
 	return result
 }
 
-func initialAppMetaScript(siteName, iconURL string) string {
-	payload, err := json.Marshal(map[string]string{
+func initialAppMetaScript(siteName, iconURL string, extra map[string]any) string {
+	payload := map[string]any{
 		"app_title":         firstNonEmpty(strings.TrimSpace(siteName), "GPT生图站"),
 		"project_name":      firstNonEmpty(strings.TrimSpace(siteName), "GPT生图站"),
 		"top_left_logo_url": firstNonEmpty(strings.TrimSpace(iconURL), "/logo-mark.svg"),
 		"site_logo_url":     firstNonEmpty(strings.TrimSpace(iconURL), "/logo-mark.svg"),
-	})
+	}
+	for key, value := range extra {
+		payload[key] = value
+	}
+	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return ""
 	}
-	return "<script>window.__APP_META__=" + string(payload) + ";</script>"
+	return "<script>window.__APP_META__=" + string(payloadJSON) + ";</script>"
 }
 
 func replaceHTMLTagContent(src, startTag, endTag, replacement string) string {

@@ -111,6 +111,13 @@ export function resolveBrandAssetURL(src?: string) {
     return "";
   }
   if (
+    typeof window !== "undefined" &&
+    window.location.protocol === "https:" &&
+    value.startsWith("http://")
+  ) {
+    return value.replace(/^http:\/\//i, "https://");
+  }
+  if (
     value.startsWith("blob:") ||
     value.startsWith("data:") ||
     value.startsWith("http://") ||
