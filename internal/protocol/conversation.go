@@ -744,6 +744,11 @@ func (e *Engine) StreamImageOutputs(ctx context.Context, client *backend.Client,
 			errCh <- nil
 			return
 		}
+		if shouldPollForImage && conversationID == "" {
+			if recoveredID := client.FindConversationByPrompt(ctx, request.Prompt, startedAt, 5*time.Second); recoveredID != "" {
+				conversationID = recoveredID
+			}
+		}
 		if shouldPollForImage && conversationID != "" {
 			for attempt := 1; attempt <= 3; attempt++ {
 				wait := time.Duration(attempt) * 15 * time.Second
