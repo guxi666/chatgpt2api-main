@@ -742,6 +742,25 @@ function parseCreationTaskErrorPayload(message: string) {
   };
 }
 
+function looksLikeUpstreamPromptEcho(message: string) {
+  const trimmed = String(message || "").trim();
+  if (trimmed.length < 80) {
+    return false;
+  }
+  const lower = trimmed.toLowerCase();
+  if (
+    lower.includes("referenced_image_ids")
+    || lower.includes('"prompt":null')
+    || (lower.includes('"size"') && lower.includes('"n"'))
+  ) {
+    return true;
+  }
+  const englishWordCount = (trimmed.match(/[a-z]{3,}/gi) || []).length;
+  const punctuationCount = (trimmed.match(/[,:;]/g) || []).length;
+  const hasChinese = /[\u4e00-\u9fff]/.test(trimmed);
+  return !hasChinese && englishWordCount >= 12 && punctuationCount >= 3;
+}
+
 function isEcommerceConversation(conversation: ImageConversation | null | undefined) {
   if (!conversation) {
     return false;
@@ -791,6 +810,9 @@ function formatCreationTaskErrorMessage(message: string) {
   }
   if (normalized.includes("task returned no output data")) {
     return "图片生成失败：上游没有返回图片结果。通常是代理线路不稳定、风控拦截或上游中断，请稍后重试或更换代理。";
+  }
+  if (looksLikeUpstreamPromptEcho(trimmed)) {
+    return "鍥剧墖鐢熸垚澶辫触锛氫笂娓歌繑鍥炰簡鏂囨鎻忚堪鑰屼笉鏄浘鐗囩粨鏋溿€傞€氬父鏄唬鐞嗐€佽处鍙锋寚绾规垨涓婃父椋庢帶閾捐矾寮傚父锛岃绋嶅悗閲嶈瘯鎴栨洿鎹唬鐞嗐€?";
   }
   if (normalized.includes("no available image quota")) {
     return "当前没有可用的图片额度，请检查账号额度或稍后重试。";
