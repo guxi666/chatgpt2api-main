@@ -215,6 +215,47 @@ func imageStreamErrorMessage(message string) string {
 	return text
 }
 
+var referencedImageIDsRE = regexp.MustCompile(`"referenced_image_ids"\s*:\s*\[[^\]]+\]`)
+var toolParamsJSONRE = regexp.MustCompile(`\{\s*"size"\s*:\s*"\d+x\d+"\s*,\s*"n"\s*:\s*\d+\s*\}`)
+
+func isModelTextReplyInsteadOfImage(message string) bool {
+	text := strings.TrimSpace(message)
+	if text == "" {
+		return false
+	}
+	return referencedImageIDsRE.MatchString(text) || toolParamsJSONRE.MatchString(text)
+}
+
+func detailedTaskError(ctx context.Context, client *backend.Client, conversationID string, timeout time.Duration) string {
+	if client == nil || strings.TrimSpace(conversationID) == "" {
+		return ""
+	}
+	tasks, err := client.QueryBackendTasks(ctx, conversationID, "", timeout)
+	if err != nil {
+		return ""
+	}
+	for _, task := range tasks {
+		if isError, errorMessage, _ := backend.CheckTaskError(task); isError && strings.TrimSpace(errorMessage) != "" {
+			return strings.TrimSpace(errorMessage)
+		}
+	}
+	return ""
+}
+
+func waitWithContext(ctx context.Context, wait time.Duration) bool {
+	if wait <= 0 {
+		return true
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 func (o ImageOutput) Chunk() map[string]any {
 	chunk := map[string]any{
 		"object":              "image.generation.chunk",
@@ -585,6 +626,7 @@ func (e *Engine) StreamImageOutputs(ctx context.Context, client *backend.Client,
 	go func() {
 		defer close(out)
 		defer close(errCh)
+		startedAt := time.Now()
 		var last ConversationEvent
 		events, convErr := e.ConversationEvents(ctx, client, request.Messages, request.Model, request.Prompt, request.Images, request.Size, request.Quality, request.ResponsesImageTool)
 		for event := range events {
@@ -609,15 +651,40 @@ func (e *Engine) StreamImageOutputs(ctx context.Context, client *backend.Client,
 		fileIDs := util.AsStringSlice(last["file_ids"])
 		sedimentIDs := util.AsStringSlice(last["sediment_ids"])
 		message := strings.TrimSpace(util.Clean(last["text"]))
-		toolInvoked, _ := last["tool_invoked"].(bool)
-		hasToolInvoked := last["tool_invoked"] != nil
-		isTextResponse := (hasToolInvoked && !toolInvoked) || last["turn_use_case"] == "text"
-		if message != "" && len(fileIDs) == 0 && len(sedimentIDs) == 0 && (util.ToBool(last["blocked"]) || isTextResponse) {
+		if message != "" && len(fileIDs) == 0 && len(sedimentIDs) == 0 && util.ToBool(last["blocked"]) {
+			text := firstNonEmpty(detailedTaskError(ctx, client, conversationID, 5*time.Second), message, "Image generation was rejected by upstream policy.")
+			out <- ImageOutput{Kind: "message", Model: request.Model, Index: index, Total: total, Created: time.Now().Unix(), Text: text}
+			errCh <- nil
+			return
+		}
+		shouldPollForImage := len(request.Images) > 0 || last["turn_use_case"] == "image gen"
+		if message != "" && len(fileIDs) == 0 && len(sedimentIDs) == 0 && !shouldPollForImage {
 			out <- ImageOutput{Kind: "message", Model: request.Model, Index: index, Total: total, Created: time.Now().Unix(), Text: message}
 			errCh <- nil
 			return
 		}
-		imageURLs := client.ResolveConversationImageURLs(ctx, conversationID, fileIDs, sedimentIDs, true)
+		isTextReply := message != "" && isModelTextReplyInsteadOfImage(message)
+		if isTextReply && conversationID == "" {
+			if recoveredID := client.FindConversationByPrompt(ctx, request.Prompt, startedAt, 5*time.Second); recoveredID != "" {
+				conversationID = recoveredID
+			}
+		}
+		if len(fileIDs) == 0 && len(sedimentIDs) == 0 && conversationID != "" {
+			if taskError := detailedTaskError(ctx, client, conversationID, 5*time.Second); taskError != "" && !shouldPollForImage && !isTextReply {
+				out <- ImageOutput{Kind: "message", Model: request.Model, Index: index, Total: total, Created: time.Now().Unix(), Text: taskError}
+				errCh <- nil
+				return
+			}
+		}
+		pollTimeout := time.Duration(0)
+		if isTextReply && conversationID != "" {
+			pollTimeout = 300 * time.Second
+		}
+		imageURLs, resolveErr := client.ResolveConversationImageURLsWithError(ctx, conversationID, fileIDs, sedimentIDs, true, pollTimeout)
+		if resolveErr != nil && !isTextReply {
+			errCh <- resolveErr
+			return
+		}
 		if len(imageURLs) > 0 {
 			bytesItems, err := client.DownloadImageBytes(ctx, imageURLs)
 			if err != nil {
@@ -637,8 +704,94 @@ func (e *Engine) StreamImageOutputs(ctx context.Context, client *backend.Client,
 			errCh <- nil
 			return
 		}
+		if message != "" && isTextReply && conversationID != "" {
+			retryTimeout := 300 * time.Second
+			for attempt := 1; attempt <= 3; attempt++ {
+				retryURLs, retryErr := client.ResolveConversationImageURLsWithError(ctx, conversationID, fileIDs, sedimentIDs, true, retryTimeout)
+				if len(retryURLs) > 0 {
+					bytesItems, err := client.DownloadImageBytes(ctx, retryURLs)
+					if err != nil {
+						errCh <- err
+						return
+					}
+					var imageItems []map[string]any
+					for _, data := range bytesItems {
+						imageItems = append(imageItems, map[string]any{"b64_json": base64.StdEncoding.EncodeToString(data), "output_format": NormalizeImageOutputFormat(request.OutputFormat)})
+					}
+					created := time.Now().Unix()
+					result := e.FormatImageResultWithOptions(imageItems, request.Prompt, request.ResponseFormat, request.BaseURL, request.OwnerID, request.OwnerName, created, "", ImageOutputOptions{Format: request.OutputFormat, Compression: request.OutputCompression})
+					data := util.AsMapSlice(result["data"])
+					if len(data) > 0 {
+						out <- ImageOutput{Kind: "result", Model: request.Model, Index: index, Total: total, Created: created, Data: data}
+						errCh <- nil
+						return
+					}
+				}
+				if _, timedOut := retryErr.(*backend.ImagePollTimeoutError); timedOut {
+					break
+				}
+				if retryErr != nil && attempt < 3 {
+					if !waitWithContext(ctx, time.Duration(attempt)*30*time.Second) {
+						break
+					}
+					continue
+				}
+				break
+			}
+		}
 		if message != "" {
 			out <- ImageOutput{Kind: "message", Model: request.Model, Index: index, Total: total, Created: time.Now().Unix(), Text: message}
+			errCh <- nil
+			return
+		}
+		if shouldPollForImage && conversationID != "" {
+			for attempt := 1; attempt <= 3; attempt++ {
+				wait := time.Duration(attempt) * 15 * time.Second
+				if !waitWithContext(ctx, wait) {
+					break
+				}
+				retryURLs, retryErr := client.ResolveConversationImageURLsWithError(ctx, conversationID, fileIDs, sedimentIDs, true, 300*time.Second)
+				if len(retryURLs) > 0 {
+					bytesItems, err := client.DownloadImageBytes(ctx, retryURLs)
+					if err != nil {
+						errCh <- err
+						return
+					}
+					var imageItems []map[string]any
+					for _, data := range bytesItems {
+						imageItems = append(imageItems, map[string]any{"b64_json": base64.StdEncoding.EncodeToString(data), "output_format": NormalizeImageOutputFormat(request.OutputFormat)})
+					}
+					created := time.Now().Unix()
+					result := e.FormatImageResultWithOptions(imageItems, request.Prompt, request.ResponseFormat, request.BaseURL, request.OwnerID, request.OwnerName, created, "", ImageOutputOptions{Format: request.OutputFormat, Compression: request.OutputCompression})
+					data := util.AsMapSlice(result["data"])
+					if len(data) > 0 {
+						out <- ImageOutput{Kind: "result", Model: request.Model, Index: index, Total: total, Created: created, Data: data}
+						errCh <- nil
+						return
+					}
+				}
+				if _, timedOut := retryErr.(*backend.ImagePollTimeoutError); timedOut {
+					break
+				}
+			}
+			out <- ImageOutput{
+				Kind:    "message",
+				Model:   request.Model,
+				Index:   index,
+				Total:   total,
+				Created: time.Now().Unix(),
+				Text:    "Image generation completed upstream but the result could not be retrieved yet. Please try again in a moment.",
+			}
+			errCh <- nil
+			return
+		}
+		out <- ImageOutput{
+			Kind:    "message",
+			Model:   request.Model,
+			Index:   index,
+			Total:   total,
+			Created: time.Now().Unix(),
+			Text:    "Image generation started upstream but the response was incomplete. Please try again.",
 		}
 		errCh <- nil
 	}()

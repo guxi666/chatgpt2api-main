@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,6 +90,22 @@ type ImagePollingSettings struct {
 	SettleDelay           time.Duration
 	SettleEnabled         bool
 	CheckBeforeHitEnabled bool
+}
+
+type ImagePollTimeoutError struct {
+	Message        string
+	TaskError      string
+	ConversationID string
+}
+
+func (e *ImagePollTimeoutError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if strings.TrimSpace(e.Message) != "" {
+		return e.Message
+	}
+	return "image generation poll timed out"
 }
 
 func DefaultImagePollingSettings() ImagePollingSettings {
@@ -304,16 +321,30 @@ func (c *Client) StreamCodexResponses(ctx context.Context, payload map[string]an
 }
 
 func (c *Client) ResolveConversationImageURLs(ctx context.Context, conversationID string, fileIDs, sedimentIDs []string, poll bool) []string {
+	urls, _ := c.ResolveConversationImageURLsWithError(ctx, conversationID, fileIDs, sedimentIDs, poll)
+	return urls
+}
+
+func (c *Client) ResolveConversationImageURLsWithError(ctx context.Context, conversationID string, fileIDs, sedimentIDs []string, poll bool, timeoutOverride ...time.Duration) ([]string, error) {
 	fileIDs = filter(fileIDs, func(v string) bool { return v != "file_upload" })
 	if poll && conversationID != "" && (len(fileIDs) > 0 || len(sedimentIDs) > 0) && !c.imagePolling.CheckBeforeHitEnabled && !c.imagePolling.SettleEnabled {
-		return c.resolveImageURLs(ctx, conversationID, fileIDs, sedimentIDs)
+		return c.resolveImageURLs(ctx, conversationID, fileIDs, sedimentIDs), nil
+	}
+	timeout := c.imagePolling.Timeout
+	if len(timeoutOverride) > 0 && timeoutOverride[0] > 0 {
+		timeout = timeoutOverride[0]
 	}
 	if poll && conversationID != "" {
-		polledFiles, polledSediments := c.pollImageResults(ctx, conversationID, c.imagePolling.Timeout, fileIDs, sedimentIDs)
+		polledFiles, polledSediments, err := c.pollImageResults(ctx, conversationID, timeout, fileIDs, sedimentIDs)
 		fileIDs = appendUnique(fileIDs, polledFiles...)
 		sedimentIDs = appendUnique(sedimentIDs, polledSediments...)
+		if err != nil {
+			if len(fileIDs) == 0 && len(sedimentIDs) == 0 {
+				return nil, err
+			}
+		}
 	}
-	return c.resolveImageURLs(ctx, conversationID, fileIDs, sedimentIDs)
+	return c.resolveImageURLs(ctx, conversationID, fileIDs, sedimentIDs), nil
 }
 
 func (c *Client) DownloadImageBytes(ctx context.Context, urls []string) ([][]byte, error) {
@@ -1033,7 +1064,7 @@ func (c *Client) getConversation(ctx context.Context, conversationID string) (ma
 	return readJSONResponse(resp, path)
 }
 
-func (c *Client) pollImageResults(ctx context.Context, conversationID string, timeout time.Duration, initialFileIDs, initialSedimentIDs []string) ([]string, []string) {
+func (c *Client) pollImageResults(ctx context.Context, conversationID string, timeout time.Duration, initialFileIDs, initialSedimentIDs []string) ([]string, []string, error) {
 	deadline := time.Now().Add(timeout)
 	fileIDs := appendUnique(nil, initialFileIDs...)
 	sedimentIDs := appendUnique(nil, initialSedimentIDs...)
@@ -1042,12 +1073,12 @@ func (c *Client) pollImageResults(ctx context.Context, conversationID string, ti
 		lastHitKey = imagePollingHitKey(fileIDs, sedimentIDs)
 		if c.imagePolling.SettleEnabled {
 			if !sleepUntil(ctx, minDuration(c.imagePolling.SettleDelay, time.Until(deadline))) {
-				return fileIDs, sedimentIDs
+				return fileIDs, sedimentIDs, nil
 			}
 		}
 	} else if c.imagePolling.InitialWait > 0 {
 		if !sleepUntil(ctx, minDuration(c.imagePolling.InitialWait, time.Until(deadline))) {
-			return nil, nil
+			return nil, nil, &ImagePollTimeoutError{Message: "image generation poll timed out", ConversationID: conversationID}
 		}
 	}
 	for time.Now().Before(deadline) {
@@ -1058,33 +1089,204 @@ func (c *Client) pollImageResults(ctx context.Context, conversationID string, ti
 			sedimentIDs = appendUnique(sedimentIDs, sediments...)
 			if len(fileIDs) > 0 || len(sedimentIDs) > 0 {
 				if !c.imagePolling.CheckBeforeHitEnabled {
-					return fileIDs, sedimentIDs
+					return fileIDs, sedimentIDs, nil
 				}
 				hitKey := imagePollingHitKey(fileIDs, sedimentIDs)
 				if lastHitKey == hitKey {
-					return fileIDs, sedimentIDs
+					return fileIDs, sedimentIDs, nil
 				}
 				lastHitKey = hitKey
 				if !c.imagePolling.SettleEnabled {
-					return fileIDs, sedimentIDs
+					return fileIDs, sedimentIDs, nil
 				}
 				if !sleepUntil(ctx, minDuration(c.imagePolling.SettleDelay, time.Until(deadline))) {
-					return fileIDs, sedimentIDs
+					return fileIDs, sedimentIDs, nil
 				}
 				continue
 			}
 		}
 		if !sleepUntil(ctx, minDuration(c.imagePolling.Interval, time.Until(deadline))) {
 			if len(fileIDs) > 0 || len(sedimentIDs) > 0 {
-				return fileIDs, sedimentIDs
+				return fileIDs, sedimentIDs, nil
 			}
-			return nil, nil
+			break
 		}
 	}
 	if len(fileIDs) > 0 || len(sedimentIDs) > 0 {
-		return fileIDs, sedimentIDs
+		return fileIDs, sedimentIDs, nil
 	}
-	return nil, nil
+	taskError := c.detailedTaskError(ctx, conversationID, 5*time.Second)
+	return nil, nil, &ImagePollTimeoutError{
+		Message:        "image generation poll timed out",
+		TaskError:      taskError,
+		ConversationID: conversationID,
+	}
+}
+
+func (c *Client) listRecentConversations(ctx context.Context, limit int, timeout time.Duration) []map[string]any {
+	if limit < 1 {
+		limit = 5
+	}
+	path := fmt.Sprintf("/backend-api/conversations?offset=0&limit=%d&order=updated&conversation_filter=all", limit)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	for key, value := range c.headers("/backend-api/conversations", map[string]string{"Accept": "application/json"}) {
+		req.Header.Set(key, value)
+	}
+	client := *c.httpClient
+	client.Timeout = timeout
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	payload, err := readJSONResponse(resp, path)
+	if err != nil {
+		return nil
+	}
+	items := util.AsMapSlice(payload["items"])
+	if len(items) == 0 {
+		items = util.AsMapSlice(payload["conversations"])
+	}
+	return items
+}
+
+func (c *Client) FindConversationByPrompt(ctx context.Context, prompt string, startedAt time.Time, timeout time.Duration) string {
+	items := c.listRecentConversations(ctx, 10, timeout)
+	if len(items) == 0 {
+		return ""
+	}
+	promptWords := strings.Fields(strings.ToLower(strings.TrimSpace(prompt)))
+	promptSet := map[string]struct{}{}
+	for _, word := range promptWords {
+		promptSet[word] = struct{}{}
+	}
+	bestID := ""
+	bestScore := 0.0
+	for _, item := range items {
+		convID := firstNonEmpty(util.Clean(item["id"]), util.Clean(item["conversation_id"]))
+		if convID == "" {
+			continue
+		}
+		updatedAt := conversationListTimestamp(item["update_time"])
+		if updatedAt.IsZero() {
+			updatedAt = conversationListTimestamp(item["updated_at"])
+		}
+		if !updatedAt.IsZero() && !startedAt.IsZero() {
+			if updatedAt.Before(startedAt.Add(-30*time.Second)) || updatedAt.After(startedAt.Add(10*time.Minute)) {
+				continue
+			}
+		}
+		titleWords := strings.Fields(strings.ToLower(util.Clean(item["title"])))
+		common := 0
+		if len(promptSet) > 0 {
+			for _, word := range titleWords {
+				if _, ok := promptSet[word]; ok {
+					common++
+				}
+			}
+		}
+		score := 0.0
+		if len(promptSet) > 0 {
+			score = float64(common) / float64(len(promptSet))
+		}
+		if strings.HasPrefix(strings.ToLower(util.Clean(item["title"])), "image") {
+			score += 0.3
+		}
+		if score > bestScore {
+			bestScore = score
+			bestID = convID
+		}
+	}
+	if bestID != "" && bestScore > 0.1 {
+		return bestID
+	}
+	for _, item := range items {
+		convID := firstNonEmpty(util.Clean(item["id"]), util.Clean(item["conversation_id"]))
+		if convID == "" {
+			continue
+		}
+		updatedAt := conversationListTimestamp(item["update_time"])
+		if updatedAt.IsZero() {
+			updatedAt = conversationListTimestamp(item["updated_at"])
+		}
+		if !updatedAt.IsZero() && !startedAt.IsZero() && !updatedAt.Before(startedAt.Add(-30*time.Second)) {
+			return convID
+		}
+	}
+	return ""
+}
+
+func (c *Client) QueryBackendTasks(ctx context.Context, conversationID, taskID string, timeout time.Duration) ([]map[string]any, error) {
+	path := "/backend-api/tasks"
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	for key, value := range c.headers(path, map[string]string{"Accept": "application/json"}) {
+		req.Header.Set(key, value)
+	}
+	client := *c.httpClient
+	client.Timeout = timeout
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, upstreamTransportError(path, err)
+	}
+	payload, err := readJSONResponse(resp, path)
+	if err != nil {
+		return nil, err
+	}
+	tasks := util.AsMapSlice(payload["tasks"])
+	if conversationID == "" && taskID == "" {
+		return tasks, nil
+	}
+	filtered := make([]map[string]any, 0, len(tasks))
+	for _, task := range tasks {
+		if conversationID != "" {
+			if util.Clean(task["conversation_id"]) != conversationID && util.Clean(task["original_conversation_id"]) != conversationID {
+				continue
+			}
+		}
+		if taskID != "" && util.Clean(task["task_id"]) != taskID {
+			continue
+		}
+		filtered = append(filtered, task)
+	}
+	return filtered, nil
+}
+
+func CheckTaskError(task map[string]any) (bool, string, map[string]any) {
+	imgMessage := util.StringMap(task["image_gen_message"])
+	if len(imgMessage) == 0 {
+		return false, "", nil
+	}
+	metadata := util.StringMap(imgMessage["metadata"])
+	content := util.StringMap(imgMessage["content"])
+	author := util.StringMap(imgMessage["author"])
+	isError := metadata["is_error"] == true
+	isTextOnly := util.Clean(content["content_type"]) == "text"
+	isAssistantRole := util.Clean(author["role"]) == "assistant"
+	if !(isError && isTextOnly && isAssistantRole) {
+		return false, "", metadata
+	}
+	var parts []string
+	for _, item := range anySlice(content["parts"]) {
+		if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+			parts = append(parts, text)
+		}
+	}
+	return true, strings.TrimSpace(strings.Join(parts, "")), metadata
+}
+
+func (c *Client) detailedTaskError(ctx context.Context, conversationID string, timeout time.Duration) string {
+	if strings.TrimSpace(conversationID) == "" {
+		return ""
+	}
+	tasks, err := c.QueryBackendTasks(ctx, conversationID, "", timeout)
+	if err != nil {
+		return ""
+	}
+	for _, task := range tasks {
+		if isError, errorMessage, _ := CheckTaskError(task); isError && strings.TrimSpace(errorMessage) != "" {
+			return strings.TrimSpace(errorMessage)
+		}
+	}
+	return ""
 }
 
 func (c *Client) resolveImageURLs(ctx context.Context, conversationID string, fileIDs, sedimentIDs []string) []string {
@@ -1423,6 +1625,41 @@ func floatValue(v any) float64 {
 	default:
 		return 0
 	}
+}
+
+func conversationListTimestamp(value any) time.Time {
+	switch item := value.(type) {
+	case float64:
+		if item <= 0 {
+			return time.Time{}
+		}
+		return time.Unix(int64(item), 0)
+	case int64:
+		if item <= 0 {
+			return time.Time{}
+		}
+		return time.Unix(item, 0)
+	case int:
+		if item <= 0 {
+			return time.Time{}
+		}
+		return time.Unix(int64(item), 0)
+	case string:
+		text := strings.TrimSpace(item)
+		if text == "" {
+			return time.Time{}
+		}
+		if seconds, err := strconv.ParseFloat(text, 64); err == nil && seconds > 0 {
+			return time.Unix(int64(seconds), 0)
+		}
+		if parsed, err := time.Parse(time.RFC3339, text); err == nil {
+			return parsed
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, text); err == nil {
+			return parsed
+		}
+	}
+	return time.Time{}
 }
 
 func sleepUntil(ctx context.Context, wait time.Duration) bool {
