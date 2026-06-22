@@ -77,6 +77,11 @@ func (s *ProxyService) BrowserHTTPClientWithProfileSource(profile string, timeou
 	return browserHTTPClientForProfile(proxy, profile, timeout), proxy
 }
 
+func (s *ProxyService) BrowserHTTPClientWithProfileSourceExcept(profile string, timeout time.Duration, excluded map[string]struct{}) (*http.Client, string) {
+	proxy := s.pickProxyExcept(excluded)
+	return browserHTTPClientForProfile(proxy, profile, timeout), proxy
+}
+
 func (s *ProxyService) Test(candidate string, timeout time.Duration) map[string]any {
 	candidate = strings.TrimSpace(candidate)
 	if candidate == "" {
@@ -189,6 +194,10 @@ func (s *ProxyService) ensureStateLocked(candidate string) *proxyState {
 }
 
 func (s *ProxyService) pickProxy() string {
+	return s.pickProxyExcept(nil)
+}
+
+func (s *ProxyService) pickProxyExcept(excluded map[string]struct{}) string {
 	candidates := s.candidates()
 	if len(candidates) == 0 {
 		return ""
@@ -199,13 +208,28 @@ func (s *ProxyService) pickProxy() string {
 	now := time.Now()
 	available := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
+		if excluded != nil {
+			if _, ok := excluded[candidate]; ok {
+				continue
+			}
+		}
 		state := s.ensureStateLocked(candidate)
 		if state.CooldownUntil.IsZero() || !state.CooldownUntil.After(now) {
 			available = append(available, candidate)
 		}
 	}
 	if len(available) == 0 {
-		available = append(available, candidates...)
+		for _, candidate := range candidates {
+			if excluded != nil {
+				if _, ok := excluded[candidate]; ok {
+					continue
+				}
+			}
+			available = append(available, candidate)
+		}
+	}
+	if len(available) == 0 {
+		return ""
 	}
 	sort.SliceStable(available, func(i, j int) bool {
 		left := s.ensureStateLocked(available[i])

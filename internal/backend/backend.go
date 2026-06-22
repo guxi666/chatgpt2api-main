@@ -52,16 +52,16 @@ type Client struct {
 	ClientBuildNumber string
 	AccessToken       string
 
-	lookup       AccountLookup
-	proxy        *service.ProxyService
+	lookup        AccountLookup
+	proxy         *service.ProxyService
 	selectedProxy string
-	httpClient   *http.Client
-	fp           map[string]string
-	userAgent    string
-	deviceID     string
-	sessionID    string
-	powSources   []string
-	powDataBuild string
+	httpClient    *http.Client
+	fp            map[string]string
+	userAgent     string
+	deviceID      string
+	sessionID     string
+	powSources    []string
+	powDataBuild  string
 }
 
 type ChatRequirements struct {
@@ -93,6 +93,23 @@ func (c *Client) reportProxyFailure(message string) {
 		return
 	}
 	c.proxy.ReportFailure(c.selectedProxy, message)
+}
+
+func (c *Client) rotateProxy(excluded map[string]struct{}) bool {
+	if c.proxy == nil {
+		return false
+	}
+	nextClient, nextProxy := c.proxy.BrowserHTTPClientWithProfileSourceExcept(c.fp["impersonate"], 300*time.Second, excluded)
+	if nextProxy == "" || nextProxy == c.selectedProxy {
+		return false
+	}
+	c.httpClient = nextClient
+	c.selectedProxy = nextProxy
+	return true
+}
+
+func (c *Client) canRetryWithAnotherProxy(attempt int) bool {
+	return c.proxy != nil && c.selectedProxy != "" && attempt < 2
 }
 
 func NewClient(accessToken string, lookup AccountLookup, proxy *service.ProxyService) *Client {
@@ -547,27 +564,42 @@ func (c *Client) bootstrapHeaders() map[string]string {
 }
 
 func (c *Client) bootstrap(ctx context.Context) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/", nil)
-	for key, value := range c.bootstrapHeaders() {
-		req.Header.Set(key, value)
+	excluded := map[string]struct{}{}
+	for attempt := 0; ; attempt++ {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/", nil)
+		for key, value := range c.bootstrapHeaders() {
+			req.Header.Set(key, value)
+		}
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			c.reportProxyFailure(err.Error())
+			if c.selectedProxy != "" {
+				excluded[c.selectedProxy] = struct{}{}
+			}
+			if c.canRetryWithAnotherProxy(attempt) && c.rotateProxy(excluded) {
+				continue
+			}
+			return upstreamTransportError("bootstrap", err)
+		}
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			c.reportProxyFailure(fmt.Sprintf("bootstrap status=%d", resp.StatusCode))
+			if c.selectedProxy != "" {
+				excluded[c.selectedProxy] = struct{}{}
+			}
+			if (resp.StatusCode == http.StatusForbidden || resp.StatusCode >= 500) && c.canRetryWithAnotherProxy(attempt) && c.rotateProxy(excluded) {
+				continue
+			}
+			return upstreamHTTPError("bootstrap", resp.StatusCode, data)
+		}
+		c.reportProxySuccess()
+		c.powSources, c.powDataBuild = parsePOWResources(string(data))
+		if len(c.powSources) == 0 {
+			c.powSources = []string{defaultPOWScript}
+		}
+		return nil
 	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		c.reportProxyFailure(err.Error())
-		return upstreamTransportError("bootstrap", err)
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		c.reportProxyFailure(fmt.Sprintf("bootstrap status=%d", resp.StatusCode))
-		return upstreamHTTPError("bootstrap", resp.StatusCode, data)
-	}
-	c.reportProxySuccess()
-	c.powSources, c.powDataBuild = parsePOWResources(string(data))
-	if len(c.powSources) == 0 {
-		c.powSources = []string{defaultPOWScript}
-	}
-	return nil
 }
 
 func (c *Client) getChatRequirements(ctx context.Context) (ChatRequirements, error) {
@@ -1043,21 +1075,39 @@ func (c *Client) postJSON(ctx context.Context, path string, payload any, headers
 }
 
 func (c *Client) postRaw(ctx context.Context, path string, data []byte, headers map[string]string, stream bool) (*http.Response, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
-	for key, value := range headers {
-		req.Header.Set(key, value)
+	excluded := map[string]struct{}{}
+	for attempt := 0; ; attempt++ {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			c.reportProxyFailure(err.Error())
+			if c.selectedProxy != "" {
+				excluded[c.selectedProxy] = struct{}{}
+			}
+			if c.canRetryWithAnotherProxy(attempt) && c.rotateProxy(excluded) {
+				continue
+			}
+			return nil, upstreamTransportError(path, err)
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+			c.reportProxySuccess()
+			return resp, nil
+		}
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode >= 500 {
+			c.reportProxyFailure(fmt.Sprintf("%s status=%d", path, resp.StatusCode))
+			if c.selectedProxy != "" {
+				excluded[c.selectedProxy] = struct{}{}
+			}
+			if c.canRetryWithAnotherProxy(attempt) && c.rotateProxy(excluded) {
+				resp.Body.Close()
+				continue
+			}
+		}
+		return resp, nil
 	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		c.reportProxyFailure(err.Error())
-		return nil, upstreamTransportError(path, err)
-	}
-	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-		c.reportProxySuccess()
-	} else if resp.StatusCode == http.StatusForbidden || resp.StatusCode >= 500 {
-		c.reportProxyFailure(fmt.Sprintf("%s status=%d", path, resp.StatusCode))
-	}
-	return resp, nil
 }
 
 func ensureOK(resp *http.Response, context string) error {
