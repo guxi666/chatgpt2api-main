@@ -62,6 +62,7 @@ type Client struct {
 	sessionID     string
 	powSources    []string
 	powDataBuild  string
+	imagePolling  ImagePollingSettings
 }
 
 type ChatRequirements struct {
@@ -79,6 +80,43 @@ type UploadedFile struct {
 	MimeType string
 	Width    int
 	Height   int
+}
+
+type ImagePollingSettings struct {
+	Timeout               time.Duration
+	Interval              time.Duration
+	InitialWait           time.Duration
+	SettleDelay           time.Duration
+	SettleEnabled         bool
+	CheckBeforeHitEnabled bool
+}
+
+func DefaultImagePollingSettings() ImagePollingSettings {
+	return ImagePollingSettings{
+		Timeout:               120 * time.Second,
+		Interval:              10 * time.Second,
+		InitialWait:           10 * time.Second,
+		SettleDelay:           2 * time.Second,
+		SettleEnabled:         true,
+		CheckBeforeHitEnabled: true,
+	}
+}
+
+func normalizeImagePollingSettings(settings ImagePollingSettings) ImagePollingSettings {
+	defaults := DefaultImagePollingSettings()
+	if settings.Timeout < time.Second {
+		settings.Timeout = defaults.Timeout
+	}
+	if settings.Interval < 500*time.Millisecond {
+		settings.Interval = defaults.Interval
+	}
+	if settings.InitialWait < 0 {
+		settings.InitialWait = 0
+	}
+	if settings.SettleDelay < 500*time.Millisecond {
+		settings.SettleDelay = defaults.SettleDelay
+	}
+	return settings
 }
 
 func (c *Client) reportProxySuccess() {
@@ -113,6 +151,10 @@ func (c *Client) canRetryWithAnotherProxy(attempt int) bool {
 }
 
 func NewClient(accessToken string, lookup AccountLookup, proxy *service.ProxyService) *Client {
+	return NewClientWithOptions(accessToken, lookup, proxy, DefaultImagePollingSettings())
+}
+
+func NewClientWithOptions(accessToken string, lookup AccountLookup, proxy *service.ProxyService, polling ImagePollingSettings) *Client {
 	c := &Client{
 		BaseURL:           "https://chatgpt.com",
 		ClientVersion:     DefaultClientVersion,
@@ -120,6 +162,7 @@ func NewClient(accessToken string, lookup AccountLookup, proxy *service.ProxySer
 		AccessToken:       strings.TrimSpace(accessToken),
 		lookup:            lookup,
 		proxy:             proxy,
+		imagePolling:      normalizeImagePollingSettings(polling),
 	}
 	c.fp = c.buildFingerprint()
 	c.applyBrowserFingerprint()
@@ -262,8 +305,11 @@ func (c *Client) StreamCodexResponses(ctx context.Context, payload map[string]an
 
 func (c *Client) ResolveConversationImageURLs(ctx context.Context, conversationID string, fileIDs, sedimentIDs []string, poll bool) []string {
 	fileIDs = filter(fileIDs, func(v string) bool { return v != "file_upload" })
-	if poll && conversationID != "" && len(fileIDs) == 0 && len(sedimentIDs) == 0 {
-		polledFiles, polledSediments := c.pollImageResults(ctx, conversationID, 120*time.Second)
+	if poll && conversationID != "" && (len(fileIDs) > 0 || len(sedimentIDs) > 0) && !c.imagePolling.CheckBeforeHitEnabled && !c.imagePolling.SettleEnabled {
+		return c.resolveImageURLs(ctx, conversationID, fileIDs, sedimentIDs)
+	}
+	if poll && conversationID != "" {
+		polledFiles, polledSediments := c.pollImageResults(ctx, conversationID, c.imagePolling.Timeout, fileIDs, sedimentIDs)
 		fileIDs = appendUnique(fileIDs, polledFiles...)
 		sedimentIDs = appendUnique(sedimentIDs, polledSediments...)
 	}
@@ -987,21 +1033,56 @@ func (c *Client) getConversation(ctx context.Context, conversationID string) (ma
 	return readJSONResponse(resp, path)
 }
 
-func (c *Client) pollImageResults(ctx context.Context, conversationID string, timeout time.Duration) ([]string, []string) {
+func (c *Client) pollImageResults(ctx context.Context, conversationID string, timeout time.Duration, initialFileIDs, initialSedimentIDs []string) ([]string, []string) {
 	deadline := time.Now().Add(timeout)
+	fileIDs := appendUnique(nil, initialFileIDs...)
+	sedimentIDs := appendUnique(nil, initialSedimentIDs...)
+	lastHitKey := ""
+	if len(fileIDs) > 0 || len(sedimentIDs) > 0 {
+		lastHitKey = imagePollingHitKey(fileIDs, sedimentIDs)
+		if c.imagePolling.SettleEnabled {
+			if !sleepUntil(ctx, minDuration(c.imagePolling.SettleDelay, time.Until(deadline))) {
+				return fileIDs, sedimentIDs
+			}
+		}
+	} else if c.imagePolling.InitialWait > 0 {
+		if !sleepUntil(ctx, minDuration(c.imagePolling.InitialWait, time.Until(deadline))) {
+			return nil, nil
+		}
+	}
 	for time.Now().Before(deadline) {
 		conversation, err := c.getConversation(ctx, conversationID)
 		if err == nil {
 			files, sediments := extractImageToolRecords(conversation)
-			if len(files) > 0 || len(sediments) > 0 {
-				return files, sediments
+			fileIDs = appendUnique(fileIDs, files...)
+			sedimentIDs = appendUnique(sedimentIDs, sediments...)
+			if len(fileIDs) > 0 || len(sedimentIDs) > 0 {
+				if !c.imagePolling.CheckBeforeHitEnabled {
+					return fileIDs, sedimentIDs
+				}
+				hitKey := imagePollingHitKey(fileIDs, sedimentIDs)
+				if lastHitKey == hitKey {
+					return fileIDs, sedimentIDs
+				}
+				lastHitKey = hitKey
+				if !c.imagePolling.SettleEnabled {
+					return fileIDs, sedimentIDs
+				}
+				if !sleepUntil(ctx, minDuration(c.imagePolling.SettleDelay, time.Until(deadline))) {
+					return fileIDs, sedimentIDs
+				}
+				continue
 			}
 		}
-		select {
-		case <-ctx.Done():
+		if !sleepUntil(ctx, minDuration(c.imagePolling.Interval, time.Until(deadline))) {
+			if len(fileIDs) > 0 || len(sedimentIDs) > 0 {
+				return fileIDs, sedimentIDs
+			}
 			return nil, nil
-		case <-time.After(4 * time.Second):
 		}
+	}
+	if len(fileIDs) > 0 || len(sedimentIDs) > 0 {
+		return fileIDs, sedimentIDs
 	}
 	return nil, nil
 }
@@ -1342,4 +1423,35 @@ func floatValue(v any) float64 {
 	default:
 		return 0
 	}
+}
+
+func sleepUntil(ctx context.Context, wait time.Duration) bool {
+	if wait <= 0 {
+		return true
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a <= 0 {
+		return 0
+	}
+	if b <= 0 {
+		return 0
+	}
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func imagePollingHitKey(fileIDs, sedimentIDs []string) string {
+	return strings.Join(fileIDs, ",") + "|" + strings.Join(sedimentIDs, ",")
 }

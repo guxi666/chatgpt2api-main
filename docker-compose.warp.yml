@@ -1,0 +1,64 @@
+services:
+  warp-proxy:
+    image: caomingjun/warp:latest
+    container_name: chatgpt2api-warp-proxy
+    restart: unless-stopped
+    environment:
+      WARP_SLEEP: "2"
+      # Optional: set your Cloudflare WARP+ license key.
+      # WARP_LICENSE_KEY: ${WARP_LICENSE_KEY:-}
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 0
+      net.ipv4.conf.all.src_valid_mark: 1
+    ports:
+      - "127.0.0.1:${WARP_SOCKS_PORT:-40000}:1080"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket; s=socket.create_connection(('127.0.0.1', 1080), 5); s.close()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  privoxy:
+    image: vimagick/privoxy:latest
+    container_name: chatgpt2api-privoxy
+    restart: unless-stopped
+    depends_on:
+      warp-proxy:
+        condition: service_started
+    volumes:
+      - ./scripts/privoxy-warp.conf:/etc/privoxy/config:ro
+    ports:
+      - "127.0.0.1:${PRIVOXY_PORT:-40080}:8118"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8118 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: chatgpt2api:warp
+    container_name: chatgpt2api-warp
+    restart: unless-stopped
+    depends_on:
+      privoxy:
+        condition: service_started
+    ports:
+      - "${CHATGPT2API_PORT:-3000}:80"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env
+    environment:
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-sqlite}
+      DATABASE_URL: ${DATABASE_URL:-}
+      CHATGPT2API_PROXY: ${CHATGPT2API_PROXY:-http://privoxy:8118}
+      CHATGPT2API_UPDATE_PROXY_URL: ${CHATGPT2API_UPDATE_PROXY_URL:-http://privoxy:8118}

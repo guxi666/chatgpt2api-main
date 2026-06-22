@@ -37,6 +37,15 @@ type ImageConfig interface {
 	CleanupOldImages() int
 }
 
+type imagePollingConfig interface {
+	ImagePollTimeoutSeconds() int
+	ImagePollIntervalSeconds() float64
+	ImagePollInitialWaitSeconds() float64
+	ImageSettleEnabled() bool
+	ImageCheckBeforeHitEnabled() bool
+	ImageSettleSeconds() float64
+}
+
 type Engine struct {
 	Accounts *service.AccountService
 	Config   ImageConfig
@@ -233,7 +242,7 @@ func (o ImageOutput) Chunk() map[string]any {
 }
 
 func (e *Engine) TextBackend(accessToken string) *backend.Client {
-	return backend.NewClient(accessToken, e.Accounts, e.Proxy)
+	return e.backendClient(accessToken)
 }
 
 func (e *Engine) ListModels(ctx context.Context) (map[string]any, error) {
@@ -261,7 +270,20 @@ func (e *Engine) listModels(ctx context.Context) (map[string]any, error) {
 	if e != nil && e.ListModelsFunc != nil {
 		return e.ListModelsFunc(ctx)
 	}
-	return backend.NewClient("", e.Accounts, e.Proxy).ListModels(ctx)
+	return e.backendClient("").ListModels(ctx)
+}
+
+func (e *Engine) backendClient(accessToken string) *backend.Client {
+	settings := backend.DefaultImagePollingSettings()
+	if cfg, ok := e.Config.(imagePollingConfig); ok {
+		settings.Timeout = time.Duration(cfg.ImagePollTimeoutSeconds()) * time.Second
+		settings.Interval = time.Duration(cfg.ImagePollIntervalSeconds() * float64(time.Second))
+		settings.InitialWait = time.Duration(cfg.ImagePollInitialWaitSeconds() * float64(time.Second))
+		settings.SettleDelay = time.Duration(cfg.ImageSettleSeconds() * float64(time.Second))
+		settings.SettleEnabled = cfg.ImageSettleEnabled()
+		settings.CheckBeforeHitEnabled = cfg.ImageCheckBeforeHitEnabled()
+	}
+	return backend.NewClientWithOptions(accessToken, e.Accounts, e.Proxy, settings)
 }
 
 func (e *Engine) StreamTextDeltas(ctx context.Context, client *backend.Client, request ConversationRequest) (<-chan string, <-chan error) {
@@ -484,7 +506,7 @@ func (e *Engine) StreamImageOutputsWithPool(ctx context.Context, request Convers
 				rateLimitedForToken := false
 				rateLimitMessage := ""
 				textResponseForToken := ""
-				client := backend.NewClient(token, e.Accounts, e.Proxy)
+				client := e.backendClient(token)
 				outputs, imageErr := e.StreamImageOutputs(ctx, client, request, index, request.N)
 				for output := range outputs {
 					if output.Kind == "message" && service.IsAccountRateLimitedErrorMessage(output.Text) {

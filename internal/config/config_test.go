@@ -19,6 +19,12 @@ func TestStoreUpdatePersistsRuntimeSettings(t *testing.T) {
 	unsetEnv(t, "CHATGPT2API_REFRESH_ACCOUNT_INTERVAL_MINUTE")
 	unsetEnv(t, "CHATGPT2API_IMAGE_CONCURRENT_LIMIT")
 	unsetEnv(t, "CHATGPT2API_IMAGE_TASK_TIMEOUT_SECONDS")
+	unsetEnv(t, "CHATGPT2API_IMAGE_POLL_TIMEOUT_SECONDS")
+	unsetEnv(t, "CHATGPT2API_IMAGE_POLL_INTERVAL_SECONDS")
+	unsetEnv(t, "CHATGPT2API_IMAGE_POLL_INITIAL_WAIT_SECONDS")
+	unsetEnv(t, "CHATGPT2API_IMAGE_SETTLE_ENABLED")
+	unsetEnv(t, "CHATGPT2API_IMAGE_CHECK_BEFORE_HIT_ENABLED")
+	unsetEnv(t, "CHATGPT2API_IMAGE_SETTLE_SECONDS")
 	unsetEnv(t, "CHATGPT2API_USER_DEFAULT_CONCURRENT_LIMIT")
 	unsetEnv(t, "CHATGPT2API_USER_DEFAULT_RPM_LIMIT")
 	unsetEnv(t, "CHATGPT2API_IMAGE_RETENTION_DAYS")
@@ -41,6 +47,12 @@ func TestStoreUpdatePersistsRuntimeSettings(t *testing.T) {
 		"refresh_account_interval_minute": 7,
 		"image_concurrent_limit":          3,
 		"image_task_timeout_seconds":      420,
+		"image_poll_timeout_seconds":      180,
+		"image_poll_interval_seconds":     6.5,
+		"image_poll_initial_wait_seconds": 8.5,
+		"image_settle_enabled":            false,
+		"image_check_before_hit_enabled":  false,
+		"image_settle_seconds":            1.5,
 		"user_default_concurrent_limit":   2,
 		"user_default_rpm_limit":          30,
 		"image_retention_days":            14,
@@ -54,6 +66,24 @@ func TestStoreUpdatePersistsRuntimeSettings(t *testing.T) {
 	}
 	if store.BaseURL() != "https://example.test/root" {
 		t.Fatalf("BaseURL() = %q", store.BaseURL())
+	}
+	if store.ImagePollTimeoutSeconds() != 180 {
+		t.Fatalf("ImagePollTimeoutSeconds() = %d, want 180", store.ImagePollTimeoutSeconds())
+	}
+	if store.ImagePollIntervalSeconds() != 6.5 {
+		t.Fatalf("ImagePollIntervalSeconds() = %v, want 6.5", store.ImagePollIntervalSeconds())
+	}
+	if store.ImagePollInitialWaitSeconds() != 8.5 {
+		t.Fatalf("ImagePollInitialWaitSeconds() = %v, want 8.5", store.ImagePollInitialWaitSeconds())
+	}
+	if store.ImageSettleEnabled() {
+		t.Fatalf("ImageSettleEnabled() = true, want false")
+	}
+	if store.ImageCheckBeforeHitEnabled() {
+		t.Fatalf("ImageCheckBeforeHitEnabled() = true, want false")
+	}
+	if store.ImageSettleSeconds() != 1.5 {
+		t.Fatalf("ImageSettleSeconds() = %v, want 1.5", store.ImageSettleSeconds())
 	}
 	assertConfigValue(t, got, "registration_enabled", true)
 	assertConfigValue(t, got, "subscription_enabled", false)
@@ -72,6 +102,12 @@ func TestStoreUpdatePersistsRuntimeSettings(t *testing.T) {
 		"CHATGPT2API_REFRESH_ACCOUNT_INTERVAL_MINUTE=7",
 		"CHATGPT2API_IMAGE_CONCURRENT_LIMIT=3",
 		"CHATGPT2API_IMAGE_TASK_TIMEOUT_SECONDS=420",
+		"CHATGPT2API_IMAGE_POLL_TIMEOUT_SECONDS=180",
+		"CHATGPT2API_IMAGE_POLL_INTERVAL_SECONDS=6.5",
+		"CHATGPT2API_IMAGE_POLL_INITIAL_WAIT_SECONDS=8.5",
+		"CHATGPT2API_IMAGE_SETTLE_ENABLED=false",
+		"CHATGPT2API_IMAGE_CHECK_BEFORE_HIT_ENABLED=false",
+		"CHATGPT2API_IMAGE_SETTLE_SECONDS=1.5",
 		"CHATGPT2API_USER_DEFAULT_CONCURRENT_LIMIT=2",
 		"CHATGPT2API_USER_DEFAULT_RPM_LIMIT=30",
 		"CHATGPT2API_IMAGE_RETENTION_DAYS=14",

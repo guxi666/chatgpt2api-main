@@ -34,6 +34,12 @@ var settingEnvKeys = map[string]string{
 	"image_concurrent_limit":               "CHATGPT2API_IMAGE_CONCURRENT_LIMIT",
 	"image_single_count_limit":             "CHATGPT2API_IMAGE_SINGLE_COUNT_LIMIT",
 	"image_task_timeout_seconds":           "CHATGPT2API_IMAGE_TASK_TIMEOUT_SECONDS",
+	"image_poll_timeout_seconds":           "CHATGPT2API_IMAGE_POLL_TIMEOUT_SECONDS",
+	"image_poll_interval_seconds":          "CHATGPT2API_IMAGE_POLL_INTERVAL_SECONDS",
+	"image_poll_initial_wait_seconds":      "CHATGPT2API_IMAGE_POLL_INITIAL_WAIT_SECONDS",
+	"image_settle_enabled":                 "CHATGPT2API_IMAGE_SETTLE_ENABLED",
+	"image_check_before_hit_enabled":       "CHATGPT2API_IMAGE_CHECK_BEFORE_HIT_ENABLED",
+	"image_settle_seconds":                 "CHATGPT2API_IMAGE_SETTLE_SECONDS",
 	"user_default_concurrent_limit":        "CHATGPT2API_USER_DEFAULT_CONCURRENT_LIMIT",
 	"user_default_rpm_limit":               "CHATGPT2API_USER_DEFAULT_RPM_LIMIT",
 	"image_retention_days":                 "CHATGPT2API_IMAGE_RETENTION_DAYS",
@@ -652,6 +658,58 @@ func (s *Store) ImageTaskTimeoutSeconds() int {
 	return normalizeImageTaskTimeoutSeconds(s.settingValue("image_task_timeout_seconds", defaultImageTaskTimeoutSeconds))
 }
 
+func (s *Store) ImagePollTimeoutSeconds() int {
+	value := intSetting(s.settingValue("image_poll_timeout_seconds", 120), 120)
+	if value < 10 {
+		return 10
+	}
+	if value > 3600 {
+		return 3600
+	}
+	return value
+}
+
+func (s *Store) ImagePollIntervalSeconds() float64 {
+	value := floatSetting(s.settingValue("image_poll_interval_seconds", 10), 10)
+	if value < 0.5 {
+		return 0.5
+	}
+	if value > 120 {
+		return 120
+	}
+	return value
+}
+
+func (s *Store) ImagePollInitialWaitSeconds() float64 {
+	value := floatSetting(s.settingValue("image_poll_initial_wait_seconds", 10), 10)
+	if value < 0 {
+		return 0
+	}
+	if value > 120 {
+		return 120
+	}
+	return value
+}
+
+func (s *Store) ImageSettleEnabled() bool {
+	return util.ToBool(s.settingValue("image_settle_enabled", true))
+}
+
+func (s *Store) ImageCheckBeforeHitEnabled() bool {
+	return util.ToBool(s.settingValue("image_check_before_hit_enabled", true))
+}
+
+func (s *Store) ImageSettleSeconds() float64 {
+	value := floatSetting(s.settingValue("image_settle_seconds", 2), 2)
+	if value < 0.5 {
+		return 0.5
+	}
+	if value > 30 {
+		return 30
+	}
+	return value
+}
+
 func (s *Store) UserDefaultConcurrentLimit() int {
 	value := intSetting(s.settingValue("user_default_concurrent_limit", 0), 0)
 	if value < 0 {
@@ -975,6 +1033,12 @@ func (s *Store) Get() map[string]any {
 	data["image_concurrent_limit"] = s.ImageConcurrentLimit()
 	data["image_single_count_limit"] = s.ImageSingleCountLimit()
 	data["image_task_timeout_seconds"] = s.ImageTaskTimeoutSeconds()
+	data["image_poll_timeout_seconds"] = s.ImagePollTimeoutSeconds()
+	data["image_poll_interval_seconds"] = s.ImagePollIntervalSeconds()
+	data["image_poll_initial_wait_seconds"] = s.ImagePollInitialWaitSeconds()
+	data["image_settle_enabled"] = s.ImageSettleEnabled()
+	data["image_check_before_hit_enabled"] = s.ImageCheckBeforeHitEnabled()
+	data["image_settle_seconds"] = s.ImageSettleSeconds()
 	data["user_default_concurrent_limit"] = s.UserDefaultConcurrentLimit()
 	data["user_default_rpm_limit"] = s.UserDefaultRPMLimit()
 	data["image_retention_days"] = s.ImageRetentionDays()
