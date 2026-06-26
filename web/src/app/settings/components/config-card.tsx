@@ -337,6 +337,66 @@ export function ConfigCard() {
 
         <section className={configSectionClassName}>
           <SectionHeading
+            title="生图上游"
+            tip="开启后，本站只负责提交请求和接收结果，真正的文生图与图生图由远端 chatgpt2api 实例处理。"
+          />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <ConfigOption
+              checked={config?.image_provider === "chatgpt2api"}
+              onCheckedChange={(value) =>
+                setConfigField(
+                  "image_provider",
+                  value ? "chatgpt2api" : "local",
+                )
+              }
+              label="使用 chatgpt2api 接口生图"
+            />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-image-chatgpt2api-base-url">
+                ChatGPT2API 地址
+              </ConfigFieldLabel>
+              <Input
+                id="settings-image-chatgpt2api-base-url"
+                value={String(config?.image_chatgpt2api_base_url || "")}
+                onChange={(event) =>
+                  setConfigField(
+                    "image_chatgpt2api_base_url",
+                    event.target.value,
+                  )
+                }
+                placeholder="https://example.com"
+                className={settingsInputClassName}
+              />
+            </Field>
+            <Field className={configFieldClassName}>
+              <ConfigFieldLabel htmlFor="settings-image-chatgpt2api-api-key">
+                ChatGPT2API 密钥
+              </ConfigFieldLabel>
+              <Input
+                id="settings-image-chatgpt2api-api-key"
+                type="password"
+                value={String(config?.image_chatgpt2api_api_key || "")}
+                onChange={(event) =>
+                  setConfigField(
+                    "image_chatgpt2api_api_key",
+                    event.target.value,
+                  )
+                }
+                placeholder={
+                  config?.image_chatgpt2api_api_key_configured
+                    ? "已配置，留空表示不修改"
+                    : "sk-..."
+                }
+                className={settingsInputClassName}
+              />
+            </Field>
+          </div>
+        </section>
+
+        <section className={configSectionClassName}>
+          <SectionHeading
             title="用户默认限制"
             tip="限制普通用户创建图片任务的默认并发和速率，管理员不受影响；0 表示不限制。"
           />

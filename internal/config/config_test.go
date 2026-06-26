@@ -19,6 +19,9 @@ func TestStoreUpdatePersistsRuntimeSettings(t *testing.T) {
 	unsetEnv(t, "CHATGPT2API_REFRESH_ACCOUNT_INTERVAL_MINUTE")
 	unsetEnv(t, "CHATGPT2API_IMAGE_CONCURRENT_LIMIT")
 	unsetEnv(t, "CHATGPT2API_IMAGE_TASK_TIMEOUT_SECONDS")
+	unsetEnv(t, "CHATGPT2API_IMAGE_PROVIDER")
+	unsetEnv(t, "CHATGPT2API_IMAGE_CHATGPT2API_BASE_URL")
+	unsetEnv(t, "CHATGPT2API_IMAGE_CHATGPT2API_API_KEY")
 	unsetEnv(t, "CHATGPT2API_IMAGE_POLL_TIMEOUT_SECONDS")
 	unsetEnv(t, "CHATGPT2API_IMAGE_POLL_INTERVAL_SECONDS")
 	unsetEnv(t, "CHATGPT2API_IMAGE_POLL_INITIAL_WAIT_SECONDS")
@@ -47,6 +50,9 @@ func TestStoreUpdatePersistsRuntimeSettings(t *testing.T) {
 		"refresh_account_interval_minute": 7,
 		"image_concurrent_limit":          3,
 		"image_task_timeout_seconds":      420,
+		"image_provider":                  "chatgpt2api",
+		"image_chatgpt2api_base_url":      "https://images.example.test",
+		"image_chatgpt2api_api_key":       "remote-secret",
 		"image_poll_timeout_seconds":      180,
 		"image_poll_interval_seconds":     6.5,
 		"image_poll_initial_wait_seconds": 8.5,
@@ -69,6 +75,12 @@ func TestStoreUpdatePersistsRuntimeSettings(t *testing.T) {
 	}
 	if store.ImagePollTimeoutSeconds() != 180 {
 		t.Fatalf("ImagePollTimeoutSeconds() = %d, want 180", store.ImagePollTimeoutSeconds())
+	}
+	if store.ImageProvider() != "chatgpt2api" {
+		t.Fatalf("ImageProvider() = %q, want chatgpt2api", store.ImageProvider())
+	}
+	if store.ImageChatGPT2APIBaseURL() != "https://images.example.test" {
+		t.Fatalf("ImageChatGPT2APIBaseURL() = %q", store.ImageChatGPT2APIBaseURL())
 	}
 	if store.ImagePollIntervalSeconds() != 6.5 {
 		t.Fatalf("ImagePollIntervalSeconds() = %v, want 6.5", store.ImagePollIntervalSeconds())
@@ -102,6 +114,9 @@ func TestStoreUpdatePersistsRuntimeSettings(t *testing.T) {
 		"CHATGPT2API_REFRESH_ACCOUNT_INTERVAL_MINUTE=7",
 		"CHATGPT2API_IMAGE_CONCURRENT_LIMIT=3",
 		"CHATGPT2API_IMAGE_TASK_TIMEOUT_SECONDS=420",
+		"CHATGPT2API_IMAGE_PROVIDER=chatgpt2api",
+		"CHATGPT2API_IMAGE_CHATGPT2API_BASE_URL=https://images.example.test",
+		"CHATGPT2API_IMAGE_CHATGPT2API_API_KEY=remote-secret",
 		"CHATGPT2API_IMAGE_POLL_TIMEOUT_SECONDS=180",
 		"CHATGPT2API_IMAGE_POLL_INTERVAL_SECONDS=6.5",
 		"CHATGPT2API_IMAGE_POLL_INITIAL_WAIT_SECONDS=8.5",
@@ -180,6 +195,28 @@ func TestStoreNormalizesImageTaskTimeoutSeconds(t *testing.T) {
 	assertConfigValue(t, got, "image_task_timeout_seconds", 3600)
 	if store.ImageTaskTimeoutSeconds() != 3600 {
 		t.Fatalf("ImageTaskTimeoutSeconds() = %d, want 3600", store.ImageTaskTimeoutSeconds())
+	}
+}
+
+func TestStoreRejectsIncompleteChatGPT2APIImageProviderSettings(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CHATGPT2API_ROOT", root)
+	unsetEnv(t, "CHATGPT2API_IMAGE_PROVIDER")
+	unsetEnv(t, "CHATGPT2API_IMAGE_CHATGPT2API_BASE_URL")
+	unsetEnv(t, "CHATGPT2API_IMAGE_CHATGPT2API_API_KEY")
+	unsetLinuxDoEnv(t)
+
+	store, err := NewStore()
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+
+	_, err = store.Update(map[string]any{
+		"image_provider":             "chatgpt2api",
+		"image_chatgpt2api_base_url": "https://images.example.test",
+	})
+	if err == nil || !strings.Contains(err.Error(), "API key") {
+		t.Fatalf("Update() error = %v, want missing API key", err)
 	}
 }
 

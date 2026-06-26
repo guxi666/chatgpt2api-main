@@ -284,6 +284,10 @@ export type SettingsConfig = {
   image_concurrent_limit?: number | string;
   image_single_count_limit?: number | string;
   image_task_timeout_seconds?: number | string;
+  image_provider?: "local" | "chatgpt2api" | string;
+  image_chatgpt2api_base_url?: string;
+  image_chatgpt2api_api_key?: string;
+  image_chatgpt2api_api_key_configured?: boolean;
   user_default_concurrent_limit?: number | string;
   user_default_rpm_limit?: number | string;
   image_retention_days?: number | string;

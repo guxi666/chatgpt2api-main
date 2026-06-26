@@ -75,6 +75,16 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     image_task_timeout_seconds: Number(
       config.image_task_timeout_seconds || 300,
     ),
+    image_provider:
+      config.image_provider === "chatgpt2api" ? "chatgpt2api" : "local",
+    image_chatgpt2api_base_url:
+      typeof config.image_chatgpt2api_base_url === "string"
+        ? config.image_chatgpt2api_base_url
+        : "",
+    image_chatgpt2api_api_key: "",
+    image_chatgpt2api_api_key_configured: Boolean(
+      config.image_chatgpt2api_api_key_configured,
+    ),
     user_default_concurrent_limit: Number(
       config.user_default_concurrent_limit || 0,
     ),

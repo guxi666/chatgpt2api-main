@@ -99,6 +99,51 @@ func TestImageServiceListImagesReturnsDimensionsWithoutGeneratingThumbnails(t *t
 	}
 }
 
+func TestImageServiceRecordGeneratedImagesCreatesRemoteImageRecord(t *testing.T) {
+	root := t.TempDir()
+	service := NewImageService(testImageConfig{root: root})
+
+	service.RecordGeneratedImages(
+		[]string{"https://remote.example/images/2026/06/26/result.png"},
+		"user-1",
+		"Alice",
+		ImageVisibilityPublic,
+		GeneratedImageMetadata{
+			ResolutionPreset: "2k",
+			RequestedSize:    "1536x1024",
+			OutputFormat:     "png",
+		},
+	)
+
+	result := service.ListImages("http://127.0.0.1:8000", "", "", allImages)
+	items := result["items"].([]map[string]any)
+	if len(items) != 1 {
+		t.Fatalf("items = %#v, want 1 item", items)
+	}
+	item := items[0]
+	if got := toString(item["url"]); got != "https://remote.example/images/2026/06/26/result.png" {
+		t.Fatalf("url = %q", got)
+	}
+	if got := toString(item["owner_id"]); got != "user-1" {
+		t.Fatalf("owner_id = %q", got)
+	}
+	if got := toString(item["owner_name"]); got != "Alice" {
+		t.Fatalf("owner_name = %q", got)
+	}
+	if got := toString(item["visibility"]); got != ImageVisibilityPublic {
+		t.Fatalf("visibility = %q", got)
+	}
+	if got := toString(item["resolution_preset"]); got != "2k" {
+		t.Fatalf("resolution_preset = %q", got)
+	}
+	if got := toString(item["requested_size"]); got != "1536x1024" {
+		t.Fatalf("requested_size = %q", got)
+	}
+	if got := toString(item["output_format"]); got != "png" {
+		t.Fatalf("output_format = %q", got)
+	}
+}
+
 func TestImageServiceEnsureThumbnailCreatesJPEGThumbnails(t *testing.T) {
 	root := t.TempDir()
 	config := testImageConfig{root: root}

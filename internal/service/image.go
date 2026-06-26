@@ -713,7 +713,18 @@ func (s *ImageService) RecordGeneratedImages(values []string, ownerID, ownerName
 		}
 		record, ok := s.remoteImageRecord(rel)
 		if !ok {
-			continue
+			localPath := filepath.Join(s.config.ImagesDir(), filepath.FromSlash(rel))
+			if info, statErr := os.Stat(localPath); statErr == nil && !info.IsDir() {
+				continue
+			}
+			record = RemoteImageRecord{
+				Path:      rel,
+				Name:      filepath.Base(rel),
+				Date:      imageDay(rel, time.Now()),
+				Size:      0,
+				URL:       strings.TrimSpace(value),
+				CreatedAt: time.Now().Format("2006-01-02 15:04:05"),
+			}
 		}
 		if ownerID != "" && ownerID != "anonymous" {
 			record.OwnerID = ownerID

@@ -100,15 +100,13 @@ func NewApp() (*App, error) {
 	app.tasks = service.NewStoredImageTaskService(filepath.Join(cfg.DataDir, "image_tasks.json"), storageBackend,
 		func(ctx context.Context, identity service.Identity, payload map[string]any) (map[string]any, error) {
 			return app.runLoggedImageTask(ctx, identity, payload, "/api/creation-tasks/image-generations", "文生图", func(ctx context.Context, payload map[string]any) (map[string]any, error) {
-				result, _, err := engine.HandleImageGenerations(ctx, payload)
-				return result, err
+				return app.runConfiguredImageGeneration(ctx, payload)
 			})
 		},
 		func(ctx context.Context, identity service.Identity, payload map[string]any) (map[string]any, error) {
 			return app.runLoggedImageTask(ctx, identity, payload, "/api/creation-tasks/image-edits", "图生图", func(ctx context.Context, payload map[string]any) (map[string]any, error) {
 				images, _ := payload["images"].([]protocol.UploadedImage)
-				result, _, err := engine.HandleImageEdits(ctx, payload, images)
-				return result, err
+				return app.runConfiguredImageEdit(ctx, payload, images)
 			})
 		},
 		func(ctx context.Context, identity service.Identity, payload map[string]any) (map[string]any, error) {
@@ -214,7 +212,13 @@ func (a *App) handleImageGenerations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model := firstNonEmpty(util.Clean(body["model"]), util.ImageModelAuto)
-	result, stream, err := a.engine.HandleImageGenerations(r.Context(), body)
+	var result map[string]any
+	var stream *protocol.StreamResult
+	if a.usesRemoteImageProvider() {
+		result, err = a.runConfiguredImageGeneration(r.Context(), body)
+	} else {
+		result, stream, err = a.engine.HandleImageGenerations(r.Context(), body)
+	}
 	if err == nil && stream == nil && hasImageResult(result) {
 		if chargeErr := a.chargeImageUsage(identity, "/v1/images/generations", body); chargeErr != nil {
 			util.WriteError(w, http.StatusPaymentRequired, chargeErr.Error())
@@ -279,7 +283,13 @@ func (a *App) handleImageEdits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model := firstNonEmpty(util.Clean(body["model"]), util.ImageModelAuto)
-	result, stream, err := a.engine.HandleImageEdits(r.Context(), body, images)
+	var result map[string]any
+	var stream *protocol.StreamResult
+	if a.usesRemoteImageProvider() {
+		result, err = a.runConfiguredImageEdit(r.Context(), body, images)
+	} else {
+		result, stream, err = a.engine.HandleImageEdits(r.Context(), body, images)
+	}
 	if err == nil && stream == nil && hasImageResult(result) {
 		if chargeErr := a.chargeImageUsage(identity, "/v1/images/edits", body); chargeErr != nil {
 			util.WriteError(w, http.StatusPaymentRequired, chargeErr.Error())

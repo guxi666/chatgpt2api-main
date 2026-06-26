@@ -34,6 +34,9 @@ var settingEnvKeys = map[string]string{
 	"image_concurrent_limit":               "CHATGPT2API_IMAGE_CONCURRENT_LIMIT",
 	"image_single_count_limit":             "CHATGPT2API_IMAGE_SINGLE_COUNT_LIMIT",
 	"image_task_timeout_seconds":           "CHATGPT2API_IMAGE_TASK_TIMEOUT_SECONDS",
+	"image_provider":                       "CHATGPT2API_IMAGE_PROVIDER",
+	"image_chatgpt2api_base_url":           "CHATGPT2API_IMAGE_CHATGPT2API_BASE_URL",
+	"image_chatgpt2api_api_key":            "CHATGPT2API_IMAGE_CHATGPT2API_API_KEY",
 	"image_poll_timeout_seconds":           "CHATGPT2API_IMAGE_POLL_TIMEOUT_SECONDS",
 	"image_poll_interval_seconds":          "CHATGPT2API_IMAGE_POLL_INTERVAL_SECONDS",
 	"image_poll_initial_wait_seconds":      "CHATGPT2API_IMAGE_POLL_INITIAL_WAIT_SECONDS",
@@ -658,6 +661,22 @@ func (s *Store) ImageTaskTimeoutSeconds() int {
 	return normalizeImageTaskTimeoutSeconds(s.settingValue("image_task_timeout_seconds", defaultImageTaskTimeoutSeconds))
 }
 
+func (s *Store) ImageProvider() string {
+	provider := strings.TrimSpace(fmt.Sprint(s.settingValue("image_provider", "")))
+	if provider == "" && s.ImageChatGPT2APIBaseURL() != "" && s.ImageChatGPT2APIAPIKey() != "" {
+		return "chatgpt2api"
+	}
+	return normalizeImageProvider(provider)
+}
+
+func (s *Store) ImageChatGPT2APIBaseURL() string {
+	return strings.TrimRight(strings.TrimSpace(fmt.Sprint(s.settingValue("image_chatgpt2api_base_url", ""))), "/")
+}
+
+func (s *Store) ImageChatGPT2APIAPIKey() string {
+	return strings.TrimSpace(fmt.Sprint(s.settingValue("image_chatgpt2api_api_key", "")))
+}
+
 func (s *Store) ImagePollTimeoutSeconds() int {
 	value := intSetting(s.settingValue("image_poll_timeout_seconds", 120), 120)
 	if value < 10 {
@@ -1033,6 +1052,9 @@ func (s *Store) Get() map[string]any {
 	data["image_concurrent_limit"] = s.ImageConcurrentLimit()
 	data["image_single_count_limit"] = s.ImageSingleCountLimit()
 	data["image_task_timeout_seconds"] = s.ImageTaskTimeoutSeconds()
+	data["image_provider"] = s.ImageProvider()
+	data["image_chatgpt2api_base_url"] = s.ImageChatGPT2APIBaseURL()
+	data["image_chatgpt2api_api_key_configured"] = s.ImageChatGPT2APIAPIKey() != ""
 	data["image_poll_timeout_seconds"] = s.ImagePollTimeoutSeconds()
 	data["image_poll_interval_seconds"] = s.ImagePollIntervalSeconds()
 	data["image_poll_initial_wait_seconds"] = s.ImagePollInitialWaitSeconds()
@@ -1166,6 +1188,7 @@ func (s *Store) Get() map[string]any {
 	delete(data, "cf_turnstile_secret_key")
 	delete(data, "email_smtp_auth_code")
 	delete(data, "yipay_key")
+	delete(data, "image_chatgpt2api_api_key")
 	delete(data, "image_r2_secret_access_key")
 	delete(data, "image_r2_secondary_secret_access_key")
 	delete(data, "image_imgbed_auth_code")
@@ -1200,6 +1223,9 @@ func (s *Store) Update(data map[string]any) (map[string]any, error) {
 		if key == "image_imgbed_auth_code_configured" {
 			continue
 		}
+		if key == "image_chatgpt2api_api_key_configured" {
+			continue
+		}
 		if key == "linuxdo_client_secret" && strings.TrimSpace(fmt.Sprint(value)) == "" {
 			continue
 		}
@@ -1224,7 +1250,13 @@ func (s *Store) Update(data map[string]any) (map[string]any, error) {
 		if key == "image_imgbed_auth_code" && strings.TrimSpace(fmt.Sprint(value)) == "" {
 			continue
 		}
+		if key == "image_chatgpt2api_api_key" && strings.TrimSpace(fmt.Sprint(value)) == "" {
+			continue
+		}
 		next[key] = value
+	}
+	if value, ok := next["image_provider"]; ok {
+		next["image_provider"] = normalizeImageProvider(value)
 	}
 	if value, ok := next["login_page_image_mode"]; ok {
 		next["login_page_image_mode"] = normalizeLoginPageImageMode(value)
@@ -1697,6 +1729,20 @@ func (s *Store) validateSettingsUpdateLocked(data map[string]any) error {
 			return errors.New("Image external Upload URL must be an absolute http(s) URL")
 		}
 	}
+	imageProvider := normalizeImageProvider(util.Clean(util.ValueOr(data["image_provider"], "")))
+	imageChatGPT2APIBaseURL := strings.TrimRight(strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_chatgpt2api_base_url"], ""))), "/")
+	imageChatGPT2APIAPIKey := strings.TrimSpace(fmt.Sprint(util.ValueOr(data["image_chatgpt2api_api_key"], "")))
+	if imageProvider == "chatgpt2api" || imageChatGPT2APIBaseURL != "" || imageChatGPT2APIAPIKey != "" {
+		if imageChatGPT2APIBaseURL == "" {
+			return errors.New("ChatGPT2API image base URL is required when the ChatGPT2API image provider is enabled")
+		}
+		if err := validateAbsoluteHTTPURL(imageChatGPT2APIBaseURL); err != nil {
+			return errors.New("ChatGPT2API image base URL must be an absolute http(s) URL")
+		}
+		if imageChatGPT2APIAPIKey == "" {
+			return errors.New("ChatGPT2API image API key is required when the ChatGPT2API image provider is enabled")
+		}
+	}
 
 	linuxdo := s.linuxDoOAuthFromData(data)
 	if !linuxdo.Enabled {
@@ -1877,6 +1923,15 @@ func normalizeImageTaskTimeoutSeconds(value any) int {
 		return maxImageTaskTimeoutSeconds
 	}
 	return seconds
+}
+
+func normalizeImageProvider(value any) string {
+	switch strings.ToLower(strings.TrimSpace(fmt.Sprint(value))) {
+	case "chatgpt2api":
+		return "chatgpt2api"
+	default:
+		return "local"
+	}
 }
 
 func clampFloat(value, min, max float64) float64 {
